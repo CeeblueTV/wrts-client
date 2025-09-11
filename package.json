@@ -1,0 +1,83 @@
+{
+    "name": "@ceeblue/wrts-client",
+    "version": "2.0.0",
+    "description": "Ceeblue WebRTS Client",
+    "keywords": [
+        "webrts",
+        "real-time",
+        "streaming",
+        "video",
+        "live",
+        "cdn",
+        "webrtc"
+    ],
+    "homepage": "https://github.com/ceebluetv/wrts-client#readme",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ceebluetv/wrts-client.git"
+    },
+    "bugs": {
+        "url": "https://github.com/ceebluetv/wrts-client/issues"
+    },
+    "main": "dist/wrts-client.js",
+    "browser": "dist/wrts-client.bundle.js",
+    "types": "dist/wrts-client.d.ts",
+    "type": "module",
+    "scripts": {
+        "build": "rollup -c",
+        "build:cjs": "rollup -c --format cjs",
+        "build:iife": "rollup -c --format iife",
+        "build:docs": "typedoc index.ts",
+        "watch": "rollup -c -w",
+        "watch:cjs": "rollup -c -w --format cjs",
+        "watch:iife": "rollup -c -w --format iife",
+        "lint": "eslint . && prettier --check .",
+        "eslint": "eslint --fix .",
+        "semantic-release": "semantic-release",
+        "prepare": "is-ci || husky install",
+        "prettier": "prettier --write --ignore-unknown ."
+    },
+    "author": "Ceeblue B.V.",
+    "license": "AGPL-3.0-or-later",
+    "engines": {
+        "node": ">=16",
+        "npm": ">=7"
+    },
+    "devDependencies": {
+        "@commitlint/cli": "^19.3.0",
+        "@commitlint/config-conventional": "^19.2.2",
+        "@html-eslint/eslint-plugin": "~0.22.0",
+        "@html-eslint/parser": "~0.22.0",
+        "@rollup/plugin-commonjs": "^26.0.1",
+        "@rollup/plugin-eslint": "~9.0.4",
+        "@rollup/plugin-node-resolve": "^15.2.3",
+        "@rollup/plugin-replace": "~5.0.2",
+        "@rollup/plugin-terser": "~0.4.3",
+        "@rollup/plugin-typescript": "~11.1.4",
+        "@semantic-release/git": "^10.0.1",
+        "@types/node": "~20.11.2",
+        "@typescript-eslint/eslint-plugin": "~6.19.0",
+        "@typescript-eslint/parser": "~6.19.0",
+        "eslint": "~8.56.0",
+        "eslint-plugin-headers": "~1.0.4",
+        "husky": "^9.0.11",
+        "is-ci": "~3.0.0",
+        "lint-staged": "^15.2.7",
+        "prettier": "3.2.4",
+        "rollup": "~3.29.3",
+        "rollup-plugin-dts": "~6.0.2",
+        "semantic-release": "~21.0.0",
+        "tslib": "~2.6.2",
+        "typedoc": "~0.25.3",
+        "typescript": "~5.2.2",
+        "undici-types": "~6.3.0"
+    },
+    "publishConfig": {
+        "access": "restricted"
+    },
+    "dependencies": {
+        "@ceeblue/web-utils": "^7.0.1",
+        "@svta/common-media-library": "^0.12.0",
+        "abortcontroller-polyfill": "^1.7.8"
+    }
+}
