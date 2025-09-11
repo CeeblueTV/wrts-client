@@ -2,6 +2,12 @@
     "plugins": [
         "@semantic-release/commit-analyzer",
         "@semantic-release/release-notes-generator",
+        [
+            "@semantic-release/exec",
+            {
+                "prepareCmd": "version=${nextRelease.version} npm run build"
+            }
+        ],
         "@semantic-release/npm",
         "@semantic-release/github",
         [
@@ -14,5 +20,5 @@
     ],
     "branches": ["main"],
     "dryRun": false,
-    "debug": true
+    "debug": false
 }
