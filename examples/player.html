@@ -1,0 +1,722 @@
+<!doctype html>
+<!--
+    Copyright 2025 Ceeblue B.V.
+    This file is part of https://github.com/CeeblueTV/wrts-client which is released under GNU Affero General Public License.
+    See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
+-->
+<html lang="en">
+    <head>
+        <title>Ceeblue WebRTS Player Example</title>
+        <meta charset="utf-8">
+        <meta content="width=device-width, initial-scale=1.0" name="viewport">
+
+        <link rel="icon" href="./assets/ceeblue-logo-32x32.png" sizes="32x32">
+        <link rel="icon" href="./assets/ceeblue-logo-192x192.png" sizes="192x192">
+
+        <link href="./css/bootstrap.css" rel="stylesheet">
+        <link href="./css/solid.css" rel="stylesheet">
+        <link href="./css/fontawesome.css" rel="stylesheet">
+
+        <style>
+            body {
+                margin-top: 1em;
+                margin-bottom: 3em;
+                background-color: #EDF0F3;
+            }
+            .card {
+                background-color: #EDF0F3;
+            }
+
+            video {
+                background-color: #333333;
+                max-width: 100%;
+                max-height: 60vh;
+            }
+            video::-webkit-media-controls {
+                display: none !important;
+                opacity: 0; 
+            }
+            video::-webkit-media-controls-start-playback-button {
+                display: none !important;
+            }
+
+            .nav .nav-item .nav-link {
+                padding: .5rem .8rem;
+            }
+
+            .btn {
+                width: 100%
+            }
+            .play-btn {
+                margin: 0;
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                width: 100px;
+                transform: translate(-50%, -50%);
+            }
+            .play-btn__svg{
+                transition: 400ms;
+                fill:#ffffff;
+                opacity: 0.9;
+            }
+            .play-btn:hover .play-btn__svg {
+                fill: #00ff0d;
+                opacity: 0.9;
+            }
+            [v-cloak] {
+                display: none;
+            }
+        </style>
+    </head>
+    <body class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <img alt="CEEBLUE Media Services" class="rounded mx-auto d-block" src="./assets/ceeblue-logo.png">
+                <h3 class="text-center">Web Real Time Streaming - Player Example</h3>
+            </div>
+
+            <div class="col-md-12" id="main">
+
+                <div class="card text-center border-0">
+                    <div class="card-body">
+                        <div class="alert alert-warning" role="alert" v-if="streamErrorMessage">
+                            {{ streamErrorMessage }}
+                        </div>
+
+                        <video autoplay id="video" ref="video" @click="fullscreen()" playsinline></video>
+                        <div ref="play-btn" class="play-btn" @click="player.paused = false" v-show="player && player.paused">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26">
+                                <polygon class="play-btn__svg" points="9.33 6.69 9.33 19.39 19.3 13.04 9.33 6.69"></polygon>
+                                <path class="play-btn__svg" d="M26,13A13,13,0,1,1,13,0,13,13,0,0,1,26,13ZM13,2.18A10.89,10.89,0,1,0,23.84,13.06,10.89,10.89,0,0,0,13,2.18Z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group col-sm">
+                        <select id="video-track-selection" class="custom-select text-center"
+                            :disabled="!player || !player.trackSelectable" v-model="videoTrackId" @change="onVideoTrackChange()">
+                            <option :value="undefined" :key="videoTrack">AUTO - {{videoTrack}}</option>
+                            <option v-for="[idx, track] of videoTracks" v-bind:value="idx">
+                                {{ track }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="form-group col-sm">
+                        <select id="audio-track-selection" class="custom-select text-center"
+                            :disabled="!player || !player.trackSelectable" v-model="audioTrackId" @change="onAudioTrackChange()">
+                            <option :value="undefined" :key="audioTrack">AUTO - {{audioTrack}}</option>
+                            <option v-for="[idx, track] of audioTracks" v-bind:value="idx">
+                                {{ track }}
+                            </option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group col-12">
+                        <input :disabled="isPlaying()" class="form-control text-center"
+                            placeholder="StreamName(?id=accessToken) or URL" type="text"
+                            v-model="stream">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group col-2">
+                        <button class="btn btn-light" title="Mute or unmute audio" type="button" v-on:click="mute">
+                            <i class="fas" v-bind:class="{ 'fa-volume-up': !muted, 'fa-volume-off': muted }"></i>
+                            <span class="d-none d-md-inline">
+                                sound
+                            </span>
+                        </button>
+                    </div>
+
+                    <div class="form-group col-2">
+                        <button class="btn btn-light" title="Jump to live position" type="button" @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
+                            <i class="fa-solid fa-rocket"></i>
+                            <span class="d-none d-md-inline">
+                                live
+                            </span>
+                        </button>
+                    </div>
+
+                    <div class="form-group col-4">
+                        <button class="btn" type="button"
+                            v-bind:class="{ 'btn-danger': isPlaying(), 'btn-success': isStopped(), 'btn-secondary': isStarting() }"
+                            v-on:click="play">
+                            <span>
+                                {{ playButtonCaption() }}
+                            </span>
+                        </button>
+                    </div>
+
+                    <div class="form-group col-4 text-center form-check">
+                        <input class="form-check-input align-middle" :disabled="!this.mutableReliability()" type="checkbox" v-model="adaptiveFrameSkipping" 
+                            @change="onReliable()">
+                        Adaptive <span class="d-none d-md-inline">Frame-Skipping</span>
+                    </div>
+
+                </div>
+
+                <div class="form-row align-items-center">
+                    <div class="form-group col-2 text-right">
+                        network <br class="d-md-none">profiles
+                    </div>
+                    <div class="form-group col-3 p-0">
+                        <select class="custom-select text-center" v-model="netProfile" @change="setBuffer()">
+                            <option v-bind:value="profil" v-for="[profil, _] of netProfiles">
+                                {{ profil }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="form-group col-3 text-right">
+                        buffer min<br class="d-md-none"> max in ms 
+                    </div>
+                    <div class="form-group col-2 p-0">
+                        <input class="form-control text-center"
+                            type="number" min="0" required oninput="validity.valid||(value='');"
+                            v-model="bufferMin" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                    </div>
+                    <div class="form-group col-2 p-0">
+                        <input class="form-control text-center"
+                            type="number" min="0" required oninput="validity.valid||(value='');"
+                            v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                    </div>
+
+      
+                </div>
+
+                <p class="text-center font-weight-light font-italic" v-html="netDescription"></p>
+
+                <div class="form-row">
+                    <ul class="list-group list-group-flush" ref="stats" style="width: 100%;">
+                    </ul>
+                </div>
+                <div class="form-row" v-show="hasMetrics">
+                    <div class="form-group mx-auto">
+                        <img class="m-1" alt="Reset metrics view" title="Reset incremental metrics and rescale the chart" type="button" @click="resetMetrics()" src="./assets/reload.png" style="object-fit:contain" height="32">
+                        <img class="m-1" alt="Download metrics" title="Download metrics as a CSV file" type="button" @click="downloadStats()" src="./assets/download.png" style="object-fit:contain" height="32">
+                    </div>
+                </div>
+                
+            </div>
+
+            
+        </div>
+    
+    </body>
+    <script type="module">
+        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, VERSION, utils } from "../dist/wrts-client.bundle.js";
+        // development version, includes helpful console warnings
+        // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
+        // production version, optimized for size and speed
+        import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
+        const { EpochTime, Util, NetAddress, Connect, LogLevel, log, UIMetrics, BinaryWriter } = utils;
+
+        // displays logs ERROR, WARN & INFO logs,
+        // can be even more detailed with LogLevel.DEBUG
+        log.level = LogLevel.INFO;
+        log('wrts-client version:', VERSION).info();
+        log('web-utils version:', utils.VERSION).info();
+
+        const options = Util.options();
+
+        const PlayState = {
+            PLAYING: 'PLAYING',
+            STARTING: 'STARTING',
+            STOPPED: 'STOPPED'
+        };
+
+        createApp({
+            data() {
+                return {
+                    PlayState: PlayState,
+                    playState: PlayState.STOPPED,
+
+                    stream: '',
+                    muted: false,
+                    host: null,
+                    bufferMin: 0,
+                    bufferMax: 0,
+
+                    // audioDump: new BinaryWriter(),
+                    // videoDump: new BinaryWriter(),
+
+                    canvas: document.createElement('canvas'),
+
+                    adaptiveFrameSkipping: true,
+                    streamMetadata: null,
+                    netDescription: "",
+                    videoTracks: new Map(),
+                    videoTrack: 'Video',
+                    videoTrackId: undefined,
+                    sourceType: undefined,
+                    audioTracks: new Map(),
+                    audioTrack: 'Audio',
+                    audioTrackId: undefined,
+                    streamErrorMessage: null,
+                    stats: new Map(),
+                    times: new Array(),
+                    hasMetrics:false,
+                    stalls: 0,
+                    skippedAudio: 0,
+                    skippedVideo: 0,
+                    uiStats: null,
+                    player: null,
+                    latencies: [],
+                    netProfiles: new Map([
+                        ['-manual-', [
+                            "Manually configure a buffer window large enough to compensate for variations caused by network fluctuations.",
+                        ]],
+                        ['ideal', [
+                            "Ideal network conditions for low latency: streamer and player are geographically close with minimal intermediary hops.",
+                            200, 500 // 350 ms
+                        ]],
+                        ['normal', [
+                            "A stable and reliable network between streamer and player, making their geographical distance negligible.",
+                            400, 800 // 600ms
+                        ]],
+                        ['distant', [
+                            "Streamer and player are significantly distant and/or the connection involves multiple intermediaries (e.g., VPNs, CDN providers).",
+                            1000, 2000 // 1.5 seconds
+                        ]], 
+                        ['unstable', [
+                            "A resilient configuration designed for maximum stability even on challenging networks, prioritizing robustness over low latency.",
+                            2000, 4000 // 3 seconds
+                        ]],
+                    ]),
+                    netProfile: 'normal'
+                }
+            },
+            mounted() {
+                this.controls = false;    
+
+                // init values
+                this.adaptiveFrameSkipping = options.reliable ? false : true;
+                const host = options.host;
+                this.host = new NetAddress(host || location.host, 443);
+                this.stream = options.stream || '';
+                this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
+                this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
+
+                const drawContext = this.canvas.getContext('2d');
+
+                const bandwidths = []; this.stats.set("Bandwidth", bandwidths);
+                const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
+                const latencies = this.latencies; this.stats.set("Latency", latencies);
+                const e2eLatencies = []; this.stats.set("Latency e2e", e2eLatencies);
+                const playbackRates = []; this.stats.set("Playback rate", playbackRates);
+                const playbackSpeeds = []; this.stats.set("Playback speed", playbackSpeeds);
+                const fps = []; this.stats.set("Video FPS", fps);
+                const trackAudio = []; this.stats.set("Track audio", trackAudio);
+                const trackVideo = []; this.stats.set("Track video", trackVideo);
+                const skippedAudio = []; this.stats.set("Skipped audio", skippedAudio);
+                const skippedVideo = []; this.stats.set("Skipped video", skippedVideo);
+                const stalls = []; this.stats.set("Stalls", stalls);
+                
+                this.uiStats = new UIMetrics(this.$refs.stats);
+
+                // Debug purpose : click right = dump & pause
+                this.$refs.video.addEventListener('contextmenu', (event) => {
+                    event.preventDefault();
+                    this.dump();
+                    this.player.paused = true;
+                });
+                
+         
+                setInterval(() => {
+                    const player = this.player;
+                    if(player) {
+                        this.hasMetrics = true;
+                        if(bandwidths.length || player.recvByteRate) {
+                            bandwidths.push(Math.round(player.recvByteRate*8/1000)+"kbps");
+                        }
+                        if(bufferAmounts.length || player.bufferAmount) {
+                            bufferAmounts.push(player.bufferAmount+"ms");
+                        }
+                        if(latencies.length || (options.latency && player.latency)) {
+                            latencies.push(player.latency+"ms");
+                        }
+                      
+                        playbackRates.push(player.playbackRate.toFixed(2));
+                        playbackSpeeds.push(player.playbackSpeed.toFixed(2));
+                        fps.push(player.videoPerSecond.toFixed(2));
+                        let track = player.metadata.tracks.get(player.audioTrack);
+                        trackAudio.push(((track && track.bandwidth || 0) *8/1000).toFixed() + 'kbps');
+                        track = player.metadata.tracks.get(player.videoTrack);
+                        trackVideo.push(((track && track.bandwidth || 0) *8/1000).toFixed() + 'kbps');
+                        skippedAudio.push(this.skippedAudio.toFixed(1)+"s");
+                        skippedVideo.push(this.skippedVideo.toFixed(1)+"s");
+                        stalls.push(this.stalls);
+
+                        const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
+                        if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
+                            // displaid only if activated!
+                            e2eLatencies.push(e2eLatency+"ms");
+                        }
+                        this.times.push({
+                            time: new Date().toISOString(),
+                            mediaTime: player.currentTime
+                        });
+                    }
+                    this.uiStats.display(this.stats);
+                }, 700);
+            },
+            methods: {
+                buildStream() {
+                    if(!this.stream) {
+                        this.stream  = 'out+de1e6f7c-e5db-450b-9603-c3644274779b';
+                        log(`Set default Bunny stream ${this.stream}`).warn();
+                    }
+                    return this.stream;
+                },
+
+                buildConnectParams() {
+                    let streamName = this.buildStream();
+                    let accessToken = options.token || options.id;
+                    let endPoint = this.host;
+                    let mediaExt;
+                    try {
+                        endPoint = new URL(streamName);
+                        streamName = endPoint.pathname;
+                    } catch(_) {
+                        // StreamName(?id=accessTolen)
+                        const found = streamName.indexOf("?");
+                        if(found>=0) {
+                            accessToken = new URLSearchParams(streamName.substring(found+1)).get("id") || accessToken;
+                            streamName = streamName.substring(0, found); // remove params
+                        }
+                        /// remove possible extension in stream name
+                        mediaExt = Util.getExtension(streamName);
+                        streamName = streamName.substring(0, streamName.length - mediaExt.length);
+                    }
+                    return {
+                        endPoint:endPoint.toString(),
+                        streamName,
+                        accessToken,
+                        mediaExt: this.sourceType === HTTPSource ? '.mp4' : mediaExt // force CMAF for HTTP Streaming
+                    };
+                },
+
+                
+                play() {
+                    if (this.player) {
+                        this.player.stop();
+                        return;
+                    }
+                    // reset error
+                    this.streamErrorMessage = null; 
+                    // reset stats!
+                    this.resetMetrics(true);
+                    // reset dump if activated
+                    if(this.audioDump) {
+                        this.audioDump.clear();
+                    }
+                    if(this.videoDump) {
+                        this.videoDump.clear();
+                    }
+
+                    // build params
+                    const params = this.buildConnectParams();
+                    if(!params.streamName) {
+                        this.streamErrorMessage = "Enter a non-empty stream name or URL to play";
+                        return;
+                    }
+
+                    this.playState = PlayState.STARTING;
+
+                    const videoElement = this.$refs.video;
+                    videoElement.muted = this.muted;
+                    videoElement.autoplay = true;
+
+                    this.player = new Player(videoElement, this.sourceType);
+                    this.player.onStart = this.onStart.bind(this);
+                    this.player.onStop = this.onStop.bind(this);
+                    this.player.onTrackChange = this.onTrackChange.bind(this);
+                    this.player.onMetadata = this.onMetadata.bind(this);
+                    this.player.onStall = () => {
+                        log('Playback stall').warn();
+                        ++this.stalls;
+                    }
+                    this.player.onAudioSkipping = (holeMs) => {
+                        log(`Audio skips ${holeMs} ms`).warn();
+                        this.skippedAudio += holeMs / 1000;
+                    }
+                    this.player.onVideoSkipping = (holeMs) => {
+                        log(`Video skips ${holeMs} ms`).warn();
+                        this.skippedVideo += holeMs / 1000;
+                    }
+              
+                    this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
+                    this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
+              
+                    this.setBuffer(); // to set buffer size!
+                    this.player.start(params, options.timeout);
+                },
+                onStart() {
+                    log('onStart').info();
+                    this.playState = PlayState.PLAYING;
+                    this.player.reliable = !this.adaptiveFrameSkipping;
+                    this.player.cmcd = options.cmcd;
+                    this.player.cmcdMode = options.cmcdMode;
+                    this.player.cmcdSid = options.cmcdSid;
+                },
+                onStop(error) {
+                    if(error) {
+                        log('onStop', error).error();
+                        this.streamErrorMessage = error.name;
+                    } else {
+                        log('onStop').info();
+                    }
+                    const videoElement = this.$refs.video;
+                    videoElement.muted = this.muted;
+                    videoElement.autoplay = true;
+                    videoElement.onloadeddata = null;
+
+                    this.audioTracks = new Map();
+                    this.audioTrack = 'Audio';
+                    this.audioTrackId = undefined;
+                    this.videoTracks = new Map();
+                    this.videoTrack = 'Video';
+                    this.videoTrackId = undefined;
+
+                    this.player = null;
+                    this.playState = PlayState.STOPPED;
+                },
+                onTrackChange(audioTrack, videoTrack) {
+                    log(`onTrackChange ${Util.stringify({audioTrack, videoTrack})}`).info();
+                    if(this.videoTrackId != null) {
+                        this.videoTrackId = videoTrack;
+                    }
+                    this.videoTrack = this.videoTracks.get(videoTrack);
+                    if(this.audioTrackId != null) {
+                        this.audioTrackId = audioTrack;
+                    }
+                    this.audioTrack = this.audioTracks.get(audioTrack);
+                },
+                onMetadata(metadata) {
+                    log(`onMetadata ${Util.stringify(metadata)}`).info();
+
+                    this.audioTracks = new Map();
+                    this.videoTracks = new Map();
+
+                    for (const [id, track] of metadata.tracks) {
+                
+                        if (track.type === Media.Type.VIDEO) {
+                            this.videoTracks.set(id, track.toString());
+                        } else if (track.type === Media.Type.AUDIO) {
+                            this.audioTracks.set(id,track.toString());
+                        }
+                    }
+                },
+                mute() {
+                    this.muted = !this.muted;
+                    this.$refs.video.muted = this.muted;
+                    log(this.muted ? 'MutePlayback' : 'UnmutePlayback').info();
+                },
+                leaveGoLive(event) {
+                    if ((event.buttons & 1) && this.player) {
+                        // trick to activate latency
+                        this.latencies.push(this.player.latency+"ms");
+                    }
+                },
+                goLive() {
+                    if(this.player) {
+                        this.player.goLive();
+                    }
+                },
+                resetMetrics(all=false) {
+                    this.uiStats.reset();
+                    this.stalls = 0;
+                    this.skippedAudio = 0;
+                    this.skippedVideo = 0;
+                    const displayableCount = all ? 0 : this.uiStats.displayableCount;
+                    for(let [_, values] of this.stats) {
+                        values.splice(0, Math.max(0, values.length - displayableCount));
+                    }
+                    this.times.splice(0, Math.max(0, this.times.length - displayableCount));
+                },
+                download(name, data, type) {
+                    const url = URL.createObjectURL(new Blob([data], {type}));
+                    const link = document.createElement("a");
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", name);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                },
+                downloadStats() {
+                    // Write headers and compute max values
+                    let csv = "";
+                    let max = this.times.length;
+                    let headers = ["localTime" , "mediaTime"];
+                    for (const [header, values] of this.stats) {
+                        headers.push(header);
+                        max = Math.max(max, values.length);
+                    }
+                    csv = headers.join(';');
+                    
+                    // Write CSV
+                    for (let i = 0; i < max; ++i) {
+                        csv += '\n';
+                        const {time, mediaTime} = this.times[i];
+                        csv += (time || '') + ';' + (mediaTime || '') + ';';
+                        for(let [name, stats] of this.stats) {
+                            csv += (stats[i] == null ? '' : parseFloat(stats[i])) + ';';
+                        }
+                    }
+
+                    // Download the csv !
+                    this.download("stats.csv", csv, 'text/csv;charset=utf-8;');
+                },
+
+                dump() {
+                    // Just here to debug binary generation when need
+                    if(this.audioDump && this.audioDump.size()) {
+                        this.download("audio.mp4", this.audioDump.data(), 'video/mp4');
+                    }
+                    if(this.videoDump && this.videoDump.size()) {
+                        this.download("video.mp4", this.videoDump.data(), 'video/mp4');
+                    }
+                },
+                fullscreen() {
+                    const video = this.$refs.video;
+
+                    if (document.fullscreenElement) {
+                        if(document.exitFullscreen) {
+                            document.exitFullscreen();
+                        } else if(video && video.webkitExitFullscreen) {
+                            video.webkitExitFullscreen();
+                        }
+                        return;
+                    } 
+
+                    if(!video) {
+                        return;
+                    }
+
+                    if(video.requestFullscreen) {
+                         video.requestFullscreen();
+                    } else if(video.webkitEnterFullscreen) {
+                        video.webkitEnterFullscreen();
+                    } else if(video.enterFullscreen) {
+                        video.enterFullscreen();
+                    }
+                },
+                playButtonCaption() {
+                    if (this.isStopped())
+                        return 'Play';
+                    if (this.isStarting())
+                        return 'Starting...';
+                    if (this.isPlaying())
+                        return 'Stop';
+                },
+                isPlaying() {
+                    return this.playState === PlayState.PLAYING;
+                },
+                isStarting() {
+                    return this.playState === PlayState.STARTING;
+                },
+                isStopped() {
+                    return this.playState === PlayState.STOPPED;
+                },
+                onVideoTrackChange() {
+                    if (this.player) {
+                        this.player.videoTrack = this.videoTrackId;
+                    }
+                },
+                onAudioTrackChange() {
+                    if (this.player) {
+                        this.player.audioTrack = this.audioTrackId;
+                    }
+                },
+                setBuffer(min, max) {
+                    let profile;
+                    if(!isNaN(min) || !isNaN(max)) {
+                        // manual mode
+                        profile = this.netProfiles.entries().next().value;
+                        this.netProfile = profile[0];
+                        profile = profile[1];
+
+                        this.bufferMin = Math.min(min || max, max || min);
+                        this.bufferMax = Math.max(min || max, max || min);
+                    } else {
+                        // auto mode
+                        profile = this.netProfiles.get(this.netProfile);
+                        if(profile[1]) {
+                            this.bufferMin = profile[1];
+                        }
+                        if(profile[2]) {
+                            this.bufferMax = profile[2];
+                        }
+                    }
+
+                    
+                    if (this.player) {
+                        // fix possible player correction!
+                        this.bufferMin = (this.player.bufferLimitLow = this.bufferMin);
+                        this.bufferMax = (this.player.bufferLimitHigh = this.bufferMax);
+                    }
+                    
+                    // Display user description
+                    this.netDescription = profile[0];
+                    this.netDescription += "<br>Expected buffering ≈" + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + "ms";
+
+                    this.updateURL();
+                    
+                },
+                updateURL() {
+                    if (history.pushState) {
+                        let path = location.origin + location.pathname + '?stream=' + encodeURIComponent(this.buildStream()) + '&bufferMin=' + this.bufferMin + '&bufferMax=' + this.bufferMax;
+                        if(options.token != null) {
+                            path += "&token=" + options.token;
+                        }
+                        if(options.id != null) {
+                            path += "&id=" + options.id;
+                        }
+                        if(options.latency != null) {
+                            path += "&latency";
+                        }
+                        if(options.timeout != null) {
+                            path += "&timeout=" + options.timeout;
+                        }
+                        if (options.cmcd != null) {
+                            path += "&cmcd=" + options.cmcd;
+                        }
+                        if (options.cmcdMode != null) {
+                            path += "&cmcdMode=" + options.cmcdMode;
+                        }
+                        if (options.cmcdSid != null) {
+                            path += "&cmcdSid=" + options.cmcdSid;
+                        }
+                        if(options.reliable != null || !this.adaptiveFrameSkipping) {
+                            path += "&reliable";
+                        }
+                        if(options.host != null) {
+                            path += "&host=" + options.host;
+                        }
+                        history.pushState({path},'',path);
+                    }
+                },
+                mutableReliability() {
+                    if(this.sourceType === HTTPSource) {
+                        // HTTP has no mutable reliability
+                        return this.player ? false : true;
+                    }
+                    return true;
+                },
+                onReliable() {
+                    if (this.player) {
+                        this.player.reliable = !this.adaptiveFrameSkipping;
+                    }
+                    this.updateURL();
+                }
+            },
+        }).mount('#main');
+    </script>
+</html>
