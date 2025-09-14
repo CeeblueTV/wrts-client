@@ -1,5 +1,6 @@
 [Requirements](#requirements) | [Usage](#usage) | [Examples](#examples) | [Building locally](#building-locally) | [Logs](#logs) | [Metrics (CMCD)](#metrics-cmcd) | [Documentation](#documentation) | [Contribution](#contribution) | [License](#license)
 
+![WRTS logo](./wrts_logo.png)
 
 # Ceeblue WebRTS Client
 [![npm]](https://npmjs.org/package/@ceeblue/wrts-client)
