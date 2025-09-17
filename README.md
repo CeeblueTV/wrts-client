@@ -242,6 +242,6 @@ By contributing code to this project, you agree to license your contribution und
 [Ceeblue Cloud API]: https://docs.ceeblue.net/reference
 [Ceeblue website]: https://ceeblue.net/free-trial/
 [Quick Start Guide]: https://docs.ceeblue.net/reference/quick-start-guide
-[npm]: https://img.shields.io/npm/v/%40ceeblue%2Fwebrts-client
+[npm]: https://img.shields.io/npm/v/%40ceeblue%2Fwrts-client
 [static http-server]: https://www.npmjs.com/package/http-server
 [CMCD (Common Media Client Data)]: https://github.com/cta-wave/common-media-client-data
