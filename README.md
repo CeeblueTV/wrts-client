@@ -7,7 +7,7 @@
  <a href="#metrics-cmcd">Metrics (CMCD)</a> •
  <a href="#documentation">Documentation</a> •
  <a href="#contribution">Contribution</a> •
- <a href="#license">License</a> •
+ <a href="#license">License</a>
 </p>
 
 <h1 align="center">
