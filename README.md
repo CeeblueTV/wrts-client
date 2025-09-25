@@ -10,7 +10,7 @@
  <a href="#license">License</a>
 </p>
 <div align="center">
-   <svg width="100" height="100" viewBox="0 0 29.2845 29.284506" xmlns="http://www.w3.org/2000/svg"><polygon fill="#69f" points="29.2845 0 0.1374 11.6588 8.8814 20.403 0 29.2845 29.2845 17.4881 20.5404 8.74402"/></svg>
+   <img src="./wrts_logo.svg" width="100"/>
 </div>
 <h1 align="center">
   Ceeblue WebRTS Client
