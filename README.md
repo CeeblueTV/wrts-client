@@ -9,9 +9,10 @@
  <a href="#contribution">Contribution</a> •
  <a href="#license">License</a>
 </p>
-
+<div align="center">
+   <svg width="100" height="100" viewBox="0 0 29.2845 29.284506" xmlns="http://www.w3.org/2000/svg"><polygon fill="#69f" points="29.2845 0 0.1374 11.6588 8.8814 20.403 0 29.2845 29.2845 17.4881 20.5404 8.74402"/></svg>
+</div>
 <h1 align="center">
-  <img src="./wrts_logo.png" alt="WebRTS logo" width="40" height="40">
   Ceeblue WebRTS Client
 </h1>
 <h4 align="center"><a href="./WEBRTS.md">Web Real-Time Streaming</a> (WebRTS) is a transport-agnostic framework designed to enable live streaming over the web with minimal latency.</h4>
