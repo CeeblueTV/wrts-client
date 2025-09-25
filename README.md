@@ -1,10 +1,26 @@
-[Requirements](#requirements) | [Usage](#usage) | [Examples](#examples) | [Building locally](#building-locally) | [Logs](#logs) | [Metrics (CMCD)](#metrics-cmcd) | [Documentation](#documentation) | [Contribution](#contribution) | [License](#license)
-
-
-# Ceeblue WebRTS Client
-[![npm]](https://npmjs.org/package/@ceeblue/wrts-client)
-
-[Web Real-Time Streaming](./WEBRTS.md) (WebRTS) is a transport-agnostic framework designed to enable live streaming over the web with minimal latency.
+<p align="center">
+ <a href="#requirements">Requirements</a> •
+ <a href="#usage">Usage</a> •
+ <a href="#examples">Examples</a> •
+ <a href="#building-locally">Building locally</a> •
+ <a href="#logs">Logs</a> •
+ <a href="#metrics-cmcd">Metrics (CMCD)</a> •
+ <a href="#documentation">Documentation</a> •
+ <a href="#contribution">Contribution</a> •
+ <a href="#license">License</a>
+</p>
+<div align="center">
+   <img src="./wrts_logo.svg" width="100"/>
+</div>
+<h1 align="center">
+  Ceeblue WebRTS Client
+</h1>
+<h4 align="center"><a href="./WEBRTS.md">Web Real-Time Streaming</a> (WebRTS) is a transport-agnostic framework designed to enable live streaming over the web with minimal latency.</h4>
+<p align="center">
+  <a href="https://npmjs.org/package/@ceeblue/wrts-client"><img src="https://img.shields.io/npm/v/@ceeblue/wrts-client.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@ceeblue/wrts-client"><img src="https://img.shields.io/npm/dm/@ceeblue/wrts-client.svg" alt="npm downloads"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-yellow.svg" alt="License: AGPL v3"></a>
+</p>
 
 ## Requirements
 
@@ -241,6 +257,5 @@ By contributing code to this project, you agree to license your contribution und
 [Ceeblue Cloud API]: https://docs.ceeblue.net/reference
 [Ceeblue website]: https://ceeblue.net/free-trial/
 [Quick Start Guide]: https://docs.ceeblue.net/reference/quick-start-guide
-[npm]: https://img.shields.io/npm/v/%40ceeblue%2Fwebrts-client
 [static http-server]: https://www.npmjs.com/package/http-server
 [CMCD (Common Media Client Data)]: https://github.com/cta-wave/common-media-client-data
