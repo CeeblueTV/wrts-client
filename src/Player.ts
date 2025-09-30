@@ -42,7 +42,7 @@ export type PlayerError =
     /**
      * Represents a unsupported feature requiring to update the browser
      */
-    | { type: 'PlayerError'; name: 'Update the browser'; compoment: string }
+    | { type: 'PlayerError'; name: 'Update the browser'; component: string }
     /**
      * Represents a media playback error
      */
@@ -649,7 +649,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._mediaSource = this._newMediaSource();
 
         if (!this._mediaSource) {
-            this.stop({ type: 'PlayerError', name: 'Update the browser', compoment: 'MediaSource' });
+            this.stop({ type: 'PlayerError', name: 'Update the browser', component: 'MediaSource' });
             return;
         }
 
