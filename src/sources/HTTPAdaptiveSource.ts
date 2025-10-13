@@ -240,8 +240,8 @@ export class HTTPAdaptiveSource extends Source {
                                 break;
                             }
 
-                            // HEAD request with weak=true to check if frame exists!
-                            const response = await this._downloadSequence(playing, this._audioController, track, newSequence, -1);
+                            // HEAD request o check if frame exists!
+                            const response = await this._downloadSequence(playing, this._audioController, track, newSequence, 0);
                             if (response.ok && newSequence > sequence) {
                                 again = false;
                                 this.log(
@@ -348,8 +348,7 @@ export class HTTPAdaptiveSource extends Source {
     /**
      * Download one sequence, retry if can't download it until get it (at least that there is a unrecoverable issue).
      * If length is set it limits body of the request to this value by processing a byte-range request,
-     * If length is set to 0 it sends a normal HEAD request (without waiting)
-     * If length is set to -1 (or negative) it sends a weak HEAD request (without waiting)
+     * If length is set to 0 it sends a normal HEAD request
      * @returns HTTP headers if was able to download at least it, null otherwise!
      */
     private async _downloadSequence(
@@ -396,10 +395,6 @@ export class HTTPAdaptiveSource extends Source {
                     return response;
                 }
             }
-        } else if (length < 0) {
-            // weak HEAD request
-            url.searchParams.set('weak', 'true');
-            length = 0;
         }
 
         let response;
@@ -424,7 +419,7 @@ export class HTTPAdaptiveSource extends Source {
 
             try {
                 if (length === 0 || type == null) {
-                    // Only HEAD
+                    // Only HEAD or GET without media (bandwidth emulation)
                     response = await this.fetch(url, {
                         method: length === 0 ? 'HEAD' : 'GET',
                         signal: controller.signal,
