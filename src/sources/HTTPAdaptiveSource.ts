@@ -380,19 +380,24 @@ export class HTTPAdaptiveSource extends Source {
                 !playing.buffering &&
                 playing.bufferState === BufferState.LOW // we are low in last rendition before to download keyframe => last chance rendition !
             ) {
-                this.log(`Download only first video frame of sequence ${sequence} track ${trackId}`).warn();
-                onlyKeyFrame = true;
                 // do the HEAD request to get first-frame-length
                 let response = await this._downloadSequence(playing, controller, trackId, sequence, 0);
-                if (!response.ok) {
+                if (response.ok) {
+                    length = Number(response.headers.get('first-frame-length'));
+                    if (!length) {
+                        response = new Response(null, { headers: response.headers, status: 400 });
+                        response.error = `No valid first-frame-length header from ${url.toString()}`;
+                        return response;
+                    }
+                    this.log(`Download only first video frame of sequence ${sequence} track ${trackId}`).warn();
+                    onlyKeyFrame = true;
+                } else {
                     // aborted, log already displaid and nothing downloaded
-                    return response;
-                }
-                length = Number(response.headers.get('first-frame-length'));
-                if (!length) {
-                    response = new Response(null, { headers: response.headers, status: 400 });
-                    response.error = `No valid first-frame-length header from ${url.toString()}`;
-                    return response;
+                    if (this.closed) {
+                        return response;
+                    }
+                    // maybe we have gotten a 404, due to immediate HEAD response and a possible origin switch
+                    // Try a full GET what ensures to wait future sequence if there is
                 }
             }
         }
