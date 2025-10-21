@@ -7,7 +7,7 @@
 import { ILog, Loggable, Util } from '@ceeblue/web-utils';
 import { CMAFWriter, CMAFWriterError } from './writer/CMAFWriter';
 import * as Media from './Media';
-import { Metadata } from './Metadata';
+import { ContentProtection, Metadata } from './Metadata';
 
 const UPDATE_TIMEOUT = 400;
 const MAX_CONSECUTIVE_BFRAME = 16;
@@ -152,9 +152,13 @@ export class MediaBuffer extends Loggable {
     }
 
     append(metadata: Metadata, trackId: number, sample: Media.Sample) {
+        const track = metadata.tracks.get(trackId);
+        let contentProtection: ContentProtection | undefined;
+        if (track?.contentProtection) {
+            contentProtection = metadata.contentProtection.get(track.contentProtection);
+        }
         if (trackId !== this._trackId) {
             // INIT
-            const track = metadata.tracks.get(trackId);
             if (!track) {
                 this.onError({ type: 'MediaBufferError', name: 'Track without metadata', track: trackId });
                 return;
@@ -164,13 +168,13 @@ export class MediaBuffer extends Loggable {
             this.log(`Update track${this._trackId == null ? ' ' : ` from ${this._trackId} to `}${trackId} ${packet}`).info();
             this._trackId = trackId;
             this._packets.push(packet);
-            const error = this._cmafWriter.init(track);
+            const error = this._cmafWriter.init(track, contentProtection);
             if (error) {
                 this.onError(error);
                 return;
             }
         }
-        this._cmafWriter.write(sample);
+        this._cmafWriter.write(sample, contentProtection);
         return this;
     }
 
@@ -190,7 +194,7 @@ export class MediaBuffer extends Loggable {
                     const beginHole = this._buffer.buffered.end(0);
                     const endHole = this._buffer.buffered.start(1);
                     update = true;
-                    // user a startTime marker because the buffer removing can not be supported by few old browsers
+                    // use a startTime marker because the buffer removing can not be supported by few old browsers
                     this._startTime = Math.max(this._startTime, endHole);
                     this.log(`Remove ${(endHole - beginHole).toFixed(3)}s of timeline from ${beginHole}s to ${endHole}s`)[
                         this._isVideo ? 'error' : 'warn'

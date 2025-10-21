@@ -12,6 +12,7 @@ import * as Media from './media/Media';
 import { Metadata } from './media/Metadata';
 import { MediaPlayback, MediaPlaybackError } from './media/MediaPlayback';
 import { HTTPAdaptiveSource } from './sources/HTTPAdaptiveSource';
+import { DRMEngine, DRMEngineError } from './media/drm/DRMEngine';
 
 const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 150; // ms
@@ -62,7 +63,11 @@ export type PlayerError =
     /**
      * Represents a {@link MediaPlaybackError} error
      */
-    | MediaPlaybackError;
+    | MediaPlaybackError
+    /**
+     * Represents a {@link DRMEngineError} error
+     */
+    | DRMEngineError;
 
 /**
  * Use Player to start playing a WebRTS stream.
@@ -216,6 +221,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @event
      */
     onVideoAppended(data: Uint8Array) {}
+
+    /**
+     * Event fired when MediaKeys are ready if contentProtection is found in the metadata
+     *
+     * DRM support can be disabled by setting no contentProtection in the player parameters
+     *
+     * @param drmEngine The DRM engine instance
+     * @event
+     */
+    onMediaKeysReady(drmEngine: DRMEngine) {}
 
     /**
      * Returns true when player is running (between a {@link Player.start} and a {@link Player.stop})
@@ -444,6 +459,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * @override{@inheritDoc IPlaying.waitingInit}
+     */
+    get waitingInit(): boolean {
+        return this._waitingInit;
+    }
+
+    /**
      * Returns true if player is paused
      */
     get paused(): boolean {
@@ -568,6 +590,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _buffering: boolean;
     private _maximumResolution?: Media.Resolution;
     private _paused: boolean;
+    private _drmEngine?: DRMEngine;
+    private _waitingInit: boolean = false;
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     /**
@@ -683,7 +707,35 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._source.onTrackChange = this._onTrackChange.bind(this);
             this._source.onMetadata = (metadata: Metadata) => {
                 this._metadata = metadata;
-                return this.onMetadata(metadata);
+                const tracks = this.onMetadata(metadata);
+
+                // Start DRM MediaKeys if needed
+                if (!this._drmEngine && metadata.contentProtection.size > 0) {
+                    if (!params.contentProtection) {
+                        this.log('Ignoring contentProtection because no DRMEngine parameters provided').info();
+                    } else {
+                        this.log('ContentProtection found, starting the DRMEngine...').info();
+                        this._waitingInit = true; // waiting DRMEngine to be ready (MediaKeys to be attached)
+                        this._drmEngine = new DRMEngine(this._video);
+                        this._drmEngine.onError = error => {
+                            this.stop(error);
+                        };
+                        this._drmEngine.log = this.log.bind(this, 'DRMEngine:') as ILog;
+                        this._drmEngine
+                            .start(metadata, params)
+                            .then(() => {
+                                if (this._drmEngine) {
+                                    this._waitingInit = false; // DRMEngine is ready
+                                    this.onMediaKeysReady(this._drmEngine);
+                                }
+                            })
+                            .catch(error => {
+                                this.stop(error);
+                            });
+                    }
+                }
+
+                return tracks;
             };
             this._source.onFinalizeRequest = (url: URL, headers: Headers) => {
                 this.onFinalizeRequest(url, headers);
@@ -879,6 +931,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             // detach video
             URL.revokeObjectURL(this._video.src);
             this._video.src = '';
+        }
+
+        if (this._drmEngine) {
+            this._drmEngine.onError = Util.EMPTY_FUNCTION;
+            this._drmEngine = undefined;
         }
 
         // Reset values

@@ -98,7 +98,18 @@ export class RTSReader extends Reader {
                 const time = this._nextTimes.get(trackId) ?? header.read7Bit();
 
                 const value = header.read7Bit();
-                const duration = value >> 2;
+                const duration = value >> 3;
+                const hasEncrypted = value & 4 ? true : false;
+                const subSamples = new Array<{ clearBytes: number; encryptedBytes: number }>(); // Encrypted list
+                if (hasEncrypted) {
+                    const subSampleCount = header.read7Bit();
+                    for (let i = 0; i < subSampleCount; i++) {
+                        subSamples.push({
+                            clearBytes: header.read7Bit(),
+                            encryptedBytes: header.read7Bit()
+                        });
+                    }
+                }
                 const compositionOffset = value & 2 ? header.read7Bit() : 0;
                 const isKeyFrame = value & 1 ? true : false;
 
@@ -111,7 +122,7 @@ export class RTSReader extends Reader {
                 if (type === Media.Type.AUDIO) {
                     this.onAudio(trackId, { time, duration, isKeyFrame, compositionOffset, data });
                 } else {
-                    this.onVideo(trackId, { time, duration, isKeyFrame, compositionOffset, data });
+                    this.onVideo(trackId, { time, duration, isKeyFrame, compositionOffset, data, subSamples });
                 }
             }
 

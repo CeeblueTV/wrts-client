@@ -26,6 +26,9 @@
             .card {
                 background-color: #EDF0F3;
             }
+            #video-container {
+                width: 100%;
+            }
 
             video {
                 background-color: #333333;
@@ -84,7 +87,7 @@
                             {{ streamErrorMessage }}
                         </div>
 
-                        <video autoplay id="video" ref="video" @click="fullscreen()" playsinline></video>
+                        <video autoplay :key="videoKey" id="video" ref="video" @click="fullscreen()" playsinline></video>
                         <div ref="play-btn" class="play-btn" @click="player.paused = false" v-show="player && player.paused">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26">
                                 <polygon class="play-btn__svg" points="9.33 6.69 9.33 19.39 19.3 13.04 9.33 6.69"></polygon>
@@ -121,6 +124,54 @@
                         <input :disabled="isPlaying()" class="form-control text-center"
                             placeholder="StreamName(?id=accessToken) or URL" type="text"
                             v-model="stream">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label class="col-2">Widevine robustness:</label>
+                    <div class="form-group col-sm">
+                        <select id="video-robustness-selection" class="custom-select text-center"
+                            :disabled="isPlaying()" v-model="videoRobustnessKey">
+                            <option v-for="(robustnessArray, label) in videoRobustnesses" :value="robustnessArray[0]">
+                               Video {{ robustnessArray[0] }}
+                            </option>
+                        </select>
+                    </div>
+                    <div class="form-group col-sm">
+                        <select id="audio-robustness-selection" class="custom-select text-center"
+                            :disabled="isPlaying()" v-model="audioRobustnessKey">
+                            <option v-for="(robustnessArray, label) in audioRobustnesses" :value="robustnessArray[0]">
+                                Audio {{ robustnessArray[0] }}
+                            </option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group col-12">
+                        <div class="d-flex flex-row align-items-center">
+                            <div class="d-flex flex-row gap-2 w-100">
+                                <button class="btn flex-grow-1" 
+                                    :class="{ 'btn-primary': enabledDRM.widevine, 'btn-success': keySystem === 'com.widevine.alpha' }"
+                                    :disabled="isPlaying()"
+                                    @click="enabledDRM.widevine = !enabledDRM.widevine">
+                                    <i class="fas fa-shield-alt"></i>
+                                    Widevine
+                                </button>
+                                <button class="btn flex-grow-1"
+                                    :class="{ 'btn-primary': enabledDRM.playready, 'btn-success': keySystem === 'com.microsoft.playready' }"
+                                    :disabled="isPlaying()"
+                                    @click="enabledDRM.playready = !enabledDRM.playready">
+                                    <i class="fas fa-shield-alt"></i>
+                                    PlayReady
+                                </button>
+                                <button class="btn flex-grow-1"
+                                    :class="{ 'btn-primary': enabledDRM.fairplay, 'btn-success': keySystem && keySystem.startsWith('com.apple.fps') }"
+                                    :disabled="isPlaying()"
+                                    @click="enabledDRM.fairplay = !enabledDRM.fairplay">
+                                    <i class="fas fa-shield-alt"></i>
+                                    FairPlay
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -200,6 +251,7 @@
                     <div class="form-group mx-auto">
                         <img class="m-1" alt="Reset metrics view" title="Reset incremental metrics and rescale the chart" type="button" @click="resetMetrics()" src="./assets/reload.png" style="object-fit:contain" height="32">
                         <img class="m-1" alt="Download metrics" title="Download metrics as a CSV file" type="button" @click="downloadStats()" src="./assets/download.png" style="object-fit:contain" height="32">
+                        <img class="m-1" alt="Dump media" title="Dump media as MP4 files" type="button" @click="dump()" src="./assets/dump.png" style="object-fit:contain" height="32" v-show="audioDump || videoDump">
                     </div>
                 </div>
                 
@@ -243,11 +295,35 @@
                     bufferMin: 0,
                     bufferMax: 0,
 
-                    // audioDump: new BinaryWriter(),
-                    // videoDump: new BinaryWriter(),
+                    audioDump: options.dump ? new BinaryWriter() : undefined,
+                    videoDump: options.dump ? new BinaryWriter() : undefined,
+
+                    videoKey: 0, // counter to force video element reload
+                    keySystem: null,
+                    enabledDRM: {
+                        widevine: true,
+                        playready: true,
+                        fairplay: true
+                    },
+                    videoRobustnesses: new Map([
+                        ['HW & SW', ['HW_SECURE_DECODE', 'SW_SECURE_DECODE']],
+                        ['SW', ['SW_SECURE_DECODE']],
+                        ['HW', ['HW_SECURE_DECODE']],
+                        ['All', ['']]
+                    ]),
+                    audioRobustnesses: new Map([
+                        ['HW & SW', ['HW_SECURE_CRYPTO', 'SW_SECURE_CRYPTO']],
+                        ['SW', ['SW_SECURE_CRYPTO']],
+                        ['HW', ['HW_SECURE_CRYPTO']],
+                        ['All', ['']]
+                    ]),
+                    // Set default values as the corresponding robustness arrays:
+                    videoRobustnessKey: 'HW & SW',
+                    audioRobustnessKey: 'HW & SW',
 
                     canvas: document.createElement('canvas'),
 
+                    currentParams: null,
                     adaptiveFrameSkipping: true,
                     streamMetadata: null,
                     netDescription: "",
@@ -394,11 +470,31 @@
                         mediaExt = Util.getExtension(streamName);
                         streamName = streamName.substring(0, streamName.length - mediaExt.length);
                     }
+
+                    const contentProtection = {};
+                    if (this.enabledDRM.widevine) {
+                        contentProtection['com.widevine.alpha'] = {
+                            licenseUrl: 'https://widevine-dash.ezdrm.com/widevine-php/widevine-foreignkey.php?pX=B752A3',
+                            audioRobustness: this.audioRobustnesses.get(this.audioRobustnessKey),
+                            videoRobustness: this.videoRobustnesses.get(this.videoRobustnessKey)
+                        };
+                    }
+                    if (this.enabledDRM.playready) {
+                        contentProtection['com.microsoft.playready'] = 'https://playready.ezdrm.com/cency/preauth.aspx?pX=CAF350';
+                    }
+                    if (this.enabledDRM.fairplay) {
+                        contentProtection['com.apple.fps.1_0'] = {
+                            certificate: 'https://na-fps.ezdrm.com/demo/video/eleisure.cer',
+                            licenseUrl: 'https://fps.ezdrm.com/api/licenses/auth?pX=48EA94&assetid=c9e170a5-b3af-49d8-a8ad-fc2d90104744'
+                        };
+                    }
+
                     return {
                         endPoint:endPoint.toString(),
                         streamName,
                         accessToken,
-                        mediaExt: this.sourceType === HTTPSource ? '.mp4' : mediaExt // force CMAF for HTTP Streaming
+                        mediaExt: this.sourceType === HTTPSource ? '.mp4' : mediaExt, // force CMAF for HTTP Streaming
+                        contentProtection
                     };
                 },
 
@@ -421,8 +517,8 @@
                     }
 
                     // build params
-                    const params = this.buildConnectParams();
-                    if(!params.streamName) {
+                    this.currentParams = this.buildConnectParams();
+                    if(!this.currentParams.streamName) {
                         this.streamErrorMessage = "Enter a non-empty stream name or URL to play";
                         return;
                     }
@@ -432,7 +528,14 @@
                     const videoElement = this.$refs.video;
                     videoElement.muted = this.muted;
                     videoElement.autoplay = true;
+                    videoElement.onerror = () => {
+                        const mediaError = videoElement.error;
+                        if (mediaError) {
+                            log('Media error code:', mediaError.code, 'Details:', mediaError.message).error();
+                        }
+                    };
 
+                    // Now we can start the player
                     this.player = new Player(videoElement, this.sourceType);
                     this.player.onStart = this.onStart.bind(this);
                     this.player.onStop = this.onStop.bind(this);
@@ -453,9 +556,17 @@
               
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
+                    this.player.onMediaKeysReady = (drmEngine) => {
+                        log('DRMEngine started').info();
+                        // Update enabled DRM based on the active key system
+                        this.keySystem = drmEngine.keySystem;
+                    }
+                    this.player.onBufferState = oldState => {
+                        return;
+                    }
               
                     this.setBuffer(); // to set buffer size!
-                    this.player.start(params, options.timeout);
+                    this.player.start(this.currentParams, options.timeout);
                 },
                 onStart() {
                     log('onStart').info();
@@ -476,6 +587,7 @@
                     videoElement.muted = this.muted;
                     videoElement.autoplay = true;
                     videoElement.onloadeddata = null;
+                    videoElement.onerror = null;
 
                     this.audioTracks = new Map();
                     this.audioTrack = 'Audio';
@@ -486,6 +598,11 @@
 
                     this.player = null;
                     this.playState = PlayState.STOPPED;
+                    this.keySystem = null;
+
+                    // Reset the video element, this is necessary to be able to set the mediaKeys again
+                    // in case of a new stream with DRM
+                    this.videoKey += 1;
                 },
                 onTrackChange(audioTrack, videoTrack) {
                     log(`onTrackChange ${Util.stringify({audioTrack, videoTrack})}`).info();
@@ -517,6 +634,14 @@
                     this.muted = !this.muted;
                     this.$refs.video.muted = this.muted;
                     log(this.muted ? 'MutePlayback' : 'UnmutePlayback').info();
+                },
+                pause() {
+                    clearTimeout(this.pauseVideo);
+                    this.pauseVideo = null;
+                    this.dump();
+                    if(this.player) {
+                        this.player.paused = !this.player.paused;
+                    }
                 },
                 leaveGoLive(event) {
                     if ((event.buttons & 1) && this.player) {
@@ -696,6 +821,9 @@
                         }
                         if(options.reliable != null || !this.adaptiveFrameSkipping) {
                             path += "&reliable";
+                        }
+                        if(options.dump) {
+                            path += "&dump";
                         }
                         if(options.host != null) {
                             path += "&host=" + options.host;

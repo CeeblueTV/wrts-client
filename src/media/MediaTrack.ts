@@ -48,6 +48,10 @@ export class MediaTrack {
      * Config packet
      */
     config?: Uint8Array;
+    /**
+     * Content Protection
+     */
+    contentProtection?: string;
 
     up?: MediaTrack; // track up by ascending MAXBPS
     down?: MediaTrack; // track down by ascending MAXBPS

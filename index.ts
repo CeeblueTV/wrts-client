@@ -24,6 +24,7 @@ export { MediaPlayback, MediaPlaybackError } from './src/media/MediaPlayback';
 export { MediaTrack } from './src/media/MediaTrack';
 export { Metadata } from './src/media/Metadata';
 export { ICMCD, CMCD, CMCDMode } from './src/media/CMCD';
+export { DRMEngine, DRMEngineError } from './src/media/drm/DRMEngine';
 
 // Sources
 export { Source, SourceError } from './src/sources/Source';

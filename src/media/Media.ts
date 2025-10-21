@@ -28,6 +28,7 @@ export type Sample = {
     data: Uint8Array;
     compositionOffset?: number;
     isKeyFrame?: boolean;
+    subSamples?: Array<{ clearBytes: number; encryptedBytes: number }>; // DRM field for SENC box
 };
 
 export type Tracks = {

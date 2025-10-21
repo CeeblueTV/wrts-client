@@ -5,6 +5,7 @@
  */
 import { BinaryWriter, EventEmitter } from '@ceeblue/web-utils';
 import * as Media from '../Media';
+import { ContentProtection, ProtectionScheme } from '../Metadata';
 import { MediaTrack } from '../MediaTrack';
 
 export type CMAFWriterError =
@@ -44,7 +45,7 @@ export class CMAFWriter extends EventEmitter {
      * @param track
      * @returns CMAFWriterError if fails, undefined otherwise
      */
-    init(track: MediaTrack): CMAFWriterError | undefined {
+    init(track: MediaTrack, contentProtection?: ContentProtection): CMAFWriterError | undefined {
         // Check codecs
         switch (track.type) {
             case Media.Type.AUDIO:
@@ -224,11 +225,14 @@ export class CMAFWriter extends EventEmitter {
                                     // 00 00 00 00			temporal quality
                                     // 00 00 00 00			spatial quality
                                     // prettier-ignore
+                                    if (track.contentProtection) {
+                                        writer.write32(0x656E6376); // encv
+                                    } else {
+                                        writer.write32(0x61766331); // avc1
+                                    }
                                     writer.write([
-                                        0x61, 0x76, 0x63, 0x31, 0x00, 0x00, 0x00, 0x00, // avc1
-                                        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                        0x00, 0x00, 0x00, 0x00
+                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
                                     ]);
                                     // 05 00 02 20			width + height
                                     writer.write16(track.resolution.width);
@@ -279,10 +283,14 @@ export class CMAFWriter extends EventEmitter {
                                     // 00 00			 revision level
                                     // 00 00 00 00		 vendor
                                     // prettier-ignore
+                                    if (track.contentProtection) {
+                                        writer.write32(0x656E6361); // enca
+                                    } else {
+                                        writer.write32(0x6d703461); // mp4a
+                                    }
                                     writer.write([
-                                        0x6d, 0x70, 0x34, 0x61, 0x00, 0x00, 0x00, 0x00, // mp4a
-                                        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-                                        0x00, 0x00, 0x00, 0x00
+                                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                        0x00
                                     ]);
                                     // writer.write(".mp3,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x00,0x10,0x00,0x00,0x00,0x00"));
                                     // 00 02			 channels
@@ -344,6 +352,7 @@ export class CMAFWriter extends EventEmitter {
                                     // 02				flags
                                     writer.write([0x06, 0x01, 0x02]);
                                 }
+                                this._writeSinf(writer, track, contentProtection);
                                 writer.view.setUint32(size, writer.size() - size);
                             } // avc1/mp4a
                             writer.view.setUint32(size, writer.size() - size);
@@ -387,16 +396,112 @@ export class CMAFWriter extends EventEmitter {
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
             ]);
         }
+
+        // PSSH for content protection, if any
+        if (contentProtection) {
+            for (const [, psshBase64] of contentProtection.pssh) {
+                const binPSSH = Uint8Array.from(atob(psshBase64), c => c.charCodeAt(0) || 0);
+                writer.write(binPSSH);
+            }
+        }
         writer.view.setUint32(size, writer.size() - size);
 
         this.onWrite(writer.data());
     }
 
-    write(sample: Media.Sample) {
+    /**
+     * Write the sinf box for content protection
+     * @param contentProtection Content protection data if any, if undefined, no sinf box is written
+     */
+    private _writeSinf(writer: BinaryWriter, track: MediaTrack, contentProtection?: ContentProtection) {
+        if (!track.contentProtection || !contentProtection) {
+            return;
+        }
+        const scheme = contentProtection.scheme;
+        const size = writer.size();
+        writer.next(4); // skip size!
+        // prettier-ignore
+        writer.write([0x73, 0x69, 0x6e, 0x66]); // sinf
+        // prettier-ignore
+        writer.write([
+            0x00, 0x00, 0x00, 0x0c, 0x66, 0x72, 0x6d, 0x61, // frma
+        ]);
+        writer.write32(this._isVideo ? 0x61766331 : 0x6d703461); // avc1 or mp4a
+        // prettier-ignore
+        writer.write([
+            0x00, 0x00, 0x00, 0x14, 0x73, 0x63, 0x68, 0x6d, // schm 
+            0x00, 0x00, 0x00, 0x00
+        ]);
+        writer.write32(scheme);
+        writer.write([0x00, 0x01, 0x00, 0x00]);
+        {
+            // schi
+            const size = writer.size();
+            writer.next(4); // skip size!
+            // prettier-ignore
+            writer.write([0x73, 0x63, 0x68, 0x69]); // schi
+            {
+                // tenc
+                const size = writer.size();
+                writer.next(4); // skip size!
+                // prettier-ignore
+                writer.write([0x74, 0x65, 0x6e, 0x63]); // tenc
+                const isVideoCBCS = scheme === ProtectionScheme.CBCS && this._isVideo;
+                writer.write8(isVideoCBCS ? 1 : 0); // version
+                writer.write32(0); // flags + reserved
+                if (isVideoCBCS) {
+                    // CBCS : default crypt block=1 and default skip block=9
+                    writer.write8((1 << 4) | 9);
+                } else {
+                    writer.write8(0);
+                }
+                writer.write8(1); // isProtected
+                writer.write8(scheme === ProtectionScheme.CBCS ? 0 : 16); // Per Sample IV Size, 0 if CBCS
+                if (contentProtection.kid.length !== 32) {
+                    this.log(`KID length is not 32 bytes, ignoring`).warn();
+                    writer.write([
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+                    ]);
+                } else {
+                    writer.writeHex(contentProtection.kid);
+                }
+                if (scheme === ProtectionScheme.CBCS) {
+                    writer.write8(16); // iv size
+                    if (contentProtection.iv.length !== 32) {
+                        this.log(`IV length is not 32 bytes, ignoring`).warn();
+                        writer.write([
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+                        ]);
+                    } else {
+                        writer.writeHex(contentProtection.iv);
+                    }
+                }
+                writer.view.setUint32(size, writer.size() - size);
+            }
+            writer.view.setUint32(size, writer.size() - size);
+        }
+        writer.view.setUint32(size, writer.size() - size);
+    }
+
+    write(sample: Media.Sample, contentProtection?: ContentProtection) {
         // Search if there is empty track => MSE requires to get at less one media by track on each segment
         // In same time compute sizeMoof!
         const sizeTrun = 36;
-        const sizeTraf = 8 + 20 + 20 + sizeTrun; // traf(8) + tfhd(20) + tfdt(20) + trun
+        let sizeSenc = 0,
+            sizeSaiz = 0,
+            sizeSaio = 0;
+        if (contentProtection) {
+            if (this._isVideo || contentProtection.scheme !== ProtectionScheme.CBCS) {
+                sizeSaiz += 18;
+                sizeSaio += 20;
+            }
+            if (contentProtection.scheme !== ProtectionScheme.CBCS && contentProtection.iv.length === 32) {
+                sizeSenc += 16;
+                //sizeSaiz += 1;
+            }
+            sizeSenc += 16 + (sample.subSamples?.length ? 2 + sample.subSamples.length * 6 : 0);
+        }
+        const sizeTraf = 8 + 20 + 20 + sizeTrun + sizeSenc + sizeSaiz + sizeSaio; // traf(8) + tfhd(20) + tfdt(20) + trun + senc + saiz + saio
         const sizeMoof = 8 + 16 + sizeTraf; // moof(8) + mfhd(16) + traf
 
         //////////// MOOF /////////////
@@ -449,6 +554,44 @@ export class CMAFWriter extends EventEmitter {
             // 0X02000000 => key or audio => sample_depends_on NO
             writer.write32(!this._isVideo || sample.isKeyFrame ? 0x02000000 : 0x01010000);
             writer.write32(sample.compositionOffset || 0);
+        }
+        if (contentProtection) {
+            if (this._isVideo || contentProtection.scheme !== ProtectionScheme.CBCS) {
+                // saiz
+                writer.write32(sizeSaiz);
+                writer.write([0x73, 0x61, 0x69, 0x7a]); // saiz
+                writer.write([0x00, 0x00, 0x00, 0x00]); // version + flags
+                writer.write8(0); // default_sample_info_size
+                writer.write32(1); // sample_count (always one for now)
+                const sampleInfoSize =
+                    (this._isVideo ? 6 * (sample.subSamples?.length || 0) + 2 : 0) +
+                    (contentProtection.scheme === ProtectionScheme.CBCS ? 0 : 16);
+                writer.write8(sampleInfoSize); // sample_info_size
+
+                // saio
+                writer.write32(sizeSaio);
+                writer.write([0x73, 0x61, 0x69, 0x6f]); // saio
+                writer.write([0x00, 0x00, 0x00, 0x00]); // version + flags
+                writer.write32(1); // entry_count (always one for now)
+                writer.write32(sizeMoof - sizeSenc + 16);
+            }
+
+            // senc
+            writer.write32(sizeSenc);
+            writer.write([0x73, 0x65, 0x6e, 0x63]); // senc
+            const flags = sample.subSamples?.length ? 0x02 : 0x00;
+            writer.write([0x00, 0x00, 0x00, flags]); // version + flags
+            writer.write32(1); // sample_count
+            if (contentProtection.scheme !== ProtectionScheme.CBCS && contentProtection.iv.length === 32) {
+                writer.writeHex(contentProtection.iv);
+            }
+            if (sample.subSamples?.length) {
+                writer.write16(sample.subSamples.length);
+                for (const subSample of sample.subSamples) {
+                    writer.write16(subSample.clearBytes);
+                    writer.write32(subSample.encryptedBytes);
+                }
+            }
         }
 
         /// MDAT ///

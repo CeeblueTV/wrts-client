@@ -9,6 +9,32 @@ import * as Media from './Media';
 import * as AVC from './AVC';
 import { MediaTrack } from './MediaTrack';
 
+export enum ProtectionScheme {
+    CENC = 0x63656e63, // (AES-CTR)
+    CBC1 = 0x63626331, // (AES-CBC)
+    CENS = 0x63656e73, // (AES-CTR with subsamples)
+    CBCS = 0x63626373 // (AES-CBC with subsamples)
+}
+
+export type ContentProtection = {
+    /**
+     * Scheme
+     */
+    scheme: ProtectionScheme;
+    /**
+     * Key ID
+     */
+    kid: string;
+    /**
+     * Initialization Vector
+     */
+    iv: string;
+    /**
+     * Map of ID of the DRM system to PSSH box
+     */
+    pssh: Map<string, string>;
+};
+
 function filter(tracks: Map<number, MediaTrack>, medias: Array<MediaTrack>, codecs: Set<Media.Codec>) {
     for (let i = 0; i < medias.length; ++i) {
         const media = medias[i];
@@ -53,6 +79,10 @@ export class Metadata {
      * Data track
      */
     dataTracks: Array<MediaTrack> = [];
+    /**
+     * Map of List of ContentProtection
+     */
+    contentProtection: Map<string, ContentProtection> = new Map<string, ContentProtection>();
 
     private _liveTimeValue: number = 0;
     private _liveTimeWhen: number = Util.time();
@@ -89,9 +119,42 @@ export class Metadata {
 
             mTrack.bandwidth = Number(track.bandwidth) || mTrack.bandwidth;
             mTrack.config = Uint8Array.from(atob(track.config as string), c => c.charCodeAt(0) || 0);
+            mTrack.contentProtection = track.contentProtection;
             mTrack.currentTime = Number(track.currentTime) || mTrack.currentTime;
 
             this.tracks.set(mTrack.id, mTrack);
+        }
+        if (Array.isArray(obj.contentProtection)) {
+            for (const contentProtection of obj.contentProtection) {
+                const kid = contentProtection.kid;
+                if (!kid) {
+                    continue;
+                }
+                const keySettings = {
+                    scheme: ProtectionScheme.CBCS,
+                    kid,
+                    iv: contentProtection.iv || '',
+                    pssh: new Map<string, string>()
+                };
+                switch (contentProtection.scheme.toLowerCase()) {
+                    case 'cenc':
+                        keySettings.scheme = ProtectionScheme.CENC;
+                        break;
+                    case 'cbc1':
+                        keySettings.scheme = ProtectionScheme.CBC1;
+                        break;
+                    case 'cens':
+                        keySettings.scheme = ProtectionScheme.CENS;
+                        break;
+                }
+                if (contentProtection.pssh) {
+                    for (const drmId in contentProtection.pssh) {
+                        const pssh = contentProtection.pssh[drmId];
+                        keySettings.pssh.set(drmId, pssh);
+                    }
+                }
+                this.contentProtection.set(kid, keySettings);
+            }
         }
     }
 
