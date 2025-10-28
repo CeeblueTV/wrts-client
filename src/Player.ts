@@ -547,11 +547,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Source is CMAF and passthrough it to MSE, it's a debugging mode
-     * activable when you set {@link Connect.Params.mediaExt} to 'cmaf'
+     * @override
+     * {@inheritDoc IPlaying.passthroughCMAF}
      */
     get passthroughCMAF(): boolean | undefined {
-        return this._source?.passthroughCMAF;
+        return this._passthroughCMAF;
     }
 
     private _mediaSource?: MediaSource;
@@ -570,6 +570,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _paused: boolean;
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
+    private _passthroughCMAF?: boolean;
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
      * with an optionally {@link Source} to custom how getting the stream.
@@ -644,6 +645,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this.log('buffering...').info();
         this._buffering = true;
         this._video.pause();
+
+        // process params
+        this._passthroughCMAF = Util.trimStart(params.mediaExt?.toLowerCase() ?? '', '.') === 'cmaf';
+        if (this._passthroughCMAF) {
+            // Rename it to mp4, cmaf is usefull only to debug reason for bypassing a CMAF source
+            params.mediaExt = 'mp4';
+        }
 
         // Create media source
         this._mediaSource = this._newMediaSource();
@@ -882,6 +890,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         // Reset values
+        this._passthroughCMAF = undefined;
         this._buffering = false;
         this._paused = false;
         this._source = undefined;

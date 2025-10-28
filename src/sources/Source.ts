@@ -266,14 +266,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     }
 
     /**
-     * Source is CMAF and passthrough it to MSE, it's a debugging mode
-     * activable when you set {@link Connect.Params.mediaExt} to 'cmaf'
-     */
-    get passthroughCMAF(): boolean {
-        return this._passthroughCMAF;
-    }
-
-    /**
      * @override
      * {@inheritDoc ICMCD.cmcd}
      */
@@ -350,7 +342,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _dataTime: number;
     private _playing: IPlaying;
     private _mediaExt: string;
-    private _passthroughCMAF: boolean;
     private _recvByteRate: ByteRate;
     private _running: boolean;
     private _cmcdMode?: CMCDMode;
@@ -367,11 +358,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     constructor(playing: IPlaying, protocol: string, params: Connect.Params, type: Connect.Type = Connect.Type.WRTS) {
         super();
         // (params.query = new URLSearchParams(params.query)).set('audio', 'none');
-        this._passthroughCMAF = Util.trimStart(params.mediaExt?.toLowerCase() ?? '', '.') === 'cmaf';
-        if (this._passthroughCMAF) {
-            // Rename it to mp4, cmaf is usefull only to debug reason for bypassing a CMAF source
-            params.mediaExt = 'mp4';
-        }
         this._url = Connect.buildURL(type, params, protocol);
         this._mediaExt = params.mediaExt || ''; // aftet buildURL call to get mediaExt possible correction
         this._streamName = params.streamName || '';
@@ -740,7 +726,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 reader = new RTSReader({ withSize: params.isStream });
                 break;
             case 'mp4':
-                reader = new CMAFReader(this.passthroughCMAF);
+                reader = new CMAFReader(this._playing.passthroughCMAF);
                 break;
             default:
                 throw Error('No demuxer found for ' + this._url.pathname);

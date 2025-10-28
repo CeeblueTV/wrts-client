@@ -140,4 +140,10 @@ export interface IPlaying extends EventEmitter {
      * Defaults to the value of {@link Media.screenResolution}
      */
     get maximumResolution(): Media.Resolution | undefined;
+
+    /**
+     * Source is CMAF and passthrough it to MSE, it's a debugging mode
+     * activable when you set {@link Connect.Params.mediaExt} to 'cmaf'
+     */
+    get passthroughCMAF(): boolean | undefined;
 }
