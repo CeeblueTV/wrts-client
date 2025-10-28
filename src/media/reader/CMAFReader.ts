@@ -33,13 +33,15 @@ export class CMAFReader extends Reader {
     private _track?: Track;
     private _defaultTimeScale: number;
     private _metadata?: Metadata;
-    private _passthrough: BinaryWriter;
+    private _passthrough?: BinaryWriter;
 
     constructor(passthrough: boolean = true) {
         super();
         this._tracks = new Map<number, Track>();
         this._defaultTimeScale = 1000;
-        this._passthrough = new BinaryWriter();
+        if (passthrough) {
+            this._passthrough = new BinaryWriter();
+        }
     }
 
     read(data: BufferSource | string) {
@@ -79,8 +81,6 @@ export class CMAFReader extends Reader {
     private _parseBox(box: Uint8Array): ReaderError | undefined {
         const reader = new BinaryReader(box);
         const boxType = String.fromCharCode(...reader.read(4));
-
-        // log({boxType, size:reader.available()}).info();
 
         switch (boxType) {
             default:
@@ -345,7 +345,7 @@ export class CMAFReader extends Reader {
 
                 const sample = track.sample;
                 sample.data = track.type === Media.Type.DATA ? JSON.parse(Util.stringify(reader.read())) : reader.read();
-                if (this._passthrough) {
+                if (this._passthrough && this._passthrough.data().length > 0) {
                     sample.data = this._passthrough.data();
                 }
                 if (track.type === Media.Type.AUDIO) {
@@ -361,7 +361,9 @@ export class CMAFReader extends Reader {
                     duration: sample.duration, // constant duration
                     data: new Uint8Array()
                 };
-                this._passthrough = new BinaryWriter();
+                if (this._passthrough) {
+                    this._passthrough = new BinaryWriter();
+                }
                 return;
             }
         }
