@@ -240,8 +240,8 @@ export class HTTPAdaptiveSource extends Source {
                                 break;
                             }
 
-                            // HEAD request with weak=true to check if frame exists!
-                            const response = await this._downloadSequence(playing, this._audioController, track, newSequence, -1);
+                            // HEAD request o check if frame exists!
+                            const response = await this._downloadSequence(playing, this._audioController, track, newSequence, 0);
                             if (response.ok && newSequence > sequence) {
                                 again = false;
                                 this.log(
@@ -348,8 +348,7 @@ export class HTTPAdaptiveSource extends Source {
     /**
      * Download one sequence, retry if can't download it until get it (at least that there is a unrecoverable issue).
      * If length is set it limits body of the request to this value by processing a byte-range request,
-     * If length is set to 0 it sends a normal HEAD request (without waiting)
-     * If length is set to -1 (or negative) it sends a weak HEAD request (without waiting)
+     * If length is set to 0 it sends a normal HEAD request
      * @returns HTTP headers if was able to download at least it, null otherwise!
      */
     private async _downloadSequence(
@@ -381,25 +380,26 @@ export class HTTPAdaptiveSource extends Source {
                 !playing.buffering &&
                 playing.bufferState === BufferState.LOW // we are low in last rendition before to download keyframe => last chance rendition !
             ) {
-                this.log(`Download only first video frame of sequence ${sequence} track ${trackId}`).warn();
-                onlyKeyFrame = true;
                 // do the HEAD request to get first-frame-length
                 let response = await this._downloadSequence(playing, controller, trackId, sequence, 0);
-                if (!response.ok) {
+                if (response.ok) {
+                    length = Number(response.headers.get('first-frame-length'));
+                    if (!length) {
+                        response = new Response(null, { headers: response.headers, status: 400 });
+                        response.error = `No valid first-frame-length header from ${url.toString()}`;
+                        return response;
+                    }
+                    this.log(`Download only first video frame of sequence ${sequence} track ${trackId}`).warn();
+                    onlyKeyFrame = true;
+                } else {
                     // aborted, log already displaid and nothing downloaded
-                    return response;
-                }
-                length = Number(response.headers.get('first-frame-length'));
-                if (!length) {
-                    response = new Response(null, { headers: response.headers, status: 400 });
-                    response.error = `No valid first-frame-length header from ${url.toString()}`;
-                    return response;
+                    if (this.closed) {
+                        return response;
+                    }
+                    // maybe we have gotten a 404, due to immediate HEAD response and a possible origin switch
+                    // Try a full GET what ensures to wait future sequence if there is
                 }
             }
-        } else if (length < 0) {
-            // weak HEAD request
-            url.searchParams.set('weak', 'true');
-            length = 0;
         }
 
         let response;
@@ -424,7 +424,7 @@ export class HTTPAdaptiveSource extends Source {
 
             try {
                 if (length === 0 || type == null) {
-                    // Only HEAD
+                    // Only HEAD or GET without media (bandwidth emulation)
                     response = await this.fetch(url, {
                         method: length === 0 ? 'HEAD' : 'GET',
                         signal: controller.signal,

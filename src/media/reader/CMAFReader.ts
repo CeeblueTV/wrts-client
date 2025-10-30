@@ -33,13 +33,15 @@ export class CMAFReader extends Reader {
     private _track?: Track;
     private _defaultTimeScale: number;
     private _metadata?: Metadata;
-    private _passthrough: BinaryWriter;
+    private _passthrough?: BinaryWriter;
 
-    constructor(passthrough: boolean = true) {
+    constructor(passthrough: boolean = false) {
         super();
         this._tracks = new Map<number, Track>();
         this._defaultTimeScale = 1000;
-        this._passthrough = new BinaryWriter();
+        if (passthrough) {
+            this._passthrough = new BinaryWriter();
+        }
     }
 
     read(data: BufferSource | string) {
@@ -361,7 +363,9 @@ export class CMAFReader extends Reader {
                     duration: sample.duration, // constant duration
                     data: new Uint8Array()
                 };
-                this._passthrough = new BinaryWriter();
+                if (this._passthrough) {
+                    this._passthrough = new BinaryWriter();
+                }
                 return;
             }
         }

@@ -27,7 +27,7 @@ To contribute fork the project, then submit a Pull-Request with your changes, ta
 
 We use [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/) for continuous deployment, versioning, and changelog creation.
 
-Once `npm install` is executed, git hooks aid in the committing process. Should the hooks not install automatically, run `npm rebuild husky`. Use `git commit` to commit your changes; [Commitizen](https://github.com/commitizen/cz-cli) assists in crafting a structured commit message. To complete the commit, close the text editor that appears (typically with ctrl + x), and then `git push` as usual.
+Once `npm install` is executed, git hooks are automatically configured to aid in the committing process. Use `git commit` to commit your changes. The commit message will be validated against conventional commit standards.
 
 ## [Developer's Certificate of Origin 1.1](https://github.com/nodejs/node/blob/main/CONTRIBUTING.md#developers-certificate-of-origin-11)
 
