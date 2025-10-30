@@ -79,7 +79,7 @@
         "undici-types": "~6.3.0"
     },
     "publishConfig": {
-        "access": "restricted"
+        "access": "public"
     },
     "dependencies": {
         "@ceeblue/web-utils": "^7.0.1",
