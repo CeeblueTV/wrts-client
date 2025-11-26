@@ -106,6 +106,7 @@ export class MediaBuffer extends Loggable {
     private _cmafWriter: CMAFWriter;
     private _packets: Array<Uint8Array | string>;
     private _trackId?: number;
+    private _codecString?: string;
     private _mimeType: string;
     private _isVideo: boolean;
     private _updateTimeout: number;
@@ -164,10 +165,14 @@ export class MediaBuffer extends Loggable {
                 return;
             }
             // to call changeType, before cmafWriter.init!
-            const packet = this._mimeType + '; codecs="' + track.codecString + '"';
-            this.log(`Update track${this._trackId == null ? ' ' : ` from ${this._trackId} to `}${trackId} ${packet}`).info();
+            // Note: If EME+PlayReady don't change the codecString, otherwise it fails
+            if (this._codecString !== track.codecString) {
+                const packet = this._mimeType + '; codecs="' + track.codecString + '"';
+                this.log(`Update track${this._trackId == null ? ' ' : ` from ${this._trackId} to `}${trackId} ${packet}`).info();
+                this._packets.push(packet);
+            }
             this._trackId = trackId;
-            this._packets.push(packet);
+            this._codecString = track.codecString;
             const error = this._cmafWriter.init(track, contentProtection);
             if (error) {
                 this.onError(error);
