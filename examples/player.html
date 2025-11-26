@@ -248,6 +248,7 @@
 
                     canvas: document.createElement('canvas'),
 
+                    startTime: 0,
                     adaptiveFrameSkipping: true,
                     streamMetadata: null,
                     netDescription: "",
@@ -404,6 +405,8 @@
 
                 
                 play() {
+                    this.startTime = Util.time();
+                    log('Play stream', this.stream, 'with options', options).info();
                     if (this.player) {
                         this.player.stop();
                         return;
@@ -432,6 +435,9 @@
                     const videoElement = this.$refs.video;
                     videoElement.muted = this.muted;
                     videoElement.autoplay = true;
+                    videoElement.onloadeddata = () => {
+                        log('TTFF :', Util.time()-this.startTime).info();
+                    };
 
                     this.player = new Player(videoElement, this.sourceType);
                     this.player.onStart = this.onStart.bind(this);
