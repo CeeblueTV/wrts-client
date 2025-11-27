@@ -561,9 +561,6 @@
                         // Update enabled DRM based on the active key system
                         this.keySystem = drmEngine.keySystem;
                     }
-                    this.player.onBufferState = oldState => {
-                        return;
-                    }
               
                     this.setBuffer(); // to set buffer size!
                     this.player.start(this.currentParams, options.timeout);
