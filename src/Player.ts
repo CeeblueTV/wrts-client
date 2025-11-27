@@ -686,9 +686,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 // closed!
                 return;
             }
-            if (this._mediaSource) {
-                this._mediaSource.onsourceopen = null; // just one time
+            if (!this._mediaSource) {
+                return;
             }
+
+            this._mediaSource.onsourceopen = null; // just one time
 
             // Connection timeout
             clearTimeout(this._timeout.id);
@@ -759,33 +761,33 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._source.onData = (trackId: number, time: number, data: any) => this.onData(trackId, time, data);
             this._source.onClose = (error?: SourceError) => this.stop(error);
 
+            // Create MediaPlayback to render frame
+            this._playback = new MediaPlayback(this._mediaSource, this.passthroughCMAF);
+            this._playback.log = this.log.bind(this);
+            this._playback.onAudioAppended = this.onAudioAppended.bind(this);
+            this._playback.onVideoAppended = this.onVideoAppended.bind(this);
+            this._playback.onProgress = this._onPlaybackProgress.bind(this);
+            this._playback.onBufferOverflow = () => {
+                // QuotaExceeding can happen just when live video is paused, we have to forward playing to let browser managed buffer exceed
+                const time = this._video.currentTime;
+                // Advance to 10s
+                this._video.currentTime += 10;
+                // Look if we success to advance the playback
+                if (this._video.currentTime <= time) {
+                    // exception whereas already at the end? => stop all!
+                    return this.stop({ type: 'MediaBufferError', name: 'Exceeds buffer size' });
+                }
+                if (this._video.paused) {
+                    this.log('Unpause video to release buffer space').warn();
+                    this.paused = false;
+                } else {
+                    this.log('Forward current playing time of 10 second to release buffer space').warn();
+                }
+            };
+            this._playback.onClose = error => this.stop(error);
+
             this.onStart();
         };
-
-        // Create MediaPlayback to render frame
-        this._playback = new MediaPlayback(this._mediaSource, this.passthroughCMAF);
-        this._playback.log = this.log.bind(this);
-        this._playback.onAudioAppended = this.onAudioAppended.bind(this);
-        this._playback.onVideoAppended = this.onVideoAppended.bind(this);
-        this._playback.onProgress = this._onPlaybackProgress.bind(this);
-        this._playback.onBufferOverflow = () => {
-            // QuotaExceeding can happen just when live video is paused, we have to forward playing to let browser managed buffer exceed
-            const time = this._video.currentTime;
-            // Advance to 10s
-            this._video.currentTime += 10;
-            // Look if we success to advance the playback
-            if (this._video.currentTime <= time) {
-                // exception whereas already at the end? => stop all!
-                return this.stop({ type: 'MediaBufferError', name: 'Exceeds buffer size' });
-            }
-            if (this._video.paused) {
-                this.log('Unpause video to release buffer space').warn();
-                this.paused = false;
-            } else {
-                this.log('Forward current playing time of 10 second to release buffer space').warn();
-            }
-        };
-        this._playback.onClose = error => this.stop(error);
 
         // Video events
         const onWaiting = () => {
