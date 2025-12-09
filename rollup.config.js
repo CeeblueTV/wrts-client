@@ -14,6 +14,7 @@ import commonjs from '@rollup/plugin-commonjs';
 import terser from '@rollup/plugin-terser';
 import { dts } from 'rollup-plugin-dts';
 import { nodeResolve } from '@rollup/plugin-node-resolve';
+import path from 'path';
 
 const input = 'index.ts';
 const output = 'dist/wrts-client';
@@ -91,8 +92,9 @@ export default args => {
         },
         // NPM binaries
         createOutput(input, output, id => {
+            const resolvedEntry = path.resolve(process.cwd(), input);
             // Internal sources → internal, others → external
-            return !id.startsWith('.') && !id.startsWith('/') && id !== 'index.ts';
+            return !id.startsWith('.') && !id.startsWith('/') && id !== resolvedEntry && id !== 'index.ts';
         }),
         // Browser binaries
         createOutput(input, output + '.bundle')
