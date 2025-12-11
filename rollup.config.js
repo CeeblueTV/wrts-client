@@ -93,8 +93,13 @@ export default args => {
         // NPM binaries
         createOutput(input, output, id => {
             const resolvedEntry = path.resolve(process.cwd(), input);
-            // Internal sources → internal, others → external
-            return !id.startsWith('.') && !id.startsWith('/') && id !== resolvedEntry && id !== 'index.ts';
+            // We return isExternal=true only for modules import
+            return (
+                !id.startsWith('.') && // is not a relative import (our sources)
+                !id.startsWith('/') &&
+                id !== resolvedEntry && // is not an absolute import
+                id !== 'index.ts'
+            ); // special case: is not our main index.ts file
         }),
         // Browser binaries
         createOutput(input, output + '.bundle')
