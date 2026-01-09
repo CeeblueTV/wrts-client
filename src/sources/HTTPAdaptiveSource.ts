@@ -126,9 +126,11 @@ export class HTTPAdaptiveSource extends Source {
         const bufferTarget = playing.bufferLimitMiddle - currentGopElapsed;
         let deltaSequence = 0;
         if (bufferTarget > 0) {
-            const gopSize =
-                Math.max(1, sequence.currentTime - sequence.firstTime) / Math.max(1, sequence.currentId - sequence.firstId);
-            deltaSequence = Math.ceil(bufferTarget / gopSize);
+            const idDiff = sequence.currentId - sequence.firstId;
+            if (idDiff > 0) {
+                const gopSize = Math.max(1, sequence.currentTime - sequence.firstTime) / idDiff;
+                deltaSequence = Math.ceil(bufferTarget / gopSize);
+            }
         }
         sequence = Math.max(Number(sequence.currentId) - deltaSequence, Math.min(sequence.firstId, sequence.currentId));
         if (deltaSequence > 0) {
