@@ -113,13 +113,26 @@ export class HTTPAdaptiveSource extends Source {
             });
         }
         this._sequencePattern = sequence.pattern.replace('{ext}', this.mediaExt);
-        sequence = Number(sequence.currentId);
-        if (isNaN(sequence)) {
+
+        if (isNaN(sequence.currentId)) {
             return this.close({
                 type: 'SourceError',
                 name: 'Malformed payload',
                 detail: `No valid sequence.currentId field in the JSON manifest ${url.toString()}`
             });
+        }
+
+        const currentGopElapsed = manifest.currentTime - sequence.currentTime;
+        const bufferTarget = playing.bufferLimitMiddle - currentGopElapsed;
+        let deltaSequence = 0;
+        if (bufferTarget > 0) {
+            const gopSize =
+                Math.max(1, sequence.currentTime - sequence.firstTime) / Math.max(1, sequence.currentId - sequence.firstId);
+            deltaSequence = Math.ceil(bufferTarget / gopSize);
+        }
+        sequence = Math.max(Number(sequence.currentId) - deltaSequence, Math.min(sequence.firstId, sequence.currentId));
+        if (deltaSequence > 0) {
+            this.log(`Preload of ${deltaSequence} sequences`).info();
         }
 
         // propagate Metadata

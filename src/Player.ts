@@ -681,10 +681,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 this._timeout.value
             );
 
-            // Add a preload param to optimize starting-time
-            params.query = new URLSearchParams(params.query);
-            params.query.set('preload', this._bufferLimitMiddle.toFixed());
-
             const protocol = params.endPoint.substring(0, params.endPoint.indexOf('://'));
             this._source = new (this.SourceClass || Source.getClass(protocol) || HTTPAdaptiveSource)(this, params);
             this._source.log = this.log.bind(this, this._source?.name + ':') as ILog;
