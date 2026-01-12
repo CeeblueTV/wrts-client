@@ -159,30 +159,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onBufferState(oldState: BufferState) {
         this.log(`Buffer change from ${oldState} to ${this.bufferState} (bufferAmount=${this.bufferAmount}ms)`).info();
-
-        if (ManagedMediaSource) {
-            // iPhone/iOS/Safari doesn't implement a smooth dynamic playbackRate change: during live it creates sound noise
-            // So for now simply disable it for iPhone
-            return;
-        }
-        const playbackRate = this._video.playbackRate;
-        if (this.bufferState === BufferState.HIGH) {
-            // Increase playback rate linearly between [1.08,1.16], reaches the max when bufferAmount > bufferLimitHigh + (bufferLimitHigh - bufferLimitMiddle)
-            const ratio = (this.bufferAmount - this.bufferLimitHigh) / (2 * (this.bufferLimitHigh - this.bufferLimitMiddle));
-            this._video.playbackRate = 1.08 + 0.08 * Math.min(Math.max(ratio, 0), 1);
-        } else if (this.bufferState === BufferState.LOW) {
-            // Decrease playback rate linearly between [0.92,0.84], reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow),
-            // Note: this threshold can be negative and thus never reached
-            const denom = 2 * (this.bufferLimitMiddle - this.bufferLimitLow);
-            const ratio = denom > 0 ? (this.bufferLimitMiddle - this.bufferAmount) / denom : 0;
-            this._video.playbackRate = 0.92 - 0.08 * Math.min(Math.max(ratio, 0), 1);
-        } else {
-            // OK or NONE
-            this._video.playbackRate = 1;
-        }
-        if (playbackRate !== this._video.playbackRate) {
-            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
-        }
     }
 
     /**
