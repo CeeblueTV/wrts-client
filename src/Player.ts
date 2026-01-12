@@ -586,6 +586,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
+    private _previousBufferAmount?: number;
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
      * with an optionally {@link Source} to custom how getting the stream.
