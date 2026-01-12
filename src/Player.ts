@@ -17,6 +17,7 @@ const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 150; // ms
 const BUFFER_LIMIT_HIGH = 550; // ms
 const TIMEOUT = 14000; // at least superior to max gop duration (10s)
+const BUFFER_CHANGE_STEP = 50; // ms
 
 const root = typeof window !== 'undefined' ? window : global;
 
@@ -222,6 +223,38 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @event
      */
     onVideoAppended(data: Uint8Array) {}
+
+    /**
+     * Event fire when the buffer amount changes by more than 50ms
+     * @event
+     */
+    onBufferChange(): void {
+        this.log(`Buffer change called`).info();
+
+        if (ManagedMediaSource) {
+            // iPhone/iOS/Safari doesn't implement a smooth dynamic playbackRate change: during live it creates sound noise
+            // So for now simply disable it for iPhone
+            return;
+        }
+        const playbackRate = this._video.playbackRate;
+        if (this.bufferState === BufferState.HIGH) {
+            // Increase playback rate linearly between [1.08,1.16], reaches the max when bufferAmount > bufferLimitHigh + (bufferLimitHigh - bufferLimitMiddle)
+            const ratio = (this.bufferAmount - this.bufferLimitHigh) / (2 * (this.bufferLimitHigh - this.bufferLimitMiddle));
+            this._video.playbackRate = 1.08 + 0.08 * Math.min(Math.max(ratio, 0), 1);
+        } else if (this.bufferState === BufferState.LOW) {
+            // Decrease playback rate linearly between [0.92,0.84], reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow),
+            // Note: this threshold can be negative and thus never reached
+            const denom = 2 * (this.bufferLimitMiddle - this.bufferLimitLow);
+            const ratio = denom > 0 ? (this.bufferLimitMiddle - this.bufferAmount) / denom : 0;
+            this._video.playbackRate = 0.92 - 0.08 * Math.min(Math.max(ratio, 0), 1);
+        } else {
+            // OK or NONE
+            this._video.playbackRate = 1;
+        }
+        if (playbackRate !== this._video.playbackRate) {
+            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
+        }
+    }
 
     /**
      * Returns true when player is running (between a {@link Player.start} and a {@link Player.stop})
@@ -1021,8 +1054,18 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._playback.startTime = currentTime - PAST_BUFFER;
         }
 
-        // Playing progress => check buffering!
         const bufferAmount = this.bufferAmount;
+        // Buffer change detection
+        if (Math.abs((this._previousBufferAmount ?? 0) - bufferAmount) >= BUFFER_CHANGE_STEP) {
+            this.onBufferChange();
+            this._previousBufferAmount = bufferAmount;
+            // Check after event that the player is still running
+            if (!this.running) {
+                return;
+            }
+        }
+
+        // Playing progress => check buffering!
         if (bufferAmount > this._bufferLimitLow) {
             // OK or HIGH
 
