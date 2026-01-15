@@ -201,7 +201,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     onVideoAppended(data: Uint8Array) {}
 
     /**
-     * Event fire when the buffer amount changes by more than 50ms
+     * Event fire when the buffer amount changes  by at least BUFFER_CHANGE_STEP ms
      * @event
      */
     onBufferChange(): void {
