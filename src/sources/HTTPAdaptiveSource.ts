@@ -114,25 +114,31 @@ export class HTTPAdaptiveSource extends Source {
         }
         this._sequencePattern = sequence.pattern.replace('{ext}', this.mediaExt);
 
-        if (isNaN(sequence.currentId)) {
+        const sequenceId = Number(sequence.current?.id ?? sequence.currentId); // WIP remove old currentId
+        const sequenceFirstId = Number(sequence.first?.id ?? sequence.firstId ?? 0); // WIP remove old firstId
+        if (isNaN(sequenceId)) {
             return this.close({
                 type: 'SourceError',
                 name: 'Malformed payload',
-                detail: `No valid sequence.currentId field in the JSON manifest ${url.toString()}`
+                detail: `No valid sequence.current.id field in the JSON manifest ${url.toString()}`
             });
         }
-
-        const currentGopElapsed = manifest.currentTime - sequence.currentTime;
-        const bufferTarget = playing.bufferLimitMiddle - currentGopElapsed;
+        const sequenceTime = Number(sequence.current?.time);
         let deltaSequence = 0;
-        if (bufferTarget > 0) {
-            const idDiff = sequence.currentId - sequence.firstId;
-            if (idDiff > 0) {
-                const gopSize = Math.max(1, sequence.currentTime - sequence.firstTime) / idDiff;
-                deltaSequence = Math.ceil(bufferTarget / gopSize);
+        if (!isNaN(sequenceTime)) {
+            const currentGopElapsed = metadata.liveTime - sequenceTime;
+            const bufferTarget = playing.bufferLimitMiddle - currentGopElapsed;
+            if (bufferTarget > 0) {
+                const sequenceTime = Number(sequence.current?.time);
+                const sequenceFirstTime = Number(sequence.first?.time);
+                const idDiff = sequenceId - sequenceFirstId;
+                if (idDiff > 0 && !isNaN(sequenceTime) && !isNaN(sequenceFirstTime)) {
+                    const gopSize = Math.max(1, sequenceTime - sequenceFirstTime) / idDiff;
+                    deltaSequence = Math.ceil(bufferTarget / gopSize);
+                }
             }
         }
-        sequence = Math.max(Number(sequence.currentId) - deltaSequence, Math.min(sequence.firstId, sequence.currentId));
+        sequence = Math.max(sequenceId - deltaSequence, Math.min(sequenceFirstId, sequenceId));
         if (deltaSequence > 0) {
             this.log(`Preload of ${deltaSequence} sequences`).info();
         }
