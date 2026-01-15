@@ -17,6 +17,7 @@ const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 150; // ms
 const BUFFER_LIMIT_HIGH = 550; // ms
 const TIMEOUT = 14000; // at least superior to max gop duration (10s)
+const BUFFER_CHANGE_STEP = 50; // ms
 
 const root = typeof window !== 'undefined' ? window : global;
 
@@ -158,24 +159,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onBufferState(oldState: BufferState) {
         this.log(`Buffer change from ${oldState} to ${this.bufferState} (bufferAmount=${this.bufferAmount}ms)`).info();
-
-        if (ManagedMediaSource) {
-            // iPhone/iOS/Safari doesn't implement a smooth dynamic playbackRate change: during live it creates sound noise
-            // So for now simply disable it for iPhone
-            return;
-        }
-        const playbackRate = this._video.playbackRate;
-        if (this.bufferState === BufferState.HIGH) {
-            this._video.playbackRate = 1.08;
-        } else if (this.bufferState === BufferState.LOW) {
-            this._video.playbackRate = 0.92;
-        } else {
-            // OK or NONE
-            this._video.playbackRate = 1;
-        }
-        if (playbackRate !== this._video.playbackRate) {
-            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
-        }
     }
 
     /**
@@ -216,6 +199,18 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @event
      */
     onVideoAppended(data: Uint8Array) {}
+
+    /**
+     * Event fire when the buffer amount changes  by at least BUFFER_CHANGE_STEP ms
+     * @event
+     */
+    onBufferChange(): void {
+        if (!ManagedMediaSource) {
+            // iPhone/iOS/Safari doesn't implement a smooth dynamic playbackRate change: during live it creates sound noise
+            // So by default disable it for iPhone, let the user re-enable it if needed
+            this.adjustPlaybackRate();
+        }
+    }
 
     /**
      * Returns true when player is running (between a {@link Player.start} and a {@link Player.stop})
@@ -571,6 +566,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
+    private _previousBufferAmount: number;
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
      * with an optionally {@link Source} to custom how getting the stream.
@@ -603,6 +599,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // Set buffer as OK at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
+        this._previousBufferAmount = 0;
     }
 
     /**
@@ -680,10 +677,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 () => this.stop({ type: 'PlayerError', name: 'Connection timeout' }),
                 this._timeout.value
             );
-
-            // Add a preload param to optimize starting-time
-            params.query = new URLSearchParams(params.query);
-            params.query.set('preload', this._bufferLimitMiddle.toFixed());
 
             const protocol = params.endPoint.substring(0, params.endPoint.indexOf('://'));
             this._source = new (this.SourceClass || Source.getClass(protocol) || HTTPAdaptiveSource)(this, params);
@@ -899,10 +892,38 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._metadata = new Metadata();
         this._playbackSpeed.clear();
         this._playbackPrevTime = undefined;
+        this._previousBufferAmount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
 
         this.onStop(error);
+    }
+
+    /**
+     * Adjust playback rate according to buffer state to avoid buffer overrun or underrun
+     */
+    private adjustPlaybackRate() {
+        const playbackRate = this._video.playbackRate;
+        if (this.bufferState === BufferState.HIGH) {
+            // Increase playback rate linearly between [1.08,1.16], reaches the max when bufferAmount > bufferLimitHigh + (bufferLimitHigh - bufferLimitMiddle)
+            const ratio =
+                Math.max(0, this.bufferAmount - this.bufferLimitHigh) /
+                Math.max(1, 2 * (this.bufferLimitHigh - this.bufferLimitMiddle));
+            this._video.playbackRate = 1.08 + 0.08 * Math.min(ratio, 1);
+        } else if (this.bufferState === BufferState.LOW) {
+            // Decrease playback rate linearly between [0.92,0.84], reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow),
+            // Note: this threshold can be negative and thus never reached
+            const ratio =
+                Math.max(0, this.bufferLimitMiddle - this.bufferAmount) /
+                Math.max(1, 2 * (this.bufferLimitMiddle - this.bufferLimitLow));
+            this._video.playbackRate = 0.92 + 0.08 * Math.min(ratio, 1);
+        } else {
+            // OK or NONE
+            this._video.playbackRate = 1;
+        }
+        if (playbackRate !== this._video.playbackRate) {
+            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
+        }
     }
 
     private _setBufferState(state: BufferState) {
@@ -1019,8 +1040,18 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._playback.startTime = currentTime - PAST_BUFFER;
         }
 
-        // Playing progress => check buffering!
         const bufferAmount = this.bufferAmount;
+        // Buffer change detection
+        if (Math.abs(this._previousBufferAmount - bufferAmount) >= BUFFER_CHANGE_STEP) {
+            this._previousBufferAmount = bufferAmount;
+            this.onBufferChange();
+            // Check after event that the player is still running
+            if (!this.running) {
+                return;
+            }
+        }
+
+        // Playing progress => check buffering!
         if (bufferAmount > this._bufferLimitLow) {
             // OK or HIGH
 
