@@ -566,7 +566,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
-    private _previousBufferAmount?: number;
+    private _previousBufferAmount: number;
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
      * with an optionally {@link Source} to custom how getting the stream.
@@ -599,6 +599,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // Set buffer as OK at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
+        this._previousBufferAmount = 0;
     }
 
     /**
@@ -1041,7 +1042,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
         const bufferAmount = this.bufferAmount;
         // Buffer change detection
-        if (Math.abs((this._previousBufferAmount ?? 0) - bufferAmount) >= BUFFER_CHANGE_STEP) {
+        if (Math.abs(this._previousBufferAmount - bufferAmount) >= BUFFER_CHANGE_STEP) {
             this._previousBufferAmount = bufferAmount;
             this.onBufferChange();
             // Check after event that the player is still running
