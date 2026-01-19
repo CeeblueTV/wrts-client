@@ -1041,15 +1041,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         const bufferAmount = this.bufferAmount;
-        // Buffer change detection
-        if (Math.abs(this._previousBufferAmount - bufferAmount) >= BUFFER_CHANGE_STEP) {
-            this._previousBufferAmount = bufferAmount;
-            this.onBufferChange();
-            // Check after event that the player is still running
-            if (!this.running) {
-                return;
-            }
-        }
 
         // Playing progress => check buffering!
         if (bufferAmount > this._bufferLimitLow) {
@@ -1073,6 +1064,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             }
         } else {
             this._setBufferState(BufferState.LOW);
+        }
+
+        // Buffer change detection
+        if (this.running && Math.abs(this._previousBufferAmount - bufferAmount) >= BUFFER_CHANGE_STEP) {
+            this._previousBufferAmount = bufferAmount;
+            this.onBufferChange();
         }
     }
 }
