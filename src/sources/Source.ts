@@ -396,8 +396,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
         this._closed = true;
         clearTimeout(this._trackRequest);
-        if (error && error.type === 'SourceError' && error.name === 'Request error') {
-            // morph a possible request error to a stream
+        if (error && error.type === 'SourceError' && 'detail' in error) {
+            // WIP MF fix = >morph a possible request error to a stream unavailable
+            // Could be fixed in server side, but it impacts a  lot of code.
             const detail = error.detail.toLowerCase();
             if (detail.startsWith('stream open failed') || detail.startsWith('404')) {
                 error = { type: 'SourceError', name: 'Resource unavailable' };
