@@ -12,6 +12,7 @@ import * as Media from './media/Media';
 import { Metadata } from './media/Metadata';
 import { MediaPlayback, MediaPlaybackError } from './media/MediaPlayback';
 import { HTTPAdaptiveSource } from './sources/HTTPAdaptiveSource';
+import { PlayerStats } from '@ceeblue/web-utils';
 
 const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 150; // ms
@@ -185,6 +186,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onStall() {
         this.log('Playback stall').warn();
+        ++this._stallCount!;
     }
 
     /**
@@ -194,6 +196,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onAudioSkipping(holeMs: number) {
         this.log(`Audio skips ${holeMs} ms`).warn();
+        this._skippedAudioCount! += holeMs / 1000;
     }
 
     /**
@@ -203,6 +206,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onVideoSkipping(holeMs: number) {
         this.log(`Video skips ${holeMs} ms`).warn();
+        this._skippedVideoCount! += holeMs / 1000;
     }
 
     /**
@@ -571,6 +575,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
+    private _playerStats?: PlayerStats;
+    private _skippedAudioCount?: number;
+    private _skippedVideoCount?: number;
+    private _stallCount?: number;
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
      * with an optionally {@link Source} to custom how getting the stream.
@@ -603,6 +611,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // Set buffer as OK at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
+        this._playerStats = new PlayerStats();
+        this._skippedAudioCount = 0;
+        this._skippedVideoCount = 0;
+        this._stallCount = 0;
     }
 
     /**
@@ -899,6 +911,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._metadata = new Metadata();
         this._playbackSpeed.clear();
         this._playbackPrevTime = undefined;
+        this._playerStats = new PlayerStats();
+        this._skippedAudioCount = 0;
+        this._skippedVideoCount = 0;
+        this._stallCount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
 
@@ -1043,5 +1059,40 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         } else {
             this._setBufferState(BufferState.LOW);
         }
+    }
+
+    /**
+     * Calculate and return current player statistics as a {@link PlayerStats} object
+     */
+    getStats(): PlayerStats {
+        this._playerStats!.recvByteRate = this.recvByteRate;
+
+        const currentTime = Math.max(this.currentTime, this.startTime);
+        this._playerStats!.bufferAmount = Math.max(0, Math.round((this.endTime - currentTime) * 1000));
+
+        if (this._source && this.currentTime) {
+            this._playerStats!.latency = Math.ceil(this.metadata.liveTime - this.currentTime * 1000);
+        }
+        this._playerStats!.playbackRate = this._video.playbackRate;
+        this._playerStats!.playbackSpeed = Math.ceil(this._playbackSpeed.exact()) / 100;
+
+        this._playerStats!.audioPerSecond = this._source?.audioPerSecond;
+        if (this?.audioTrack) {
+            this._playerStats!.audioTrackId = this?.audioTrack;
+            this._playerStats!.audioTrackBandwidth = this.metadata.tracks.get(this?.audioTrack)?.bandwidth;
+        }
+
+        this._playerStats!.videoPerSecond = this._source?.videoPerSecond;
+        if (this?.videoTrack) {
+            this._playerStats!.videoTrackId = this?.videoTrack;
+            this._playerStats!.videoTrackBandwidth = this.metadata.tracks.get(this?.videoTrack)?.bandwidth;
+        }
+
+        this._playerStats!.skippedVideoCount = this._skippedVideoCount || 0;
+        this._playerStats!.skippedAudioCount = this._skippedAudioCount || 0;
+
+        this._playerStats!.stallCount = this._stallCount || 0;
+
+        return this._playerStats!;
     }
 }

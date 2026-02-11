@@ -4,7 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { EventEmitter } from '@ceeblue/web-utils';
+import { EventEmitter, PlayerStats } from '@ceeblue/web-utils';
 import * as Media from '../media/Media';
 
 /**
@@ -63,6 +63,13 @@ export interface IPlaying extends EventEmitter {
      * @event
      */
     onVideoSkipping(holeMs: number): void;
+
+    /**
+     * Retrieves current player statistics.
+     *
+     * @returns An object containing the current player statistics as a {@link PlayerStats} object.
+     */
+    getStats(): PlayerStats;
 
     /**
      * Gets an AbortSignal useful for subscribing to playback stop events.

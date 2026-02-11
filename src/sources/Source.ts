@@ -11,8 +11,7 @@ import { CMAFReader } from '../media/reader/CMAFReader';
 import { RTSReader } from '../media/reader/RTSReader';
 import { Reader, ReaderError } from '../media/reader/Reader';
 import { IPlaying } from './IPlaying';
-import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError } from '@ceeblue/web-utils';
-import { Cmcd, CmcdObjectType, CmcdStreamType, toCmcdHeaders, encodeCmcd } from '@svta/common-media-library/cmcd';
+import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError, CML } from '@ceeblue/web-utils';
 import { MediaTrack } from '../media/MediaTrack';
 
 const TIMESTAMP_HOLE_TOLERANCE = 7; // ms of timestamp acceptable
@@ -802,39 +801,25 @@ export abstract class Source extends EventEmitter implements ICMCD {
     protected async fetchMedia(url: URL, type: Media.Type, options: RequestInit = {}): Promise<Response & { error?: string }> {
         const withCMCD = this.cmcd !== CMCD.NONE;
         if (withCMCD) {
+            const playerStats = this._playing.getStats();
             // Add CMCD headers
             const trackId = type === Media.Type.AUDIO ? this.audioTrack : type === Media.Type.VIDEO ? this.videoTrack : -1;
-            const bandwidth = (trackId && trackId >= 0 && this.metadata?.tracks.get(trackId)?.bandwidth) || 0;
-            // Basic CMCD
-            const cmcd = {
-                br: bandwidth,
-                bl: this._playing.bufferAmount, // NOTE: CMCD says it MUST be rounded to the nearest 100ms
-                bs: this._lastStalls > 0,
-                mtp: this._playing.recvByteRate,
-                pr: this._playing.playbackRate,
-                sf: 'o', // there is no way to say it's WebRTS)
-                sid: this.cmcdSid,
-                su: this._playing.bufferAmount === 0
-            } as Cmcd;
-            // Full CMCD
-            if (this.cmcd === CMCD.FULL) {
-                cmcd.cid = url.pathname.split('/').pop();
-                cmcd.dl = this._playing.bufferAmount * this._playing.playbackRate;
-                cmcd.ot =
-                    type === Media.Type.AUDIO
-                        ? CmcdObjectType.AUDIO
-                        : type === Media.Type.VIDEO
-                          ? CmcdObjectType.VIDEO
-                          : CmcdObjectType.OTHER;
-                cmcd.st = CmcdStreamType.LIVE;
-                cmcd.v = 1;
-            }
 
+            // Convert player's stats to CMCD
+            const cmcd = playerStats.toCmcd(url, trackId!, undefined);
+            cmcd.sid = this.cmcdSid; // Add session id
+            // If asking for the short version of the cmcd payload remove the following fields
+            if (this.cmcd === CMCD.SHORT) {
+                delete cmcd.cid;
+                delete cmcd.dl;
+                delete cmcd.ot;
+                delete cmcd.st;
+            }
             // Mode
             if (this.cmcdMode === CMCDMode.QUERY) {
-                url.searchParams.set('cmcd', encodeCmcd(cmcd));
+                url.searchParams.set('cmcd', CML.encodeCmcd(cmcd));
             } else {
-                options.headers = toCmcdHeaders(cmcd);
+                options.headers = CML.toCmcdHeaders(cmcd);
             }
         }
 
