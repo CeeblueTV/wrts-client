@@ -909,14 +909,14 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const ratio =
                 Math.max(0, this.bufferAmount - this.bufferLimitHigh) /
                 Math.max(1, 2 * (this.bufferLimitHigh - this.bufferLimitMiddle));
-            this._video.playbackRate = 1.08 + 0.08 * Math.min(ratio, 1);
+            this._video.playbackRate = Math.max(this._video.playbackRate, Math.round(108 + 8 * Math.min(ratio, 1)) / 100);
         } else if (this.bufferState === BufferState.LOW) {
             // Decrease playback rate linearly between [0.92,0.84], reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow),
             // Note: this threshold can be negative and thus never reached
             const ratio =
                 Math.max(0, this.bufferLimitMiddle - this.bufferAmount) /
                 Math.max(1, 2 * (this.bufferLimitMiddle - this.bufferLimitLow));
-            this._video.playbackRate = 0.92 + 0.08 * Math.min(ratio, 1);
+            this._video.playbackRate = Math.min(Math.round(92 + 8 * Math.min(ratio, 1)) / 100, this._video.playbackRate);
         } else {
             // OK or NONE
             this._video.playbackRate = 1;

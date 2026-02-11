@@ -263,7 +263,7 @@ export class HTTPAdaptiveSource extends Source {
 
                             // HEAD request o check if frame exists!
                             const response = await this._downloadSequence(playing, this._audioController, track, newSequence, 0);
-                            if (response.ok && newSequence > sequence) {
+                            if (response.ok) {
                                 again = false;
                                 this.log(
                                     `Skip sequences ${sequence} to ${newSequence - 1} ${Util.stringify({
@@ -277,7 +277,7 @@ export class HTTPAdaptiveSource extends Source {
 
                             fixLiveTime -= this._maxSequenceDuration;
                             this.log(
-                                `Fails to skip sequence ${newSequence} ${Util.stringify({
+                                `Fails to skip sequences ${sequence} to ${newSequence - 1} ${Util.stringify({
                                     delay: this.metadata.liveTime - this.currentTime,
                                     maxSequenceDuration: this._maxSequenceDuration
                                 })}`
@@ -402,7 +402,9 @@ export class HTTPAdaptiveSource extends Source {
                 playing.bufferState === BufferState.LOW // we are low in last rendition before to download keyframe => last chance rendition !
             ) {
                 // do the HEAD request to get first-frame-length
+                this.log('HEAD?').warn();
                 let response = await this._downloadSequence(playing, controller, trackId, sequence, 0);
+                this.log('HEAD!').warn();
                 if (response.ok) {
                     length = Number(response.headers.get('first-frame-length'));
                     if (!length) {
@@ -419,6 +421,10 @@ export class HTTPAdaptiveSource extends Source {
                     }
                     // maybe we have gotten a 404, due to immediate HEAD response and a possible origin switch
                     // Try a full GET what ensures to wait future sequence if there is
+                    this.log(
+                        `First video frame download for sequence ${sequence} track ${trackId} failed, \
+                        switching to a full sequence download`
+                    ).warn();
                 }
             }
         }
