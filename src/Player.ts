@@ -1074,13 +1074,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._playerStats!.playbackSpeed = Math.ceil(this._playbackSpeed.exact()) / 100;
 
         this._playerStats!.audioPerSecond = this.audioPerSecond;
-        if (this?.audioTrack) {
+        if (this?.audioTrack != null) {
             this._playerStats!.audioTrackId = this?.audioTrack;
             this._playerStats!.audioTrackBandwidth = this.metadata.tracks.get(this?.audioTrack)?.bandwidth;
         }
 
         this._playerStats!.videoPerSecond = this.videoPerSecond;
-        if (this?.videoTrack) {
+        if (this?.videoTrack != null) {
             this._playerStats!.videoTrackId = this?.videoTrack;
             this._playerStats!.videoTrackBandwidth = this.metadata.tracks.get(this?.videoTrack)?.bandwidth;
         }
