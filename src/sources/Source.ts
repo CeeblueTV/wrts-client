@@ -806,7 +806,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
             const trackId = type === Media.Type.AUDIO ? this.audioTrack : type === Media.Type.VIDEO ? this.videoTrack : -1;
 
             // Convert player's stats to CMCD
-            const cmcd = playerStats.toCmcd(url, trackId!, undefined);
+            const cmcd = playerStats.toCmcd(url, trackId ?? -1, undefined);
             cmcd.sid = this.cmcdSid; // Add session id
             // If asking for the short version of the cmcd payload remove the following fields
             if (this.cmcd === CMCD.SHORT) {
