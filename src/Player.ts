@@ -576,9 +576,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
     private _playerStats?: PlayerStats;
-    private _skippedAudioCount?: number;
-    private _skippedVideoCount?: number;
-    private _stallCount?: number;
+    private _skippedVideoCount: number = 0;
+    private _skippedAudioCount: number = 0;
+    private _stallCount: number = 0;
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
      * with an optionally {@link Source} to custom how getting the stream.
@@ -612,9 +612,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
         this._playerStats = new PlayerStats();
-        this._skippedAudioCount = 0;
-        this._skippedVideoCount = 0;
-        this._stallCount = 0;
     }
 
     /**
