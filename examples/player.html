@@ -381,6 +381,9 @@
                     let accessToken = options.token || options.id;
                     let endPoint = this.host;
                     let mediaExt;
+                    if(this.sourceType === HTTPSource) {
+                        mediaExt = '.mp4'; // force CMAF for HTTP Streaming
+                    }
                     try {
                         endPoint = new URL(streamName);
                         streamName = endPoint.pathname;
@@ -399,7 +402,7 @@
                         endPoint:endPoint.toString(),
                         streamName,
                         accessToken,
-                        mediaExt: this.sourceType === HTTPSource ? '.mp4' : mediaExt // force CMAF for HTTP Streaming
+                        mediaExt
                     };
                 },
 
