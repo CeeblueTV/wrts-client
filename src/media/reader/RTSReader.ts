@@ -15,7 +15,7 @@ import { Reader } from './Reader';
  * Format:
  * MEDIA PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type](7bit firstTime)[7bit duration << 2 | hasCompositionOffset<<1 | isKeyFrame](7bit compositionOffset) [frame] --
  * DATA  PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type][7bit time] [frame] --
- * INIT TRACKS  -- (7bit packetSize)[7bit 0 << 2 | 3] (7bit videoTrackId+1) (7bit audioTrackId+1)--
+ * INIT TRACKS  -- (7bit packetSize)[7bit 0 << 2 | 3]  (7bit audioTrackId+1)(7bit videoTrackId+1)--
  * METADATA -- (7bit packetSize)[7bit 0 << 2 | 0] [meta] --
  *
  * packetSize => optional packet size
@@ -63,8 +63,8 @@ export class RTSReader extends Reader {
                     case 3: {
                         // INIT TRACKS
                         this._nextTimes.clear();
-                        this.onVideo(frame.read7Bit() - 1);
                         this.onAudio(frame.read7Bit() - 1);
+                        this.onVideo(frame.read7Bit() - 1);
                         break;
                     }
                     case 0: {
