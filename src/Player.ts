@@ -575,7 +575,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
-    private _playerStats?: PlayerStats;
     private _skippedVideoCount: number = 0;
     private _skippedAudioCount: number = 0;
     private _stallCount: number = 0;
@@ -611,7 +610,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // Set buffer as OK at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
-        this._playerStats = new PlayerStats();
     }
 
     /**
@@ -908,7 +906,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._metadata = new Metadata();
         this._playbackSpeed.clear();
         this._playbackPrevTime = undefined;
-        this._playerStats = new PlayerStats();
         this._skippedAudioCount = 0;
         this._skippedVideoCount = 0;
         this._stallCount = 0;
@@ -1062,34 +1059,35 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Calculate and return current player statistics as a {@link PlayerStats} object
      */
     getStats(): PlayerStats {
-        this._playerStats!.recvByteRate = this.recvByteRate;
+        const playerStats = new PlayerStats();
+        playerStats.recvByteRate = this.recvByteRate;
 
         const currentTime = Math.max(this.currentTime, this.startTime);
-        this._playerStats!.bufferAmount = Math.max(0, Math.round((this.endTime - currentTime) * 1000));
+        playerStats.bufferAmount = Math.max(0, Math.round((this.endTime - currentTime) * 1000));
 
         if (this._source && this.currentTime) {
-            this._playerStats!.latency = Math.ceil(this.metadata.liveTime - this.currentTime * 1000);
+            playerStats.latency = Math.ceil(this.metadata.liveTime - this.currentTime * 1000);
         }
-        this._playerStats!.playbackRate = this._video.playbackRate;
-        this._playerStats!.playbackSpeed = Math.ceil(this._playbackSpeed.exact()) / 100;
+        playerStats.playbackRate = this._video.playbackRate;
+        playerStats.playbackSpeed = Math.ceil(this._playbackSpeed.exact()) / 100;
 
-        this._playerStats!.audioPerSecond = this.audioPerSecond;
+        playerStats.audioPerSecond = this.audioPerSecond;
         if (this?.audioTrack != null) {
-            this._playerStats!.audioTrackId = this?.audioTrack;
-            this._playerStats!.audioTrackBandwidth = this.metadata.tracks.get(this?.audioTrack)?.bandwidth;
+            playerStats.audioTrackId = this?.audioTrack;
+            playerStats.audioTrackBandwidth = this.metadata.tracks.get(this?.audioTrack)?.bandwidth;
         }
 
-        this._playerStats!.videoPerSecond = this.videoPerSecond;
+        playerStats.videoPerSecond = this.videoPerSecond;
         if (this?.videoTrack != null) {
-            this._playerStats!.videoTrackId = this?.videoTrack;
-            this._playerStats!.videoTrackBandwidth = this.metadata.tracks.get(this?.videoTrack)?.bandwidth;
+            playerStats.videoTrackId = this?.videoTrack;
+            playerStats.videoTrackBandwidth = this.metadata.tracks.get(this?.videoTrack)?.bandwidth;
         }
 
-        this._playerStats!.skippedVideoCount = this._skippedVideoCount || 0;
-        this._playerStats!.skippedAudioCount = this._skippedAudioCount || 0;
+        playerStats.skippedVideoCount = this._skippedVideoCount || 0;
+        playerStats.skippedAudioCount = this._skippedAudioCount || 0;
 
-        this._playerStats!.stallCount = this._stallCount || 0;
+        playerStats.stallCount = this._stallCount || 0;
 
-        return this._playerStats!;
+        return playerStats;
     }
 }
