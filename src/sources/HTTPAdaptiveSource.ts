@@ -113,13 +113,34 @@ export class HTTPAdaptiveSource extends Source {
             });
         }
         this._sequencePattern = sequence.pattern.replace('{ext}', this.mediaExt);
-        sequence = Number(sequence.currentId);
-        if (isNaN(sequence)) {
+
+        const sequenceId = Number(sequence.current?.id ?? sequence.currentId); // WIP remove old currentId
+        const sequenceFirstId = Number(sequence.first?.id ?? sequence.firstId ?? 0); // WIP remove old firstId
+        if (isNaN(sequenceId)) {
             return this.close({
                 type: 'SourceError',
                 name: 'Malformed payload',
-                detail: `No valid sequence.currentId field in the JSON manifest ${url.toString()}`
+                detail: `No valid sequence.current.id field in the JSON manifest ${url.toString()}`
             });
+        }
+        const sequenceTime = Number(sequence.current?.time);
+        let deltaSequence = 0;
+        if (!isNaN(sequenceTime)) {
+            const currentGopElapsed = metadata.liveTime - sequenceTime;
+            const bufferTarget = playing.bufferLimitMiddle - currentGopElapsed;
+            if (bufferTarget > 0) {
+                const sequenceTime = Number(sequence.current?.time);
+                const sequenceFirstTime = Number(sequence.first?.time);
+                const idDiff = sequenceId - sequenceFirstId;
+                if (idDiff > 0 && !isNaN(sequenceTime) && !isNaN(sequenceFirstTime)) {
+                    const gopSize = Math.max(1, sequenceTime - sequenceFirstTime) / idDiff;
+                    deltaSequence = Math.ceil(bufferTarget / gopSize);
+                }
+            }
+        }
+        sequence = Math.max(sequenceId - deltaSequence, Math.min(sequenceFirstId, sequenceId));
+        if (deltaSequence > 0) {
+            this.log(`Preload of ${deltaSequence} sequences`).info();
         }
 
         // propagate Metadata
@@ -242,7 +263,7 @@ export class HTTPAdaptiveSource extends Source {
 
                             // HEAD request o check if frame exists!
                             const response = await this._downloadSequence(playing, this._audioController, track, newSequence, 0);
-                            if (response.ok && newSequence > sequence) {
+                            if (response.ok) {
                                 again = false;
                                 this.log(
                                     `Skip sequences ${sequence} to ${newSequence - 1} ${Util.stringify({
@@ -256,7 +277,7 @@ export class HTTPAdaptiveSource extends Source {
 
                             fixLiveTime -= this._maxSequenceDuration;
                             this.log(
-                                `Fails to skip sequence ${newSequence} ${Util.stringify({
+                                `Fails to skip sequences ${sequence} to ${newSequence - 1} ${Util.stringify({
                                     delay: this.metadata.liveTime - this.currentTime,
                                     maxSequenceDuration: this._maxSequenceDuration
                                 })}`
@@ -381,7 +402,9 @@ export class HTTPAdaptiveSource extends Source {
                 playing.bufferState === BufferState.LOW // we are low in last rendition before to download keyframe => last chance rendition !
             ) {
                 // do the HEAD request to get first-frame-length
+                this.log('HEAD?').warn();
                 let response = await this._downloadSequence(playing, controller, trackId, sequence, 0);
+                this.log('HEAD!').warn();
                 if (response.ok) {
                     length = Number(response.headers.get('first-frame-length'));
                     if (!length) {
@@ -398,6 +421,10 @@ export class HTTPAdaptiveSource extends Source {
                     }
                     // maybe we have gotten a 404, due to immediate HEAD response and a possible origin switch
                     // Try a full GET what ensures to wait future sequence if there is
+                    this.log(
+                        `First video frame download for sequence ${sequence} track ${trackId} failed, \
+                        switching to a full sequence download`
+                    ).warn();
                 }
             }
         }
