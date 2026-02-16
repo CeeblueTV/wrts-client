@@ -18,8 +18,10 @@ export enum Codec {
     UNKNOWN = '',
     H264 = 'H264',
     HEVC = 'HEVC',
+    VP8 = 'VP8',
     MP3 = 'MP3',
-    AAC = 'AAC'
+    AAC = 'AAC',
+    OPUS = 'OPUS'
 }
 
 export type Sample = {
