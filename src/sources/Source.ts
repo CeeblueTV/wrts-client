@@ -279,7 +279,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * {@inheritDoc ICMCD.cmcd}
      */
     set cmcd(value: CMCD | undefined) {
-        throw new Error(this.name + " doesn't support CMCD");
+        if (value != null) {
+            throw new Error(this.name + " doesn't support CMCD");
+        }
     }
 
     /**
