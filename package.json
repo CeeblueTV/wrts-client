@@ -82,7 +82,7 @@
         "access": "public"
     },
     "dependencies": {
-        "@ceeblue/web-utils": "^7.0.1",
+        "@ceeblue/web-utils": "^7.4.0",
         "@svta/common-media-library": "^0.12.0",
         "abortcontroller-polyfill": "^1.7.8"
     }

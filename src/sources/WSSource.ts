@@ -9,7 +9,6 @@ import * as Media from '../media/Media';
 import { Source, SourceError } from './Source';
 import { IPlaying } from './IPlaying';
 import { Metadata } from '../media/Metadata';
-import * as RTS from '../media/RTS';
 import { Reader } from '../media/reader/Reader';
 
 /**
@@ -21,7 +20,7 @@ export class WSSource extends Source {
     private _rtt: number;
 
     constructor(playing: IPlaying, params: Connect.Params) {
-        super(playing, 'wss', params);
+        super(playing, 'wss', params, Connect.Type.DIRECT_STREAMING);
 
         this._rtt = 0;
         this._ws = new WebSocketReliable();
@@ -33,25 +32,24 @@ export class WSSource extends Source {
     }
 
     protected _setTracks(tracks: Media.Tracks) {
-        const cmd = {
-            audio: tracks.audio == null ? '' : tracks.audio.toFixed(),
-            video: tracks.video == null ? '' : tracks.video.toFixed()
-        };
-        if (!cmd.audio || this.audioSelected == null) {
-            // if no audio set, or auto selection
-            cmd.audio += '~';
-        }
-        if (!cmd.video || this.videoSelected == null) {
-            // if no video set, or auto selection
-            cmd.video += '~';
-        }
-        this._ws.send(JSON.stringify(cmd));
+        this._ws.send(
+            JSON.stringify({
+                type: 'tracks',
+                audio: tracks.audio ?? this.audioTrack ?? '',
+                video: tracks.video ?? this.videoTrack ?? ''
+            })
+        );
     }
 
     protected async _play(url: URL, tracks: Media.Tracks, playing: IPlaying): Promise<void> {
         const reader = this._newReader();
+        reader.onMetadata = Util.EMPTY_FUNCTION;
 
-        RTS.addSourceParams(url, tracks, this.reliable);
+        // download best AAC track
+        url.searchParams.set('audio', tracks.audio != null ? tracks.audio.toString() : 'aac,|bestbps');
+        // download best H264 track
+        url.searchParams.set('video', tracks.video != null ? tracks.video.toString() : 'h264,|bestbps');
+
         const time = Util.time();
         this._ws.onOpen = () => (this._rtt = Util.time() - time);
         this._ws.onClose = async (error?: WebSocketReliableError) => {
@@ -70,13 +68,23 @@ export class WSSource extends Source {
             }
         };
         this._ws.onMessage = (data: ArrayBuffer | string) => {
+            if (typeof data == 'string') {
+                // JSON metadata
+                const metadata = new Metadata(JSON.parse(data));
+                metadata.filterAudios([Media.Codec.AAC]);
+                metadata.filterVideos([Media.Codec.H264]);
+                this.readMetadata(metadata);
+                return;
+            }
             reader.read(data);
         };
         this._ws.open(this.finalizeRequest(url, new Headers()));
     }
 
     protected _setReliability(reliable: boolean) {
-        this._ws.send(JSON.stringify({ reliable }));
+        if (!reliable) {
+            throw Error("WS doesn't support partial reliability");
+        }
     }
 
     protected readMetadata(metadata: Metadata) {

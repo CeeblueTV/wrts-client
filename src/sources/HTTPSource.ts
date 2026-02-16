@@ -9,7 +9,6 @@ import * as Media from '../media/Media';
 import { Source } from './Source';
 import { IPlaying } from './IPlaying';
 import { Metadata } from '../media/Metadata';
-import * as RTS from '../media/RTS';
 
 /**
  * HTTP Direct Streaming
@@ -18,22 +17,28 @@ export class HTTPSource extends Source {
     private _rtt: number;
 
     constructor(playing: IPlaying, params: Connect.Params) {
-        super(playing, 'https', params);
+        super(playing, 'https', params, Connect.Type.DIRECT_STREAMING);
         this._rtt = 0;
     }
 
     protected _setReliability(reliable: boolean) {
-        throw Error("HTTP doesn't support a mutable reliability");
+        if (!reliable) {
+            throw Error("WS doesn't support partial reliability");
+        }
     }
 
     protected _setTracks(tracks: Media.Tracks) {
-        throw Error("HTTP doesn't support a manual track selection");
+        throw Error("HTTP doesn't support a dynamic track selection");
     }
 
     protected async _play(url: URL, tracks: Media.Tracks, playing: IPlaying): Promise<void> {
         const reader = this._newReader();
 
-        RTS.addSourceParams(url, tracks, this.reliable);
+        // download best AAC track
+        url.searchParams.set('audio', tracks.audio != null ? tracks.audio.toString() : 'aac,|bestbps');
+        // download best H264 track
+        url.searchParams.set('video', tracks.video != null ? tracks.video.toString() : 'h264,|bestbps');
+
         while (!this.closed) {
             let chunk;
             try {
