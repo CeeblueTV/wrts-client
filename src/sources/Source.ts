@@ -12,7 +12,7 @@ import { RTSReader } from '../media/reader/RTSReader';
 import { RTSReaderOld } from '../media/reader/RTSReaderOld';
 import { Reader, ReaderError } from '../media/reader/Reader';
 import { IPlaying } from './IPlaying';
-import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError, CML } from '@ceeblue/web-utils';
+import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError, CML, PlayerStats } from '@ceeblue/web-utils';
 import { MediaTrack } from '../media/MediaTrack';
 
 const TIMESTAMP_HOLE_TOLERANCE = 7; // ms of timestamp acceptable
@@ -327,6 +327,14 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return this._videoPerSecond.exact();
     }
 
+    set skippedAudio(value: number) {
+        this._skippedAudio = value;
+    }
+
+    set skippedVideo(value: number) {
+        this._skippedVideo = value;
+    }
+
     private _reliable: boolean;
     private _name: string;
     private _url: URL;
@@ -351,6 +359,8 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _fixLiveTime: number;
     private _audioPerSecond: ByteRate;
     private _videoPerSecond: ByteRate;
+    private _skippedVideo: number = 0;
+    private _skippedAudio: number = 0;
 
     /**
      * Create a new Source, to be passed to a Player
@@ -518,6 +528,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
                         `Extends video duration from ${sample.duration - delay} to ${sample.duration}ms track ${trackId}`
                     ).warn();
                     this._playing.onVideoSkipping(delay);
+                    this._skippedVideo += delay;
                 }
 
                 if (sample.isKeyFrame) {
@@ -583,8 +594,10 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (delta > 0) {
             if (type === Media.Type.AUDIO) {
                 this._playing.onAudioSkipping(delta);
+                this._skippedAudio += delta;
             } else if (type === Media.Type.VIDEO) {
                 this._playing.onVideoSkipping(delta);
+                this._skippedVideo += delta;
             }
         }
 
@@ -601,6 +614,20 @@ export abstract class Source extends EventEmitter implements ICMCD {
             }
         }
         return currentTime;
+    }
+
+    computeStats(): PlayerStats {
+        const playerStats = new PlayerStats();
+
+        playerStats.recvByteRate = this._recvByteRate.value() || 0;
+        playerStats.skippedAudio = this._skippedAudio / 1000;
+        playerStats.skippedVideo = this._skippedVideo / 1000;
+        playerStats.audioPerSecond = this._audioPerSecond.value() || 0;
+        playerStats.videoPerSecond = this._videoPerSecond.value() || 0;
+        playerStats.audioTrackId = this.audioTrack;
+        playerStats.videoTrackId = this.videoTrack;
+
+        return playerStats;
     }
 
     protected _onSample(trackId: number, sample?: Media.Sample) {

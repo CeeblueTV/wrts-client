@@ -169,7 +169,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onStall() {
         this.log('Playback stall').warn();
-        ++this._stallCount!;
     }
 
     /**
@@ -179,7 +178,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onAudioSkipping(holeMs: number) {
         this.log(`Audio skips ${holeMs} ms`).warn();
-        this._skippedAudioCount! += holeMs / 1000;
     }
 
     /**
@@ -189,7 +187,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onVideoSkipping(holeMs: number) {
         this.log(`Video skips ${holeMs} ms`).warn();
-        this._skippedVideoCount! += holeMs / 1000;
     }
 
     /**
@@ -570,8 +567,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
-    private _skippedVideoCount: number = 0;
-    private _skippedAudioCount: number = 0;
     private _stallCount: number = 0;
     private _previousBufferAmount: number;
     /**
@@ -766,6 +761,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._setBufferState(BufferState.LOW); // Force buffer to LOW
             this._video.pause();
             this.onStall();
+            this._stallCount++;
             // W3C specification says that the player has been stopped to wait data
             // In such case few browsers "Pause" player when waiting data and so
             // require an explicit play => see _onProgress
@@ -899,8 +895,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._metadata = new Metadata();
         this._playbackSpeed.clear();
         this._playbackPrevTime = undefined;
-        this._skippedAudioCount = 0;
-        this._skippedVideoCount = 0;
         this._stallCount = 0;
         this._previousBufferAmount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
@@ -1087,8 +1081,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Calculate and return current player statistics as a {@link PlayerStats} object
      */
     computeStats(): PlayerStats {
-        const playerStats = new PlayerStats();
-        playerStats.recvByteRate = this.recvByteRate;
+        if (!this._source) {
+            throw Error('Cannot compute stats on stopped player');
+        }
+        const playerStats = this._source.computeStats();
 
         const currentTime = Math.max(this.currentTime, this.startTime);
         playerStats.bufferAmount = Math.max(0, Math.round((this.endTime - currentTime) * 1000));
@@ -1099,23 +1095,24 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         playerStats.playbackRate = this._video.playbackRate;
         playerStats.playbackSpeed = Math.ceil(this._playbackSpeed.exact()) / 100;
 
-        playerStats.audioPerSecond = this.audioPerSecond;
         if (this?.audioTrack != null) {
-            playerStats.audioTrackId = this?.audioTrack;
             playerStats.audioTrackBandwidth = this.metadata.tracks.get(this?.audioTrack)?.bandwidth;
         }
 
-        playerStats.videoPerSecond = this.videoPerSecond;
         if (this?.videoTrack != null) {
-            playerStats.videoTrackId = this?.videoTrack;
             playerStats.videoTrackBandwidth = this.metadata.tracks.get(this?.videoTrack)?.bandwidth;
         }
-
-        playerStats.skippedVideoCount = this._skippedVideoCount || 0;
-        playerStats.skippedAudioCount = this._skippedAudioCount || 0;
 
         playerStats.stallCount = this._stallCount || 0;
 
         return playerStats;
+    }
+
+    resetCounters() {
+        this._stallCount = 0;
+        if (this._source) {
+            this._source.skippedAudio = 0;
+            this._source.skippedVideo = 0;
+        }
     }
 }

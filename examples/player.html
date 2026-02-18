@@ -346,8 +346,8 @@
                         fps.push(playerStats.videoPerSecond.toFixed(2));
                         trackAudio.push(((playerStats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
                         trackVideo.push(((playerStats.videoTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
-                        skippedAudio.push(playerStats.skippedAudioCount.toFixed(1)+"s");
-                        skippedVideo.push(playerStats.skippedVideoCount.toFixed(1)+"s");
+                        skippedAudio.push(playerStats.skippedAudio.toFixed(1)+"s");
+                        skippedVideo.push(playerStats.skippedVideo.toFixed(1)+"s");
                         stalls.push(playerStats.stallCount);
 
                         const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
@@ -523,9 +523,7 @@
                     this.uiStats.reset();
                     // reset incremental metrics counters
                     if (this.player) {
-                        this.player._stallCount = 0;
-                        this.player._skippedAudioCount = 0;
-                        this.player._skippedVideoCount = 0;
+                        this.player.resetCounters();
                     }
                     const displayableCount = all ? 0 : this.uiStats.displayableCount;
                     for(let [_, values] of this.stats) {
