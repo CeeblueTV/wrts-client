@@ -810,7 +810,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
     protected async fetchMedia(url: URL, type: Media.Type, options: RequestInit = {}): Promise<Response & { error?: string }> {
         const withCMCD = this.cmcd !== CMCD.NONE;
         if (withCMCD) {
-            const playerStats = this._playing.getStats();
+            const playerStats = this._playing.computeStats();
             // Add CMCD headers
             const trackId = type === Media.Type.AUDIO ? this.audioTrack : type === Media.Type.VIDEO ? this.videoTrack : -1;
 

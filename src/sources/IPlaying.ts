@@ -75,7 +75,7 @@ export interface IPlaying extends EventEmitter {
      *
      * @returns An object containing the current player statistics as a {@link PlayerStats} object.
      */
-    getStats(): PlayerStats;
+    computeStats(): PlayerStats;
 
     /**
      * Gets an AbortSignal useful for subscribing to playback stop events.

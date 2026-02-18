@@ -330,7 +330,7 @@
                     const player = this.player;
                     if(player) {
                         this.hasMetrics = true;
-                        let playerStats = player.getStats();
+                        let playerStats = player.computeStats();
                         if(bandwidths.length || playerStats.recvByteRate) {
                             bandwidths.push(Math.round(playerStats.recvByteRate*8/1000)+"kbps");
                         }

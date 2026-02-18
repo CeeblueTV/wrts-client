@@ -1086,7 +1086,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * Calculate and return current player statistics as a {@link PlayerStats} object
      */
-    getStats(): PlayerStats {
+    computeStats(): PlayerStats {
         const playerStats = new PlayerStats();
         playerStats.recvByteRate = this.recvByteRate;
 
