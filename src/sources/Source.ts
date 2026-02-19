@@ -327,14 +327,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return this._videoPerSecond.exact();
     }
 
-    set skippedAudio(value: number) {
-        this._skippedAudio = value;
-    }
-
-    set skippedVideo(value: number) {
-        this._skippedVideo = value;
-    }
-
     private _reliable: boolean;
     private _name: string;
     private _url: URL;

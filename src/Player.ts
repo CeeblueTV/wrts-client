@@ -1107,12 +1107,4 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
         return playerStats;
     }
-
-    resetCounters() {
-        this._stallCount = 0;
-        if (this._source) {
-            this._source.skippedAudio = 0;
-            this._source.skippedVideo = 0;
-        }
-    }
 }
