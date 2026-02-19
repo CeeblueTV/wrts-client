@@ -346,8 +346,8 @@
                         fps.push(playerStats.videoPerSecond.toFixed(2));
                         trackAudio.push(((playerStats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
                         trackVideo.push(((playerStats.videoTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
-                        skippedAudio.push(playerStats.skippedAudio.toFixed(1)+"s");
-                        skippedVideo.push(playerStats.skippedVideo.toFixed(1)+"s");
+                        skippedAudio.push((playerStats.skippedAudio/1000).toFixed(1)+"s");
+                        skippedVideo.push((playerStats.skippedVideo/1000).toFixed(1)+"s");
                         stalls.push(playerStats.stallCount);
 
                         const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);

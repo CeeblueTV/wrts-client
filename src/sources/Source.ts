@@ -620,8 +620,8 @@ export abstract class Source extends EventEmitter implements ICMCD {
         const playerStats = new PlayerStats();
 
         playerStats.recvByteRate = this._recvByteRate.value() || 0;
-        playerStats.skippedAudio = this._skippedAudio / 1000;
-        playerStats.skippedVideo = this._skippedVideo / 1000;
+        playerStats.skippedAudio = this._skippedAudio;
+        playerStats.skippedVideo = this._skippedVideo;
         playerStats.audioPerSecond = this._audioPerSecond.value() || 0;
         playerStats.videoPerSecond = this._videoPerSecond.value() || 0;
         playerStats.audioTrackId = this.audioTrack;
