@@ -42,33 +42,30 @@ export abstract class Reader extends EventEmitter {
     onMetadata(metadata: Metadata) {}
 
     /**
-     * Event fire on new audio {@link Media.Sample}
-     * @param trackId
-     * @param sample
+     * Event fire on tracks initialization
      */
-    onAudio(trackId: number, sample?: Media.Sample) {
-        this.log(`Audio sample uncatched on track ${trackId}`).warn();
+    onInitTracks(tracks: Media.Tracks) {
+        this.log(`Init tracks ${Util.stringify(tracks)}`).info();
     }
 
     /**
-     * Event fire on new video {@link Media.Sample}
+     * Event fire on new sample {@link Media.Sample}
      * @param trackId
      * @param sample
      */
-    onVideo(trackId: number, sample?: Media.Sample) {
-        this.log(`Video sample uncatched on track ${trackId}`).warn();
+    onSample(type: Media.Type, trackId: number, sample: Media.Sample) {
+        const types = ['Data', 'Audio', 'Video'];
+        this.log(`${types[type]} sample uncatched on track ${trackId}`).warn();
     }
 
     /**
-     * Event fired on new data
-     * @param trackId
-     * @param time
+     * Event fired on a generic message
+     * @param name
      * @param data
      * @event
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onData(trackId: number, time: number, data: any) {
-        this.log(`Data sample uncatched on track ${trackId}`).warn();
+    onMessage(name: string, time: number, duration: number, data: Uint8Array) {
+        this.log(`Uncaught message ${Util.stringify({ name, time, duration, data })}`).warn();
     }
 
     private _data?: Uint8Array;

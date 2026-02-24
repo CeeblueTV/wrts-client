@@ -95,26 +95,29 @@ export class Metadata extends Loggable {
                 // no found, force cast codecStirng to Media.Codec (in an upper case form)
                 mTrack.codec = mTrack.codecString.toUpperCase() as Media.Codec;
             }
+
             mTrack.bandwidth = Number(track.bandwidth) || mTrack.bandwidth;
-            mTrack.config = Uint8Array.from(atob(track.config as string), c => c.charCodeAt(0) || 0);
             mTrack.currentTime = Number(track.currentTime) || mTrack.currentTime;
-            switch ((track.type || '').toLowerCase()) {
-                case 'audio':
+
+            const type = (track.type || '').toLowerCase();
+
+            if (type === 'data') {
+                mTrack.type = Media.Type.DATA;
+                this.dataTracks.push(mTrack);
+            } else {
+                // Media
+                mTrack.config = Uint8Array.from(atob(track.config as string), c => c.charCodeAt(0) || 0);
+                if (type === 'audio') {
                     mTrack.type = Media.Type.AUDIO;
                     mTrack.rate = Number(track.sampleRate) || mTrack.rate;
                     mTrack.channels = Number(track.channels) || mTrack.channels;
                     this.audioTracks.push(mTrack);
-                    break;
-                case 'video':
+                } else if (type === 'video') {
                     mTrack.type = Media.Type.VIDEO;
                     mTrack.resolution = track.resolution ?? mTrack.resolution;
                     mTrack.rate = Number(track.frameRate) || mTrack.rate;
                     this.videoTracks.push(mTrack);
-                    break;
-                case 'data':
-                    mTrack.type = Media.Type.DATA;
-                    this.dataTracks.push(mTrack);
-                    break;
+                }
             }
         }
     }
@@ -136,7 +139,7 @@ export class Metadata extends Loggable {
         tracks.sort((track1: MediaTrack, track2: MediaTrack) => track2.bandwidth - track1.bandwidth);
 
         // Fill related collection and make each track unique
-        this.audioTracks.length = this.videoTracks.length = 0;
+        this.dataTracks.length = this.audioTracks.length = this.videoTracks.length = 0;
         this.tracks.clear();
         for (const track of tracks) {
             const size = this.tracks.size;

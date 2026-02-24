@@ -120,6 +120,9 @@ export function readAudioConfig(data: Uint8Array): { rate: number; channels: num
 
 export function writeCodecString(codec: Media.Codec, config?: Uint8Array): string {
     switch (codec) {
+        case Media.Codec.ID3: {
+            return 'id3';
+        }
         case Media.Codec.OPUS: {
             return 'opus';
         }
@@ -161,6 +164,10 @@ export function readCodecString(codecString: string, out: { codec: Media.Codec; 
     }
     let codec = (fields[0]?.trim() || '').toLowerCase();
     switch (codec) {
+        case 'id3':
+            out.codec = Media.Codec.ID3;
+            out.type = Media.Type.DATA;
+            return true;
         case 'opus':
             out.codec = Media.Codec.OPUS;
             out.type = Media.Type.AUDIO;

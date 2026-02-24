@@ -63,8 +63,10 @@ export class RTSReader extends Reader {
                     case 3: {
                         // INIT TRACKS
                         this._nextTimes.clear();
-                        this.onAudio(frame.read7Bit() - 1);
-                        this.onVideo(frame.read7Bit() - 1);
+                        this.onInitTracks({
+                            audio: frame.read7Bit() - 1,
+                            video: frame.read7Bit() - 1
+                        });
                         break;
                     }
                     case 0: {
@@ -91,16 +93,24 @@ export class RTSReader extends Reader {
                     const data = frame.read();
 
                     this._nextTimes.set(trackId, time + duration);
-                    if (type === Media.Type.AUDIO) {
-                        this.onAudio(trackId, { time, duration, isKeyFrame, compositionOffset, data });
-                    } else {
-                        this.onVideo(trackId, { time, duration, isKeyFrame, compositionOffset, data });
-                    }
+                    this.onSample(type, trackId, {
+                        time,
+                        duration,
+                        isKeyFrame,
+                        compositionOffset,
+                        data
+                    });
                 } else {
-                    // DATA String
-                    const time = frame.read7Bit();
+                    // DATA PACKET
+                    const time = frame.read7Bit() + (this._nextTimes.get(trackId) ?? 0);
+                    const duration = frame.read7Bit();
                     this._readCustom(frame);
-                    this.onData(trackId, time, JSON.parse(Util.stringify(frame.read())));
+                    this._nextTimes.set(trackId, time);
+                    this.onSample(Media.Type.DATA, trackId, {
+                        time,
+                        duration,
+                        data: frame.read()
+                    });
                 }
             }
         }

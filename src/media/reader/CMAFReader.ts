@@ -4,7 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { BinaryReader, BinaryWriter, Util } from '@ceeblue/web-utils';
+import { BinaryReader, BinaryWriter } from '@ceeblue/web-utils';
 import { Reader, ReaderError } from './Reader';
 import * as Media from '../Media';
 import * as AVC from '../AVC';
@@ -40,17 +40,8 @@ enum SampleFlags {
 }
 
 export class CMAFReader extends Reader {
-    /**
-     * Event fired on new CMAF message
-     * @param name
-     * @param data
-     * @event
-     */
-    onMessage(name: string, data: Uint8Array) {
-        this.log(`Uncaught message ${name}`).warn();
-    }
-
     private _tracks: Map<number, Track>;
+    private _initTracks?: Media.Tracks;
     private _track?: Track;
     private _defaultTimeScale: number;
     private _metadata?: Metadata;
@@ -117,25 +108,33 @@ export class CMAFReader extends Reader {
                 const version = reader.read8(); // version
                 reader.next(3); // flags
                 let name: string;
+                let timeScale: number;
+                let time;
+                let duration;
                 if (!version) {
                     reader.readString(); // scheme_id_uri
                     name = reader.readString(); // name
-                    reader.next(4); // timescale
-                    reader.next(4); // presentation_time
-                    reader.next(4); // event_duration
+                    timeScale = reader.read32(); // timescale
+                    time = 0;
+                    for (const [, track] of this._tracks) {
+                        time = Math.max(track.time, time);
+                    }
+                    time += (1000 / timeScale) * reader.read32(); // delta time!
+                    duration = (1000 / timeScale) * reader.read32(); // event_duration
                     reader.next(4); // id
                 } else {
-                    reader.next(4); // timescale
-                    reader.next(8); // presentation_time
-                    reader.next(4); // event_duration
+                    timeScale = reader.read32(); // timescale
+                    time = (1000 / timeScale) * reader.read64();
+                    duration = (1000 / timeScale) * reader.read32(); // event_duration
                     reader.next(4); // id
                     reader.readString(); // scheme_id_uri
                     name = reader.readString(); // name
                 }
-                this.onMessage(name, reader.read());
+                this.onMessage(name, time, duration, reader.read());
                 return;
             }
             case 'moov':
+                this._initTracks = {};
                 break;
             case 'mvhd': {
                 const version = reader.read8(); // version
@@ -157,7 +156,7 @@ export class CMAFReader extends Reader {
                     trackId,
                     (this._track = {
                         id: trackId,
-                        type: 0,
+                        type: Media.Type.DATA,
                         timeScale: this._defaultTimeScale,
                         time: 0
                     })
@@ -435,29 +434,43 @@ export class CMAFReader extends Reader {
                 if (!this._pendingSamples.length) {
                     return { type: 'ReaderError', name: 'Invalid payload', detail: 'Data without trun before' };
                 }
+                // metadata BEFORE initTracks
                 if (this._metadata) {
                     this.onMetadata(this._metadata);
                     this._metadata = undefined;
                 }
+                // InitTracks
+                if (this._initTracks) {
+                    for (const [id, track] of this._tracks) {
+                        if (track.type === Media.Type.AUDIO) {
+                            if (this._initTracks.audio == null) {
+                                this._initTracks.audio = id;
+                            } else {
+                                this.log('Multiple Audio tracks unsupported, track ' + id + ' will be ignored').error();
+                            }
+                        } else if (track.type === Media.Type.VIDEO) {
+                            if (this._initTracks.video == null) {
+                                this._initTracks.video = id;
+                            } else {
+                                this.log('Multiple Video tracks unsupported, track ' + id + ' will be ignored').error();
+                            }
+                        }
+                    }
+                    this.onInitTracks(this._initTracks);
+                    this._initTracks = undefined;
+                }
 
                 while (this._pendingSamples.length) {
                     const { track, sample } = this._pendingSamples.shift()!;
-                    const raw = reader.read(sample.size);
-                    if (sample.size != null && sample.size > raw.byteLength) {
-                        this.log().warn(`Expected ${sample.size} bytes but got ${raw.byteLength} bytes for the sample`);
+                    sample.data = reader.read(sample.size);
+                    if (sample.size != null && sample.size > sample.data.byteLength) {
+                        this.log().warn(`Expected ${sample.size} bytes but got ${sample.data.byteLength} bytes for the sample`);
                     }
-                    sample.data = track.type === Media.Type.DATA ? JSON.parse(Util.stringify(raw)) : raw;
                     if (this._passthrough) {
                         sample.data = this._passthrough.data();
                         this._passthrough = new BinaryWriter();
                     }
-                    if (track.type === Media.Type.AUDIO) {
-                        this.onAudio(track.id, sample);
-                    } else if (track.type === Media.Type.VIDEO) {
-                        this.onVideo(track.id, sample);
-                    } else {
-                        this.onData(track.id, sample.time, sample.data);
-                    }
+                    this.onSample(track.type, track.id, sample);
                 }
                 this._pendingSamples.length = 0;
                 return;
