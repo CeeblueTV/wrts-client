@@ -31,7 +31,7 @@ export class WSSource extends Source {
         super.close(error);
     }
 
-    protected _setTracks(tracks: Media.Tracks) {
+    protected setTracks(tracks: Media.Tracks) {
         this._ws.send(
             JSON.stringify({
                 type: 'tracks',
@@ -41,8 +41,8 @@ export class WSSource extends Source {
         );
     }
 
-    protected async _play(url: URL, tracks: Media.Tracks, playing: IPlaying): Promise<void> {
-        const reader = this._newReader();
+    protected async play(url: URL, tracks: Media.Tracks, playing: IPlaying): Promise<void> {
+        const reader = this.newReader();
         reader.onMetadata = Util.EMPTY_FUNCTION;
 
         // download best AAC track
@@ -81,7 +81,7 @@ export class WSSource extends Source {
         this._ws.open(this.finalizeRequest(url, new Headers()));
     }
 
-    protected _setReliability(reliable: boolean) {
+    protected setReliability(reliable: boolean) {
         if (!reliable) {
             throw Error("WS doesn't support partial reliability");
         }
@@ -93,7 +93,7 @@ export class WSSource extends Source {
         super.readMetadata(metadata);
     }
 
-    protected _newReader(params = { isStream: true }): Reader {
-        return super._newReader({ isStream: false });
+    protected newReader(params = { isStream: true }): Reader {
+        return super.newReader({ isStream: false });
     }
 }

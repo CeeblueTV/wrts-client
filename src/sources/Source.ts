@@ -248,7 +248,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * Returns true if manual track selection is supported by the source implementation
      */
     get trackSelectable(): boolean {
-        return this._setTracks !== Source.prototype._setTracks;
+        return this.setTracks !== Source.prototype.setTracks;
     }
 
     get recvByteRate(): ByteRate {
@@ -259,7 +259,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return this._reliable;
     }
     set reliable(value: boolean) {
-        this._setReliable(value);
+        this.setReliable(value);
     }
 
     get mediaExt(): string {
@@ -650,7 +650,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @param tracks
      * @returns
      */
-    protected _autoFirstTrack(tracks: Array<MediaTrack>): number {
+    private _autoFirstTrack(tracks: Array<MediaTrack>): number {
         let track = tracks[Math.floor(tracks.length / 2)];
         if (!track) {
             return -1;
@@ -666,7 +666,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
      *
      * @param tracks tracks to select, undefined mean "auto" selection
      */
-    protected _selectTracks(tracks: Media.Tracks) {
+    private _selectTracks(tracks: Media.Tracks) {
         if (this._closed) {
             return;
         }
@@ -701,7 +701,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
             }
             try {
                 this.log(`Select tracks ${Util.stringify(this._selectedTracks)}`).info();
-                await this._setTracks({ ...this._selectedTracks });
+                await this.setTracks({ ...this._selectedTracks });
                 // After a track deactivation we don't receive any more data on this track
                 // so we have to disable the track now
                 if (this._requestedTracks.audio && this._requestedTracks.audio < 0) {
@@ -770,7 +770,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
             // - non blocking and return immediately
             // - blocking and stays processing during all the life-time
             this._requestedTracks = { ...this._selectedTracks };
-            await this._play(this._url, this._requestedTracks, this._playing);
+            await this.play(this._url, this._requestedTracks, this._playing);
         } catch (e: unknown) {
             this.close({ type: 'SourceError', name: 'Unexpected source issue', detail: Util.stringify(e) });
         }
@@ -791,13 +791,13 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return track;
     }
 
-    protected async _setReliable(reliable: boolean) {
+    protected async setReliable(reliable: boolean) {
         if (reliable === this._reliable) {
             return;
         }
         try {
             if (this._running) {
-                await this._setReliability(reliable);
+                await this.setReliability(reliable);
             } // else wait running!
             this._reliable = reliable;
         } catch (e: unknown) {
@@ -897,7 +897,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @param tracks
      * @param playing
      */
-    protected abstract _play(url: URL, tracks: Media.Tracks, playing: IPlaying): void;
-    protected abstract _setReliability(reliable: boolean): void;
-    protected abstract _setTracks(tracks: Media.Tracks): void;
+    protected abstract play(url: URL, tracks: Media.Tracks, playing: IPlaying): void;
+    protected abstract setReliability(reliable: boolean): void;
+    protected abstract setTracks(tracks: Media.Tracks): void;
 }

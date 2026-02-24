@@ -21,18 +21,18 @@ export class HTTPSource extends Source {
         this._rtt = 0;
     }
 
-    protected _setReliability(reliable: boolean) {
+    protected setReliability(reliable: boolean) {
         if (!reliable) {
             throw Error("WS doesn't support partial reliability");
         }
     }
 
-    protected _setTracks(tracks: Media.Tracks) {
+    protected setTracks(tracks: Media.Tracks) {
         throw Error("HTTP doesn't support a dynamic track selection");
     }
 
-    protected async _play(url: URL, tracks: Media.Tracks, playing: IPlaying): Promise<void> {
-        const reader = this._newReader();
+    protected async play(url: URL, tracks: Media.Tracks, playing: IPlaying): Promise<void> {
+        const reader = this.newReader();
 
         // download best AAC track
         url.searchParams.set('audio', tracks.audio != null ? tracks.audio.toString() : 'aac,|bestbps');

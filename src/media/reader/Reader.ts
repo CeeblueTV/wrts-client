@@ -80,14 +80,9 @@ export abstract class Reader extends EventEmitter {
         this._data = undefined;
     }
 
-    read(data: BufferSource | string) {
+    read(data: BufferSource) {
         // try-catch to anticipate Reader implementation issue
         try {
-            if (typeof data == 'string') {
-                // JSON metadata or time
-                this._parseString(data);
-                return;
-            }
             let packet = 'buffer' in data ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
             // Binary!
             if (this._data) {
@@ -96,7 +91,7 @@ export abstract class Reader extends EventEmitter {
                 newData.set(packet, this._data.byteLength); // new data
                 packet = newData;
             }
-            const remaining = Math.min(this._parse(packet), packet.byteLength);
+            const remaining = Math.min(this.parse(packet), packet.byteLength);
             if (remaining > 0) {
                 this._data = new Uint8Array(packet.buffer, packet.byteOffset + packet.byteLength - remaining, remaining);
             } else {
@@ -111,16 +106,7 @@ export abstract class Reader extends EventEmitter {
      * Children class must implement the parsing logic, and returns how many bytes have to be kept.
      * @param packet the binary to parse
      */
-    protected _parse(packet: Uint8Array): number {
-        throw Error(this.constructor.name + ' must implement _parse');
-    }
-
-    protected _parseString(data: string) {
-        const obj = JSON.parse(data);
-        if (obj.trackId != null) {
-            this.onData(obj.trackId, obj.time, obj.data ?? data);
-        } else {
-            this.onMetadata(new Metadata(obj));
-        }
+    protected parse(packet: Uint8Array): number {
+        throw Error(this.constructor.name + ' must implement parse');
     }
 }

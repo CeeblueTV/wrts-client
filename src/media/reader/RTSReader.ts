@@ -39,7 +39,7 @@ export class RTSReader extends Reader {
         this._nextTimes = new Map<number, number>();
     }
 
-    protected _parse(packet: Uint8Array): number {
+    protected parse(packet: Uint8Array): number {
         const reader = new BinaryReader(packet);
         while (reader.available()) {
             let size = reader.available();

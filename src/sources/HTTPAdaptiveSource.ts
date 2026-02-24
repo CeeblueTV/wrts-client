@@ -490,7 +490,7 @@ export class HTTPAdaptiveSource extends Source {
                         continue;
                     }
                     if (!reader) {
-                        reader = this._newReader();
+                        reader = this.newReader();
                         reader.onMetadata = Util.EMPTY_FUNCTION;
                         if (type === Media.Type.AUDIO) {
                             reader.onVideo = Util.EMPTY_FUNCTION;
@@ -562,7 +562,7 @@ export class HTTPAdaptiveSource extends Source {
         return new Response(null, { headers: response?.headers, status: 206 });
     }
 
-    protected _setTracks(tracks: Media.Tracks) {
+    protected setTracks(tracks: Media.Tracks) {
         // change tracks is allowed and done in play method
     }
 }

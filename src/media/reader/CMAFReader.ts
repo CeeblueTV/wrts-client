@@ -67,7 +67,7 @@ export class CMAFReader extends Reader {
         }
     }
 
-    read(data: BufferSource | string) {
+    read(data: BufferSource) {
         if (this._passthrough) {
             this._passthrough.write(data);
         }
@@ -81,7 +81,7 @@ export class CMAFReader extends Reader {
         this._pendingSamples.length = 0;
     }
 
-    protected _parse(packet: Uint8Array): number {
+    protected parse(packet: Uint8Array): number {
         const reader = new BinaryReader(packet);
 
         // Read packet!
