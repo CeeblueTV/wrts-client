@@ -590,7 +590,7 @@ export class HTTPAdaptiveSource extends Source {
                             // - we reached a key frame while downloading only the first frame (last-resort rendition), or
                             // - we lost buffer (bufferAmount dropped to 0) while it was previously available.
                             const isKey = sample?.isKeyFrame;
-                            if (isKey && onlyKeyFrame && bufferAmount && !playing.bufferAmount) {
+                            if ((isKey && onlyKeyFrame) || (bufferAmount && !playing.bufferAmount)) {
                                 videoAborted = true;
                                 if (!length) {
                                     // if is a cancel whereas was not a firt-frame download => cancel the transfer
