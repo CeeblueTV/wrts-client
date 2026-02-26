@@ -4,7 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { BinaryReader, BinaryWriter, Util } from '@ceeblue/web-utils';
+import { BinaryReader, BinaryWriter, log, Util } from '@ceeblue/web-utils';
 import { Reader, ReaderError } from './Reader';
 import * as Media from '../Media';
 import * as AVC from '../AVC';
@@ -23,6 +23,8 @@ type Track = {
         iv?: Uint8Array;
     };
 };
+
+export type TrackEncryption = Track['encryption'];
 
 export class CMAFReader extends Reader {
     /**
@@ -48,6 +50,31 @@ export class CMAFReader extends Reader {
         if (passthrough) {
             this._passthrough = new BinaryWriter();
         }
+    }
+
+    /**
+     * Parse initData as sinf/schi payload using the same recursive parser path as CMAFReader.
+     * Returns a lightweight track object populated with encryption when tenc is found.
+     */
+    static parseSinfTrack(initData: Uint8Array): TrackEncryption | undefined {
+        const parser = new CMAFReader(false);
+        parser.onError = error => {
+            log('Error while parsing sinf payload:', error).warn();
+        };
+
+        // We need to set a dummy track in the parser to be able to parse the tenc box and extract encryption info.
+        const track: Track = {
+            id: -1,
+            type: Media.Type.DATA,
+            timeScale: 1000,
+            sample: { time: 0, duration: 0, data: new Uint8Array() }
+        };
+        parser._track = track;
+
+        // Try parsing as a full packet containing sized MP4 boxes.
+        parser._parse(initData);
+
+        return track.encryption;
     }
 
     read(data: BufferSource | string) {
@@ -88,7 +115,7 @@ export class CMAFReader extends Reader {
         const reader = new BinaryReader(box);
         const boxType = String.fromCharCode(...reader.read(4));
 
-        // this.log({boxType, size:reader.available()}).info();
+        // this.log(`Parsing box ${boxType} of size ${reader.available()}`).info();
 
         switch (boxType) {
             default:
@@ -400,16 +427,11 @@ export class CMAFReader extends Reader {
                 if (!track) {
                     return { type: 'ReaderError', name: 'Invalid payload', detail: 'Track Encryption Box without track before' };
                 }
-                reader.next(6); // version + flags + reserved byte + byteBlock
-                track.encryption = {
-                    isProtected: reader.read8() === 1,
-                    perSampleIVSize: reader.read8(),
-                    kid: reader.read(16)
-                };
-                if (track.encryption.isProtected && track.encryption.perSampleIVSize === 0) {
-                    const constantIVSize = reader.read8();
-                    track.encryption.iv = reader.read(constantIVSize);
+                const encryption = CMAFReader._parseTencPayload(reader.read());
+                if (!encryption) {
+                    return { type: 'ReaderError', name: 'Invalid payload', detail: 'Invalid tenc payload' };
                 }
+                track.encryption = encryption;
                 return;
             }
             case 'senc': {
@@ -467,6 +489,9 @@ export class CMAFReader extends Reader {
             let i: number;
             let end: number = extension.byteLength;
             const type = String.fromCharCode(...extension.subarray(0, (i = 4)));
+
+            // this.log(`Parsing codec extension ${type} of size ${extension.byteLength}`).info();
+
             switch (type) {
                 case 'esds': {
                     // http://xhelmboyx.tripod.com/formats/mp4-layout.txt
@@ -587,5 +612,29 @@ export class CMAFReader extends Reader {
         if (track.codec) {
             track.codecString = AVC.writeCodecString(track.codec, track.config);
         }
+    }
+
+    private static _parseTencPayload(payload: Uint8Array): TrackEncryption | undefined {
+        const reader = new BinaryReader(payload);
+        if (reader.available() < 23) {
+            return undefined;
+        }
+        reader.next(6); // version + flags + reserved byte + byteBlock
+        const encryption: TrackEncryption = {
+            isProtected: reader.read8() === 1,
+            perSampleIVSize: reader.read8(),
+            kid: reader.read(16)
+        };
+        if (encryption.isProtected && encryption.perSampleIVSize === 0) {
+            if (!reader.available()) {
+                return undefined;
+            }
+            const constantIVSize = reader.read8();
+            if (reader.available() < constantIVSize) {
+                return undefined;
+            }
+            encryption.iv = reader.read(constantIVSize);
+        }
+        return encryption;
     }
 }

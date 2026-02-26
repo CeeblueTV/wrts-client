@@ -7,6 +7,7 @@
 import { Connect, EventEmitter, Util } from '@ceeblue/web-utils';
 import { Metadata } from '../Metadata';
 import * as Media from '../Media';
+import { CMAFReader } from '../reader/CMAFReader';
 
 export type DRMEngineError =
     /**
@@ -82,7 +83,8 @@ export class DRMEngine extends EventEmitter {
         this.log(error).error();
     }
     onKeyStatusChanged(keyId: string, status: MediaKeyStatus) {
-        this.log(`Key status for ${keyId}: ${status}`).info();
+        const tracks = this._keyIdToTracks.get(keyId) || [];
+        this.log(`Key status for ${keyId}: ${status} (tracks: ${tracks.join(', ')})`).info();
     }
 
     /**
@@ -102,6 +104,8 @@ export class DRMEngine extends EventEmitter {
     private _keySystemConfig?: Connect.KeySystem;
 
     private _initDataMap: Map<string, MediaKeySession> = new Map();
+    private _keyIdToTracks: Map<string, Array<number>> = new Map();
+    private _fairplayAssetIds: WeakMap<MediaKeySession, string> = new WeakMap();
     private _certificate?: Uint8Array;
     private _isStarted: boolean = false;
 
@@ -137,7 +141,14 @@ export class DRMEngine extends EventEmitter {
                 for (const keySystem in params.contentProtection) {
                     this._settings.set(keySystem, params.contentProtection[keySystem]);
                 }
-
+                // Generate the mapping of key ID to tracks for quick lookup when receiving key status updates
+                for (const [, track] of metadata.tracks) {
+                    if (track.contentProtection) {
+                        const keyIds = this._keyIdToTracks.get(track.contentProtection) || [];
+                        keyIds.push(track.id);
+                        this._keyIdToTracks.set(track.contentProtection, keyIds);
+                    }
+                }
                 // For other DRM systems (Widevine, PlayReady), use standard EME
                 const drmConfig: MediaKeySystemConfiguration = {
                     initDataTypes: ['cenc', 'sinf', 'skd', 'keyids'],
@@ -275,6 +286,13 @@ export class DRMEngine extends EventEmitter {
 
         session.addEventListener('message', ((e: MediaKeyMessageEvent) => this._handleMessage(e, session)) as EventListener);
         session.addEventListener('keystatuseschange', ((e: Event) => this._handleKeyStatusesChange(e, session)) as EventListener);
+        if (this._keySystem?.startsWith('com.apple.fps')) {
+            const fairplayAssetId = this._extractAssetIdFromInitData(event.initDataType, byteArray);
+            if (fairplayAssetId) {
+                this._fairplayAssetIds.set(session, fairplayAssetId);
+                this.log(`FairPlay assetid selected: ${fairplayAssetId}`).debug();
+            }
+        }
 
         session.generateRequest(event.initDataType, byteArray).catch(err => {
             this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'generateRequest failed: ' + err });
@@ -291,6 +309,7 @@ export class DRMEngine extends EventEmitter {
         // The license server URL can be a string or an object with a licenseUrl and optional headers
         const licenseServerUrl =
             typeof this._keySystemConfig === 'string' ? this._keySystemConfig : this._keySystemConfig.licenseUrl;
+        let licenseRequestUrl = licenseServerUrl;
         const headers: Record<string, string> = {
             'Content-Type': 'application/octet-stream'
         };
@@ -307,13 +326,27 @@ export class DRMEngine extends EventEmitter {
             Object.assign(headers, playReadyHeaders);
             requestBody = body;
         }
+        if (this._keySystem?.startsWith('com.apple.fps')) {
+            const fairplayAssetId = this._fairplayAssetIds.get(session);
+            if (fairplayAssetId) {
+                try {
+                    const url = new URL(licenseServerUrl);
+                    url.searchParams.set('assetid', fairplayAssetId);
+                    licenseRequestUrl = url.toString();
+                } catch (err) {
+                    this.log('Failed to append assetid to license server URL, using original URL').warn();
+                }
+            } else {
+                this.log('FairPlay message received but no asset ID found').warn();
+            }
+        }
 
         this.log('License request headers:', headers).debug();
         this.log('License request body:', requestBody).debug();
 
         // Use fetch or XHR to POST the requestBody to the license server
-        this.log(`Sending license request to ${licenseServerUrl}`).info();
-        fetch(licenseServerUrl, {
+        this.log(`Sending license request to ${licenseRequestUrl}`).info();
+        fetch(licenseRequestUrl, {
             method: 'POST',
             headers,
             body: requestBody
@@ -427,5 +460,95 @@ export class DRMEngine extends EventEmitter {
                 body: message
             };
         }
+    }
+
+    private _extractAssetIdFromInitData(initDataType: string, initData: Uint8Array): string | undefined {
+        if (initDataType !== 'sinf') {
+            return undefined;
+        }
+        const sinfPayloads = this._extractSinfPayloads(initData);
+        for (const sinfPayload of sinfPayloads) {
+            const encryption = CMAFReader.parseSinfTrack(sinfPayload);
+            this.log('Parsed sinf payload, found encryption:', encryption).debug();
+            if (!encryption?.kid) {
+                continue;
+            }
+            const kidHex = Array.from(encryption.kid)
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+            return DRMEngine._normalizeKeyId(kidHex);
+        }
+        return undefined;
+    }
+
+    private _extractSinfPayloads(initData: Uint8Array): Uint8Array[] {
+        const payloads: Uint8Array[] = [];
+        try {
+            const parsed = JSON.parse(new TextDecoder().decode(initData));
+            if (!Array.isArray(parsed?.sinf)) {
+                this.log('No sinf array found in initData JSON').warn();
+                return [initData];
+            }
+            for (const entry of parsed.sinf) {
+                if (typeof entry !== 'string' || entry.length === 0) {
+                    continue;
+                }
+                try {
+                    this.log('Trying to parse sinf entry as base64 :', entry).debug();
+                    payloads.push(Uint8Array.from(atob(entry), c => c.charCodeAt(0) || 0));
+                } catch (error) {
+                    this.log('Invalid base64 entry in sinf initData JSON, error:', error).warn();
+                }
+            }
+        } catch (error) {
+            this.log('initData was not a JSON wrapper, using raw payload only, error:', error).warn();
+            return [initData];
+        }
+        if (payloads.length === 0) {
+            this.log('No valid sinf payloads found in initData JSON, using raw payload only').warn();
+            return [initData];
+        }
+        return payloads;
+    }
+
+    /**
+     * Convert various key ID formats (base64, hex with or without dashes, URN with or without braces)
+     * to a normalized UUID string format (8-4-4-4-12 lowercase hex).
+     * @returns the normalized key ID string, or the original string if it cannot be parsed as a known format
+     */
+    private static _normalizeKeyId(raw: string): string {
+        let keyId = raw.trim().toLowerCase();
+        // Normalize common UUID decorations (URN prefix and surrounding braces).
+        keyId = keyId.replace(/^urn:uuid:/, '').replace(/[{}]/g, '');
+
+        // Already a canonical UUID string (8-4-4-4-12).
+        const uuidMatch = keyId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+        if (uuidMatch) {
+            return keyId;
+        }
+
+        // 32-char hex KID without dashes -> convert to UUID format.
+        const hexMatch = keyId.match(/^[0-9a-f]{32}$/);
+        if (hexMatch) {
+            return `${keyId.slice(0, 8)}-${keyId.slice(8, 12)}-${keyId.slice(12, 16)}-${keyId.slice(16, 20)}-${keyId.slice(20)}`;
+        }
+
+        // Try base64/base64url-encoded 16-byte KID -> decode and convert to UUID format.
+        const padded = keyId
+            .replace(/-/g, '+')
+            .replace(/_/g, '/')
+            .padEnd(Math.ceil(keyId.length / 4) * 4, '=');
+        try {
+            const binary = atob(padded);
+            if (binary.length === 16) {
+                const hex = Array.from(binary)
+                    .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
+                    .join('');
+                return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+            }
+        } catch (_) {}
+
+        // Unknown format: return a normalized lowercase string as-is.
+        return keyId;
     }
 }
