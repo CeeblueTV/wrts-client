@@ -124,8 +124,8 @@ export class HTTPAdaptiveSource extends Source {
         this._sequencePattern = mSequence.pattern.replace('{ext}', this.mediaExt);
 
         // WIP backward compatibility, remove it
-        const oldNode = metadata.protocolVersion.major < 2;
-        if (oldNode) {
+        const version = metadata.protocolVersion.major;
+        if (version < 2) {
             this._sequencePattern = this._sequencePattern.replace('{trackId}', '{trackIds}');
         }
 
@@ -276,7 +276,7 @@ export class HTTPAdaptiveSource extends Source {
                                     maxSequenceDuration: this._maxSequenceDuration
                                 })}`
                             ).warn();
-                            if (oldNode) {
+                            if (version < 2) {
                                 // WIP remove
                                 sequence = newSequence;
                             } else {
@@ -368,7 +368,7 @@ export class HTTPAdaptiveSource extends Source {
 
                 // Create promises
                 if (channels.reliable.size) {
-                    if (oldNode) {
+                    if (version < 2) {
                         for (const track of channels.reliable) {
                             promises.push(this._downloadSequence(playing, this._reliableController, track, sequence));
                         }
@@ -385,7 +385,7 @@ export class HTTPAdaptiveSource extends Source {
                     }
                 } else {
                     if (channels.skippable.size) {
-                        if (oldNode) {
+                        if (version < 2) {
                             for (const track of channels.skippable) {
                                 promises.push(this._downloadSequence(playing, this._skippableController, track, sequence));
                             }
@@ -396,7 +396,7 @@ export class HTTPAdaptiveSource extends Source {
                         }
                     }
                     if (channels.alterable.size) {
-                        if (oldNode) {
+                        if (version < 2) {
                             for (const track of channels.alterable) {
                                 promises.push(this._downloadSequence(playing, this._alterableController, track, sequence));
                             }
