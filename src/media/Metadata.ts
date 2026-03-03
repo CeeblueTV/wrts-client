@@ -75,19 +75,18 @@ export class Metadata extends Loggable {
             // Force in milliseconds!
             this._liveTimeValue *= 1000;
         }
-        let trackId = 0;
 
         const tracks = Array.isArray(obj.tracks) ? obj.tracks : [];
         for (const track of tracks) {
-            const mTrack = new MediaTrack(track.id ?? trackId++);
             const size = this.tracks.size;
-            if (this.tracks.set(mTrack.id, mTrack).size <= size) {
-                // Duplicated track
-                continue;
-            }
+            const mTrack = new MediaTrack(track.id ?? size);
             mTrack.codecString = track.codec || track.codecDescription;
             if (!mTrack.codecString) {
                 this.log(`Skipping track ${mTrack.id} because codec information is missing`).warn();
+                continue;
+            }
+            if (this.tracks.set(mTrack.id, mTrack).size <= size) {
+                // Duplicated track
                 continue;
             }
             AVC.readCodecString(mTrack.codecString, mTrack);
