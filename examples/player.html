@@ -467,12 +467,12 @@
                         log(
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
                         ).info();
-                    }
+                    };
                     this.player.onMessage = (name, time, duration, data) => {
                         log(
                             `Message reception ${Util.stringify({ name, time, duration, data })}`
                         ).info();
-                    }
+                    };
               
                     this.setBuffer(); // to set buffer size!
                     this.player.start(params, options.timeout);

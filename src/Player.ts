@@ -130,7 +130,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Event fired on a generic message
-     * @param namea
+     * @param name
      * @param data
      * @event
      */
