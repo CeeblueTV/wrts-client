@@ -151,6 +151,9 @@ export function writeCodecString(codec: Media.Codec, config?: Uint8Array): strin
             }
             return desc;
         }
+        case Media.Codec.VP8: {
+            return 'vp8';
+        }
     }
     log(`Miss support of ${codec} codec`).error();
     return '';
