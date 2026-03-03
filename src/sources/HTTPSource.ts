@@ -23,7 +23,7 @@ export class HTTPSource extends Source {
 
     protected setReliability(reliable: boolean) {
         if (!reliable) {
-            throw Error("WS doesn't support partial reliability");
+            throw Error("HTTP doesn't support partial reliability");
         }
     }
 
