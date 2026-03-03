@@ -15,7 +15,7 @@ import { Reader } from './Reader';
  * Format:
  * MEDIA PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type](7bit firstTime)[7bit duration << 2 | hasCompositionOffset<<1 | isKeyFrame](7bit compositionOffset) [frame] --
  * DATA  PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type][7bit time] [frame] --
- * INIT TRACKS  -- (7bit packetSize)[7bit 0 << 2 | 3] (7bit videoTrackId+1) (7bit audioTrackId+1)--
+ * INIT TRACKS  -- (7bit packetSize)[7bit 0 << 2 | 3]  (7bit audioTrackId+1)(7bit videoTrackId+1)--
  * METADATA -- (7bit packetSize)[7bit 0 << 2 | 0] [meta] --
  *
  * packetSize => optional packet size
@@ -39,7 +39,7 @@ export class RTSReader extends Reader {
         this._nextTimes = new Map<number, number>();
     }
 
-    protected _parse(packet: Uint8Array): number {
+    protected parse(packet: Uint8Array): number {
         const reader = new BinaryReader(packet);
         while (reader.available()) {
             let size = reader.available();
@@ -63,8 +63,10 @@ export class RTSReader extends Reader {
                     case 3: {
                         // INIT TRACKS
                         this._nextTimes.clear();
-                        this.onVideo(frame.read7Bit() - 1);
-                        this.onAudio(frame.read7Bit() - 1);
+                        this.onInitTracks({
+                            audio: frame.read7Bit() - 1,
+                            video: frame.read7Bit() - 1
+                        });
                         break;
                     }
                     case 0: {
@@ -91,16 +93,24 @@ export class RTSReader extends Reader {
                     const data = frame.read();
 
                     this._nextTimes.set(trackId, time + duration);
-                    if (type === Media.Type.AUDIO) {
-                        this.onAudio(trackId, { time, duration, isKeyFrame, compositionOffset, data });
-                    } else {
-                        this.onVideo(trackId, { time, duration, isKeyFrame, compositionOffset, data });
-                    }
+                    this.onSample(type, trackId, {
+                        time,
+                        duration,
+                        isKeyFrame,
+                        compositionOffset,
+                        data
+                    });
                 } else {
-                    // DATA String
-                    const time = frame.read7Bit();
+                    // DATA PACKET
+                    const time = frame.read7Bit() + (this._nextTimes.get(trackId) ?? 0);
+                    const duration = frame.read7Bit();
                     this._readCustom(frame);
-                    this.onData(trackId, time, JSON.parse(Util.stringify(frame.read())));
+                    this._nextTimes.set(trackId, time);
+                    this.onSample(Media.Type.DATA, trackId, {
+                        time,
+                        duration,
+                        data: frame.read()
+                    });
                 }
             }
         }

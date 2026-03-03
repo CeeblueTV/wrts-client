@@ -42,33 +42,30 @@ export abstract class Reader extends EventEmitter {
     onMetadata(metadata: Metadata) {}
 
     /**
-     * Event fire on new audio {@link Media.Sample}
-     * @param trackId
-     * @param sample
+     * Event fire on tracks initialization
      */
-    onAudio(trackId: number, sample?: Media.Sample) {
-        this.log(`Audio sample uncatched on track ${trackId}`).warn();
+    onInitTracks(tracks: Media.Tracks) {
+        this.log(`Init tracks ${Util.stringify(tracks)}`).info();
     }
 
     /**
-     * Event fire on new video {@link Media.Sample}
+     * Event fire on new sample {@link Media.Sample}
      * @param trackId
      * @param sample
      */
-    onVideo(trackId: number, sample?: Media.Sample) {
-        this.log(`Video sample uncatched on track ${trackId}`).warn();
+    onSample(type: Media.Type, trackId: number, sample: Media.Sample) {
+        const types = ['Data', 'Audio', 'Video'];
+        this.log(`${types[type]} sample uncatched on track ${trackId}`).warn();
     }
 
     /**
-     * Event fired on new data
-     * @param trackId
-     * @param time
+     * Event fired on a generic message
+     * @param name
      * @param data
      * @event
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onData(trackId: number, time: number, data: any) {
-        this.log(`Data sample uncatched on track ${trackId}`).warn();
+    onMessage(name: string, time: number, duration: number, data: Uint8Array) {
+        this.log(`Uncaught message ${Util.stringify({ name, time, duration, data })}`).warn();
     }
 
     private _data?: Uint8Array;
@@ -80,14 +77,9 @@ export abstract class Reader extends EventEmitter {
         this._data = undefined;
     }
 
-    read(data: BufferSource | string) {
+    read(data: BufferSource) {
         // try-catch to anticipate Reader implementation issue
         try {
-            if (typeof data == 'string') {
-                // JSON metadata or time
-                this._parseString(data);
-                return;
-            }
             let packet = 'buffer' in data ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
             // Binary!
             if (this._data) {
@@ -96,7 +88,7 @@ export abstract class Reader extends EventEmitter {
                 newData.set(packet, this._data.byteLength); // new data
                 packet = newData;
             }
-            const remaining = Math.min(this._parse(packet), packet.byteLength);
+            const remaining = Math.min(this.parse(packet), packet.byteLength);
             if (remaining > 0) {
                 this._data = new Uint8Array(packet.buffer, packet.byteOffset + packet.byteLength - remaining, remaining);
             } else {
@@ -111,16 +103,7 @@ export abstract class Reader extends EventEmitter {
      * Children class must implement the parsing logic, and returns how many bytes have to be kept.
      * @param packet the binary to parse
      */
-    protected _parse(packet: Uint8Array): number {
-        throw Error(this.constructor.name + ' must implement _parse');
-    }
-
-    protected _parseString(data: string) {
-        const obj = JSON.parse(data);
-        if (obj.trackId != null) {
-            this.onData(obj.trackId, obj.time, obj.data ?? data);
-        } else {
-            this.onMetadata(new Metadata(obj));
-        }
+    protected parse(packet: Uint8Array): number {
+        throw Error(this.constructor.name + ' must implement parse');
     }
 }

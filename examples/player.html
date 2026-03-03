@@ -381,6 +381,9 @@
                     let accessToken = options.token || options.id;
                     let endPoint = this.host;
                     let mediaExt;
+                    if(this.sourceType === HTTPSource) {
+                        mediaExt = '.mp4'; // force CMAF for HTTP Streaming
+                    }
                     try {
                         endPoint = new URL(streamName);
                         streamName = endPoint.pathname;
@@ -399,7 +402,7 @@
                         endPoint:endPoint.toString(),
                         streamName,
                         accessToken,
-                        mediaExt: this.sourceType === HTTPSource ? '.mp4' : mediaExt // force CMAF for HTTP Streaming
+                        mediaExt
                     };
                 },
 
@@ -459,6 +462,17 @@
               
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
+                    this.player.onData = (track, time, duration, data) => {
+                        const codec = this.player.metadata.tracks.get(track)?.codecString;
+                        log(
+                            `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
+                        ).info();
+                    };
+                    this.player.onMessage = (name, time, duration, data) => {
+                        log(
+                            `Message reception ${Util.stringify({ name, time, duration, data })}`
+                        ).info();
+                    };
               
                     this.setBuffer(); // to set buffer size!
                     this.player.start(params, options.timeout);
@@ -493,8 +507,8 @@
                     this.player = null;
                     this.playState = PlayState.STOPPED;
                 },
-                onTrackChange(audioTrack, videoTrack) {
-                    log(`onTrackChange ${Util.stringify({audioTrack, videoTrack})}`).info();
+                onTrackChange(audioTrack, videoTrack, dataTrack) {
+                    log(`onTrackChange ${Util.stringify({audioTrack, videoTrack, dataTrack})}`).info();
                     if(this.videoTrackId != null) {
                         this.videoTrackId = videoTrack;
                     }

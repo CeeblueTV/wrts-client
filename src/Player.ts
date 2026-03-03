@@ -122,13 +122,21 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Event fired when data is received in the stream
-     * @param trackId
-     * @param time
+     * @event
+     */
+    onData(track: number, time: number, duration: number, data: Uint8Array) {
+        this.log(`Data reception ${Util.stringify({ track, time, duration, data })}`).info();
+    }
+
+    /**
+     * Event fired on a generic message
+     * @param name
      * @param data
      * @event
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onData(trackId: number, time: number, data: any) {}
+    onMessage(name: string, time: number, duration: number, data: Uint8Array) {
+        this.log(`Message reception ${Util.stringify({ name, time, duration, data })}`).info();
+    }
 
     /**
      * {@inheritDoc Source.onMetadata}
@@ -142,8 +150,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * {@inheritDoc Source.onTrackChange}
      * @event {@link Source.onTrackChange}
      */
-    onTrackChange(audioTrack: number, videoTrack: number) {
-        this.log(Util.stringify({ audioTrack, videoTrack })).info();
+    onTrackChange(audioTrack: number, videoTrack: number, dataTrack: Set<number>) {
+        this.log(Util.stringify({ audioTrack, videoTrack, dataTrack })).info();
     }
 
     /**
@@ -260,6 +268,24 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             throw Error('Cannot assign video track on stopped player');
         }
         this._source.videoTrack = idx;
+    }
+
+    /**
+     * Select a or multiple data track to the index provided, must be set after {@link Player.onStart starting}.
+     * When set to `undefined` it selects all data tracks available.
+     */
+    set dataTrack(idx: number | Array<number> | Set<number> | undefined) {
+        if (!this._source) {
+            throw Error('Cannot assign data track on stopped player');
+        }
+        this._source.dataTrack = idx;
+    }
+
+    /**
+     * Index of the data track being received, can be undefined if the player is not playing
+     */
+    get dataTrack(): Set<number> | undefined {
+        return this._source?.dataTrack;
     }
 
     /**
@@ -681,7 +707,14 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const protocol = params.endPoint.substring(0, params.endPoint.indexOf('://'));
             this._source = new (this.SourceClass || Source.getClass(protocol) || HTTPAdaptiveSource)(this, params);
             this._source.log = this.log.bind(this, this._source?.name + ':') as ILog;
-            this._source.onTrackChange = this._onTrackChange.bind(this);
+            this._source.onTrackChange = (audioTrack: number, videoTrack: number, dataTrack: Set<number>) => {
+                if (!this._playback) {
+                    return;
+                }
+                this._playback.audioEnabled = audioTrack >= 0;
+                this._playback.videoEnabled = videoTrack >= 0;
+                this.onTrackChange(audioTrack, videoTrack, dataTrack);
+            };
             this._source.onMetadata = (metadata: Metadata) => {
                 this._metadata = metadata;
                 return this.onMetadata(metadata);
@@ -689,23 +722,18 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._source.onFinalizeRequest = (url: URL, headers: Headers) => {
                 this.onFinalizeRequest(url, headers);
             };
-            this._source.onSample = (trackId: number, sample: Media.Sample) => {
-                if (!this._playback) {
-                    this.stop({
-                        type: 'PlayerError',
-                        name: 'Playback error',
-                        detail: 'Append sample before to have initialized media playback'
-                    });
-                    return;
-                }
-                if (trackId === this._source?.videoTrack) {
-                    this._playback.appendVideo(this._metadata, trackId, sample);
-                } else {
-                    this._playback.appendAudio(this._metadata, trackId, sample);
-                }
+            this._source.onAudio = (trackId: number, sample: Media.Sample) => {
+                this._playback?.appendAudio(this._metadata, trackId, sample);
             };
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            this._source.onData = (trackId: number, time: number, data: any) => this.onData(trackId, time, data);
+            this._source.onVideo = (trackId: number, sample: Media.Sample) => {
+                this._playback?.appendVideo(this._metadata, trackId, sample);
+            };
+            this._source.onData = (trackId: number, sample: Media.Sample) => {
+                this.onData(trackId, sample.time, sample.duration, sample.data);
+            };
+            this._source.onMessage = (name: string, time: number, duration: number, data: Uint8Array) => {
+                this.onMessage(name, time, duration, data);
+            };
             this._source.onClose = (error?: SourceError) => this.stop(error);
 
             this.onStart();
@@ -867,10 +895,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     this._source.close();
                     // remove events to prevent against an incorrect Source implementation
                     this._source.onClose = Util.EMPTY_FUNCTION;
-                    this._source.onData = Util.EMPTY_FUNCTION;
                     this._source.onMetadata = Util.EMPTY_FUNCTION;
                     this._source.onFinalizeRequest = Util.EMPTY_FUNCTION;
-                    this._source.onSample = Util.EMPTY_FUNCTION;
+                    this._source.onAudio = Util.EMPTY_FUNCTION;
+                    this._source.onVideo = Util.EMPTY_FUNCTION;
+                    this._source.onData = Util.EMPTY_FUNCTION;
+                    this._source.onMessage = Util.EMPTY_FUNCTION;
                     this._source.onTrackChange = Util.EMPTY_FUNCTION;
                 }
 
@@ -949,15 +979,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.log('new ManagedMediaSource').info();
             return new ManagedMediaSource();
         }
-    }
-
-    private _onTrackChange(audioTrack: number, videoTrack: number) {
-        if (!this._playback) {
-            return;
-        }
-        this._playback.audioEnabled = audioTrack >= 0;
-        this._playback.videoEnabled = videoTrack >= 0;
-        this.onTrackChange(audioTrack, videoTrack);
     }
 
     private async _tryToPlay() {

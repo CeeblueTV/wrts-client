@@ -4,25 +4,15 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { Connect, Util } from '@ceeblue/web-utils';
+import { Connect, Util, Loggable } from '@ceeblue/web-utils';
 import * as Media from './Media';
 import * as AVC from './AVC';
 import { MediaTrack } from './MediaTrack';
 
-function filter(tracks: Map<number, MediaTrack>, medias: Array<MediaTrack>, codecs: Set<Media.Codec>) {
-    for (let i = 0; i < medias.length; ++i) {
-        const media = medias[i];
-        if (!codecs.has(media.codec)) {
-            tracks.delete(media.id);
-            medias.splice(i--, 1);
-        }
-    }
-}
-
 /**
  * Metadata representation
  */
-export class Metadata {
+export class Metadata extends Loggable {
     /**
      * The version of the protocol
      */
@@ -67,6 +57,7 @@ export class Metadata {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(obj?: any) {
+        super();
         if (obj == null) {
             return;
         }
@@ -84,31 +75,49 @@ export class Metadata {
             // Force in milliseconds!
             this._liveTimeValue *= 1000;
         }
-        let trackId = 0;
 
         const tracks = Array.isArray(obj.tracks) ? obj.tracks : [];
         for (const track of tracks) {
-            const mTrack = new MediaTrack(track.id ?? trackId++);
-            switch ((track.type || '').toLowerCase()) {
-                case 'audio':
+            const size = this.tracks.size;
+            const mTrack = new MediaTrack(track.id ?? size);
+            mTrack.codecString = track.codec || track.codecDescription;
+            if (!mTrack.codecString) {
+                this.log(`Skipping track ${mTrack.id} because codec information is missing`).warn();
+                continue;
+            }
+            if (this.tracks.set(mTrack.id, mTrack).size <= size) {
+                // Duplicated track
+                continue;
+            }
+            AVC.readCodecString(mTrack.codecString, mTrack);
+            if (!mTrack.codec) {
+                // no found, force cast codecStirng to Media.Codec (in an upper case form)
+                mTrack.codec = mTrack.codecString.toUpperCase() as Media.Codec;
+            }
+
+            mTrack.bandwidth = Number(track.bandwidth) || mTrack.bandwidth;
+            mTrack.currentTime = Number(track.currentTime) || mTrack.currentTime;
+
+            const type = (track.type || '').toLowerCase();
+
+            if (type === 'data') {
+                mTrack.type = Media.Type.DATA;
+                this.dataTracks.push(mTrack);
+            } else {
+                // Media
+                mTrack.config = Uint8Array.from(atob(track.config as string), c => c.charCodeAt(0) || 0);
+                if (type === 'audio') {
                     mTrack.type = Media.Type.AUDIO;
                     mTrack.rate = Number(track.sampleRate) || mTrack.rate;
                     mTrack.channels = Number(track.channels) || mTrack.channels;
-                    break;
-                case 'video':
+                    this.audioTracks.push(mTrack);
+                } else if (type === 'video') {
                     mTrack.type = Media.Type.VIDEO;
                     mTrack.resolution = track.resolution ?? mTrack.resolution;
                     mTrack.rate = Number(track.frameRate) || mTrack.rate;
-                    break;
+                    this.videoTracks.push(mTrack);
+                }
             }
-            mTrack.codecString = track.codec || track.codecDescription;
-            AVC.readCodecString(mTrack.codecString, mTrack);
-
-            mTrack.bandwidth = Number(track.bandwidth) || mTrack.bandwidth;
-            mTrack.config = Uint8Array.from(atob(track.config as string), c => c.charCodeAt(0) || 0);
-            mTrack.currentTime = Number(track.currentTime) || mTrack.currentTime;
-
-            this.tracks.set(mTrack.id, mTrack);
         }
     }
 
@@ -129,7 +138,7 @@ export class Metadata {
         tracks.sort((track1: MediaTrack, track2: MediaTrack) => track2.bandwidth - track1.bandwidth);
 
         // Fill related collection and make each track unique
-        this.audioTracks.length = this.videoTracks.length = 0;
+        this.dataTracks.length = this.audioTracks.length = this.videoTracks.length = 0;
         this.tracks.clear();
         for (const track of tracks) {
             const size = this.tracks.size;
@@ -155,25 +164,51 @@ export class Metadata {
     }
 
     /**
-     * Return a new metadata subset with only track with a codec supported
-     * @param codecs codecs supported
-     * @returns the subset of metadata
+     * Filter metadata to subset with only audio track with a codec supported
+     * @param codecs audio codecs supported
+     * @returns the metadata modified
      */
-    subset(codecs?: Set<Media.Codec>): Metadata {
-        const metadata: Metadata = { ...this };
+    filterAudios(codecs?: Array<Media.Codec>): this {
+        return this._filter(this.audioTracks, new Set(codecs));
+    }
+
+    /**
+     * Filter metadata to subset with only video track with a codec supported
+     * @param codecs video codecs supported
+     * @returns the metadata modified
+     */
+    filterVideos(codecs?: Array<Media.Codec>): this {
+        return this._filter(this.videoTracks, new Set(codecs));
+    }
+
+    /**
+     * Filter metadata to subset with only data track with a codec supported
+     * @param codecs data codecs supported
+     * @returns the metadata modified
+     */
+    filterDatas(codecs?: Array<Media.Codec>): this {
+        return this._filter(this.dataTracks, new Set(codecs));
+    }
+
+    private _filter(medias: Array<MediaTrack>, codecs?: Set<Media.Codec>): this {
         if (codecs) {
-            filter(metadata.tracks, metadata.audioTracks, codecs);
-            filter(metadata.tracks, metadata.videoTracks, codecs);
+            for (let i = 0; i < medias.length; ++i) {
+                const media = medias[i];
+                if (!codecs.has(media.codec)) {
+                    this.tracks.delete(media.id);
+                    medias.splice(i--, 1);
+                }
+            }
             // Fix UP/DOWN
-            for (const [, track] of metadata.tracks) {
-                while (track.up && !metadata.tracks.has(track.up.id)) {
+            for (const track of medias) {
+                while (track.up && !this.tracks.has(track.up.id)) {
                     track.up = track.up.up;
                 }
-                while (track.down && !metadata.tracks.has(track.down.id)) {
+                while (track.down && !this.tracks.has(track.down.id)) {
                     track.down = track.down.down;
                 }
             }
         }
-        return metadata;
+        return this;
     }
 }
