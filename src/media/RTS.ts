@@ -15,3 +15,7 @@ export function addSourceParams(url: URL, tracks: Media.Tracks, reliable: boolea
     }
     url.searchParams.set('reliable', reliable ? 'true' : 'false');
 }
+
+export enum CustomType {
+    SUBSAMPLE_ENCRYPTED = 0x01,
+}

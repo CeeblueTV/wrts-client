@@ -50,7 +50,15 @@ function filter(tracks: Map<number, MediaTrack>, medias: Array<MediaTrack>, code
  */
 export class Metadata {
     /**
-     * Date of Metadata creatiob
+     * The version of the protocol
+     */
+    protocolVersion: {
+        major: number;
+        minor: number;
+        patch: number;
+    } = { major: 0, minor: 0, patch: 0 };
+    /**
+     * Date of Metadata creation
      */
     date: Date = new Date();
     /**
@@ -92,6 +100,15 @@ export class Metadata {
         if (obj == null) {
             return;
         }
+        if (typeof obj.version === 'string') {
+            const parts = obj.version.split('.');
+            this.protocolVersion.major = parseInt(parts[0]) || 0;
+            this.protocolVersion.minor = parseInt(parts[1]) || 0;
+            this.protocolVersion.patch = parseInt(parts[2]) || 0;
+        } else if (typeof obj.version === 'number') {
+            this.protocolVersion.major = obj.version;
+        }
+
         this._liveTimeValue = Number(obj.currentTime) || Number(obj.liveTime) || this._liveTimeValue;
         if (String(this._liveTimeValue).indexOf('.') >= 0) {
             // Force in milliseconds!

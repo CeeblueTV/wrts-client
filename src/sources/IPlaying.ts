@@ -47,6 +47,12 @@ export interface IPlaying extends EventEmitter {
     onBufferState(oldState: BufferState): void;
 
     /**
+     * Event fire when buffer amount changes by a configured threshold
+     * @event
+     */
+    onBufferChange(): void;
+
+    /**
      * Event fire on playback stall
      * @event
      */
@@ -140,6 +146,12 @@ export interface IPlaying extends EventEmitter {
      * Defaults to the value of {@link Media.screenResolution}
      */
     get maximumResolution(): Media.Resolution | undefined;
+
+    /**
+     * Source is CMAF and passthrough it to MSE, it's a debugging mode
+     * activable when you set {@link Connect.Params.mediaExt} to 'cmaf'
+     */
+    get passthroughCMAF(): boolean | undefined;
 
     /**
      * Gets whether playback is waiting an event before flushing

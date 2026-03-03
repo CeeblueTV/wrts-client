@@ -43,7 +43,7 @@ export class CMAFReader extends Reader {
     private _metadata?: Metadata;
     private _passthrough?: BinaryWriter;
 
-    constructor(passthrough: boolean = true) {
+    constructor(passthrough: boolean = false) {
         super();
         this._tracks = new Map<number, Track>();
         this._defaultTimeScale = 1000;

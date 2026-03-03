@@ -323,7 +323,7 @@
 
                     canvas: document.createElement('canvas'),
 
-                    currentParams: null,
+                    startTime: 0,
                     adaptiveFrameSkipping: true,
                     streamMetadata: null,
                     netDescription: "",
@@ -500,6 +500,8 @@
 
                 
                 play() {
+                    this.startTime = Util.time();
+                    log('Play stream', this.stream, 'with options', options).info();
                     if (this.player) {
                         this.player.stop();
                         return;
@@ -517,8 +519,8 @@
                     }
 
                     // build params
-                    this.currentParams = this.buildConnectParams();
-                    if(!this.currentParams.streamName) {
+                    const params = this.buildConnectParams();
+                    if(!params.streamName) {
                         this.streamErrorMessage = "Enter a non-empty stream name or URL to play";
                         return;
                     }
@@ -528,6 +530,9 @@
                     const videoElement = this.$refs.video;
                     videoElement.muted = this.muted;
                     videoElement.autoplay = true;
+                    videoElement.onloadeddata = () => {
+                        log('TTFF :', Util.time()-this.startTime).info();
+                    };
                     videoElement.onerror = () => {
                         const mediaError = videoElement.error;
                         if (mediaError) {
@@ -563,7 +568,7 @@
                     }
               
                     this.setBuffer(); // to set buffer size!
-                    this.player.start(this.currentParams, options.timeout);
+                    this.player.start(params, options.timeout);
                 },
                 onStart() {
                     log('onStart').info();

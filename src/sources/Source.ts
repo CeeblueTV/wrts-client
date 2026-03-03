@@ -9,6 +9,7 @@ import { CMCD, CMCDMode, ICMCD } from '../media/CMCD';
 import { Metadata } from '../media/Metadata';
 import { CMAFReader } from '../media/reader/CMAFReader';
 import { RTSReader } from '../media/reader/RTSReader';
+import { RTSReaderOld } from '../media/reader/RTSReaderOld';
 import { Reader, ReaderError } from '../media/reader/Reader';
 import { IPlaying } from './IPlaying';
 import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError } from '@ceeblue/web-utils';
@@ -270,14 +271,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     }
 
     /**
-     * Source is CMAF and passthrough it to MSE, it's a debugging mode
-     * activable when you set {@link Connect.Params.mediaExt} to 'cmaf'
-     */
-    get passthroughCMAF(): boolean {
-        return this._passthroughCMAF;
-    }
-
-    /**
      * @override
      * {@inheritDoc ICMCD.cmcd}
      */
@@ -354,7 +347,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _dataTime: number;
     private _playing: IPlaying;
     private _mediaExt: string;
-    private _passthroughCMAF: boolean;
     private _recvByteRate: ByteRate;
     private _running: boolean;
     private _cmcdMode?: CMCDMode;
@@ -371,11 +363,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     constructor(playing: IPlaying, protocol: string, params: Connect.Params, type: Connect.Type = Connect.Type.WRTS) {
         super();
         // (params.query = new URLSearchParams(params.query)).set('audio', 'none');
-        this._passthroughCMAF = Util.trimStart(params.mediaExt?.toLowerCase() ?? '', '.') === 'cmaf';
-        if (this._passthroughCMAF) {
-            // Rename it to mp4, cmaf is usefull only to debug reason for bypassing a CMAF source
-            params.mediaExt = 'mp4';
-        }
         this._url = Connect.buildURL(type, params, protocol);
         this._mediaExt = params.mediaExt || ''; // aftet buildURL call to get mediaExt possible correction
         this._streamName = params.streamName || '';
@@ -414,8 +401,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
         this._closed = true;
         clearTimeout(this._trackRequest);
-        if (error && error.type === 'SourceError' && error.name === 'Request error') {
-            // morph a possible request error to a stream
+        if (error && error.type === 'SourceError' && 'detail' in error) {
+            // WIP MF fix = >morph a possible request error to a stream unavailable
+            // Could be fixed in server side, but it impacts a  lot of code.
             const detail = error.detail.toLowerCase();
             if (detail.startsWith('stream open failed') || detail.startsWith('404')) {
                 error = { type: 'SourceError', name: 'Resource unavailable' };
@@ -744,11 +732,18 @@ export abstract class Source extends EventEmitter implements ICMCD {
         // default behavior is to select the correct reader related with the file extension in the url
         let reader: Reader;
         switch (this._mediaExt) {
-            case 'rts':
-                reader = new RTSReader({ withSize: params.isStream });
+            case 'rts': {
+                // WIP remove old version when there is no more old nodes
+                const protocolVersion = this.metadata?.protocolVersion;
+                if (protocolVersion && protocolVersion.major <= 1) {
+                    reader = new RTSReaderOld({ withSize: params.isStream });
+                } else {
+                    reader = new RTSReader({ withSize: params.isStream });
+                }
                 break;
+            }
             case 'mp4':
-                reader = new CMAFReader(this.passthroughCMAF);
+                reader = new CMAFReader(this._playing.passthroughCMAF);
                 break;
             default:
                 throw Error('No demuxer found for ' + this._url.pathname);
