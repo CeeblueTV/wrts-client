@@ -490,19 +490,20 @@ export class HTTPAdaptiveSource extends Source {
                 playing.bufferState === BufferState.LOW // we are low in last rendition before to download keyframe => last chance rendition !
             ) {
                 // do the HEAD request to get first-sample-length
-                let response = await this._downloadSequence(playing, controller, tracks, sequence, 0);
+                const response = await this._downloadSequence(playing, controller, tracks, sequence, 0);
                 if (response.ok) {
                     // WIP remove old 'first-frame-length'
-                    length = Number(response.headers.get('first-sample-length') || response.headers.get('first-frame-length'));
-                    if (!length) {
-                        response = new Response(null, { headers: response.headers, status: 400 });
-                        response.error = `No valid first-sample-length header from ${url.toString()}`;
-                        return response;
+                    length = parseInt(
+                        response.headers.get('first-sample-length') || response.headers.get('first-frame-length') || ''
+                    );
+                    if (length) {
+                        onlyKeyFrame = true;
+                        this.log(
+                            `Download only first video frame of ${controllerType} sequence ${sequence} track ${strTracks}`
+                        ).warn();
+                    } else {
+                        this.log('Cannot download only first video because there is no valid first-sample-length header').error();
                     }
-                    this.log(
-                        `Download only first video frame of ${controllerType} sequence ${sequence} track ${strTracks}`
-                    ).warn();
-                    onlyKeyFrame = true;
                 } else {
                     // aborted, log already displaid and nothing downloaded
                     if (this.closed) {
@@ -550,7 +551,7 @@ export class HTTPAdaptiveSource extends Source {
                     });
                 }
 
-                const maxSequenceDuration = Number(response.headers.get('max-sequence-duration')) || NaN;
+                const maxSequenceDuration = parseInt(response.headers.get('max-sequence-duration') || '');
                 if (!isNaN(maxSequenceDuration)) {
                     this._maxSequenceDuration = maxSequenceDuration;
                 }
