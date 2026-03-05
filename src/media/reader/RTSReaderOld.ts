@@ -40,7 +40,7 @@ export class RTSReaderOld extends Reader {
         this._nextTimes = new Map<number, number>();
     }
 
-    protected _parse(packet: Uint8Array): number {
+    protected parse(packet: Uint8Array): number {
         const reader = new BinaryReader(packet);
         while (reader.available()) {
             if (!this._header) {
@@ -68,8 +68,10 @@ export class RTSReaderOld extends Reader {
                     case 3: {
                         // INIT TRACKS
                         this._nextTimes.clear();
-                        this.onVideo(header.read7Bit() - 1);
-                        this.onAudio(header.read7Bit() - 1);
+                        this.onInitTracks({
+                            video: header.read7Bit() - 1,
+                            audio: header.read7Bit() - 1
+                        });
                         break;
                     }
                     case 0: {
@@ -92,7 +94,11 @@ export class RTSReaderOld extends Reader {
                 if (!data) {
                     return reader.available();
                 }
-                this.onData(trackId, time, JSON.parse(Util.stringify(data)));
+                this.onSample(Media.Type.DATA, trackId, {
+                    time,
+                    duration: 0,
+                    data
+                });
             } else {
                 // MEDIA PACKET
                 const time = this._nextTimes.get(trackId) ?? header.read7Bit();
@@ -108,11 +114,7 @@ export class RTSReaderOld extends Reader {
                 }
 
                 this._nextTimes.set(trackId, time + duration);
-                if (type === Media.Type.AUDIO) {
-                    this.onAudio(trackId, { time, duration, isKeyFrame, compositionOffset, data });
-                } else {
-                    this.onVideo(trackId, { time, duration, isKeyFrame, compositionOffset, data });
-                }
+                this.onSample(type, trackId, { time, duration, isKeyFrame, compositionOffset, data });
             }
 
             this._header = undefined;
