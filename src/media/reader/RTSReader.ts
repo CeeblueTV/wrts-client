@@ -118,26 +118,26 @@ export class RTSReader extends Reader {
     private _readCustom(reader: BinaryReader, sample?: Media.Sample) {
         let size;
         while ((size = reader.read7Bit())) {
-            const type = reader.read7Bit();
+            if (reader.available() < size) {
+                this.log('Not enough data for custom type, skipping', { size, available: reader.available() }).warn();
+                return;
+            }
+            const typeReader = new BinaryReader(reader.read(size));
+            const type = typeReader.read7Bit();
             switch (type) {
                 case CustomType.SUBSAMPLE_ENCRYPTED: {
                     if (sample) {
                         sample.subSamples = new Array<{ clearBytes: number; encryptedBytes: number }>(); // Encrypted list
-                        const subSampleCount = reader.read7Bit();
+                        const subSampleCount = typeReader.read7Bit();
                         for (let i = 0; i < subSampleCount; i++) {
                             sample.subSamples.push({
-                                clearBytes: reader.read7Bit(),
-                                encryptedBytes: reader.read7Bit()
+                                clearBytes: typeReader.read7Bit(),
+                                encryptedBytes: typeReader.read7Bit()
                             });
                         }
-                        break;
-                    } else {
-                        reader.read(size);
                     }
                     break;
                 }
-                default:
-                    reader.read(size);
             }
         }
     }
