@@ -29,6 +29,66 @@
             #video-container {
                 width: 100%;
             }
+            .tab-panel {
+                /*text-align: left;*/
+            }
+            .tab-panel .nav-tabs {
+                border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            }
+            .tab-panel .nav-link {
+                cursor: pointer;
+            }
+            .tab-panel-content {
+                position: relative;
+                min-height: 18rem;
+                padding-top: 0.75rem;
+            }
+            .tab-panel-pane {
+                width: 100%;
+            }
+            .tab-panel-pane.is-hidden {
+                visibility: hidden;
+                pointer-events: none;
+            }
+            .tab-panel-pane--overlay {
+                position: absolute;
+                inset: 0;
+                padding-top: 0.75rem;
+            }
+            .tab-panel-pane--overlay.is-hidden {
+                display: block;
+            }
+            .messages-panel {
+                background-color: #ffffff;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 0.25rem;
+                padding: 0.25rem 0;
+                height: calc(10 * 2rem);
+                overflow-x: auto;
+                overflow-y: auto;
+            }
+            .messages-list {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+                font-family: monospace;
+                font-size: 0.9rem;
+            }
+            .messages-list li {
+                padding: 0.35rem 0.75rem;
+                border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+                white-space: pre;
+                min-width: max-content;
+                line-height: 1.3rem;
+            }
+            .messages-empty {
+                color: #6c757d;
+                font-style: italic;
+                padding: 1rem 0.75rem;
+            }
+            .tab-badge {
+                margin-left: 0.35rem;
+            }
 
             video {
                 background-color: #333333;
@@ -243,18 +303,44 @@
 
                 <p class="text-center font-weight-light font-italic" v-html="netDescription"></p>
 
-                <div class="form-row">
-                    <ul class="list-group list-group-flush" ref="stats" style="width: 100%;">
+                <div class="tab-panel">
+                    <ul class="nav nav-tabs">
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: activeBottomTab === 'graph' }" @click="selectBottomTab('graph')">
+                                Graph
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: activeBottomTab === 'messages' }" @click="selectBottomTab('messages')">
+                                Messages
+                                <span class="badge badge-primary tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+                            </a>
+                        </li>
                     </ul>
-                </div>
-                <div class="form-row" v-show="hasMetrics">
-                    <div class="form-group mx-auto">
-                        <img class="m-1" alt="Reset metrics view" title="Reset incremental metrics and rescale the chart" type="button" @click="resetMetrics()" src="./assets/reload.png" style="object-fit:contain" height="32">
-                        <img class="m-1" alt="Download metrics" title="Download metrics as a CSV file" type="button" @click="downloadStats()" src="./assets/download.png" style="object-fit:contain" height="32">
-                        <img class="m-1" alt="Dump media" title="Dump media as MP4 files" type="button" @click="dump()" src="./assets/dump.png" style="object-fit:contain" height="32" v-show="audioDump || videoDump">
+                    <div class="tab-panel-content">
+                        <div class="tab-panel-pane" :class="{ 'is-hidden': activeBottomTab !== 'graph' }">
+                            <div class="form-row">
+                                <ul class="list-group list-group-flush" ref="stats" style="width: 100%;">
+                                </ul>
+                            </div>
+                            <div class="form-row" v-show="hasMetrics">
+                                <div class="form-group mx-auto">
+                                    <img class="m-1" alt="Reset metrics view" title="Reset incremental metrics and rescale the chart" type="button" @click="resetMetrics()" src="./assets/reload.png" style="object-fit:contain" height="32">
+                                    <img class="m-1" alt="Download metrics" title="Download metrics as a CSV file" type="button" @click="downloadStats()" src="./assets/download.png" style="object-fit:contain" height="32">
+                                    <img class="m-1" alt="Dump media" title="Dump media as MP4 files" type="button" @click="dump()" src="./assets/dump.png" style="object-fit:contain" height="32" v-show="audioDump || videoDump">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-panel-pane tab-panel-pane--overlay" :class="{ 'is-hidden': activeBottomTab !== 'messages' }">
+                            <div class="messages-panel" ref="messagesPanel">
+                                <div class="messages-empty" v-if="messages.length === 0">No data messages received yet.</div>
+                                <ul class="messages-list" v-else>
+                                    <li v-for="(message, idx) in messages" :key="idx">[{{ message.track }}] {{ message.receivedAt }} : {{ message.text }}</li>
+                                </ul>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                
             </div>
 
             
@@ -266,7 +352,7 @@
         // development version, includes helpful console warnings
         // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
         // production version, optimized for size and speed
-        import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
+        import { createApp, nextTick } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
         const { EpochTime, Util, NetAddress, Connect, LogLevel, log, UIMetrics, BinaryWriter } = utils;
 
         // displays logs ERROR, WARN & INFO logs,
@@ -330,6 +416,9 @@
                     videoTracks: new Map(),
                     videoTrack: 'Video',
                     videoTrackId: undefined,
+                    activeBottomTab: 'graph',
+                    messages: [],
+                    unreadMessages: 0,
                     sourceType: undefined,
                     audioTracks: new Map(),
                     audioTrack: 'Audio',
@@ -513,6 +602,7 @@
                     this.streamErrorMessage = null; 
                     // reset stats!
                     this.resetMetrics(true);
+                    this.resetMessages();
                     // reset dump if activated
                     if(this.audioDump) {
                         this.audioDump.clear();
@@ -565,6 +655,7 @@
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
                     this.player.onData = (track, time, duration, data) => {
+                        this.pushMessage(track, time, data);
                         const codec = this.player.metadata.tracks.get(track)?.codecString;
                         log(
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
@@ -611,6 +702,7 @@
                     this.videoTracks = new Map();
                     this.videoTrack = 'Video';
                     this.videoTrackId = undefined;
+                    this.resetMessages();
 
                     this.player = null;
                     this.playState = PlayState.STOPPED;
@@ -645,6 +737,57 @@
                             this.audioTracks.set(id,track.toString());
                         }
                     }
+                },
+                selectBottomTab(tab) {
+                    this.activeBottomTab = tab;
+                    if(tab === 'messages') {
+                        this.unreadMessages = 0;
+                        this.scrollMessagesToBottom();
+                    }
+                },
+                resetMessages() {
+                    this.messages = [];
+                    this.unreadMessages = 0;
+                    this.activeBottomTab = 'graph';
+                },
+                formatReceptionTime(date = new Date()) {
+                    return date.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                },
+                scrollMessagesToBottom() {
+                    nextTick(() => {
+                        const panel = this.$refs.messagesPanel;
+                        if(panel) {
+                            panel.scrollTop = panel.scrollHeight;
+                        }
+                    });
+                },
+                pushMessage(track, time, data) {
+                    const decoder = new TextDecoder();
+                    let message;
+                    try {
+                        message = decoder.decode(data).trim();
+                    } catch(_) {
+                        message = Array.from(data).join(' ');
+                    }
+                    if(!message) {
+                        message = '[binary data]';
+                    }
+                    this.messages.push({
+                        track,
+                        receivedAt: this.formatReceptionTime(),
+                        text: message.replace(/[\r\n]+/g, ' ')
+                    });
+                    if(this.messages.length > 200) {
+                        this.messages.splice(0, this.messages.length - 200);
+                    }
+                    if(this.activeBottomTab !== 'messages') {
+                        this.unreadMessages += 1;
+                    }
+                    this.scrollMessagesToBottom();
                 },
                 mute() {
                     this.muted = !this.muted;
