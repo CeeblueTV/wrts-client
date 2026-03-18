@@ -186,50 +186,52 @@
                             v-model="stream">
                     </div>
                 </div>
-                <div class="form-row">
-                    <label class="col-2">Widevine robustness:</label>
-                    <div class="form-group col-sm">
-                        <select id="video-robustness-selection" class="custom-select text-center"
-                            :disabled="isPlaying()" v-model="videoRobustnessKey">
-                            <option v-for="(robustnessArray, label) in videoRobustnesses" :value="robustnessArray[0]">
-                                Video {{ robustnessArray[0] }}
-                            </option>
-                        </select>
+                <div id="content-protection" v-if="!streamMetadata || streamMetadata.contentProtection?.size">
+                    <div class="form-row">
+                        <label class="col-2">Widevine robustness:</label>
+                        <div class="form-group col-sm">
+                            <select id="video-robustness-selection" class="custom-select text-center"
+                                :disabled="isPlaying()" v-model="videoRobustnessKey">
+                                <option v-for="(robustnessArray, label) in videoRobustnesses" :value="robustnessArray[0]">
+                                    Video {{ robustnessArray[0] }}
+                                </option>
+                            </select>
+                        </div>
+                        <div class="form-group col-sm">
+                            <select id="audio-robustness-selection" class="custom-select text-center"
+                                :disabled="isPlaying()" v-model="audioRobustnessKey">
+                                <option v-for="(robustnessArray, label) in audioRobustnesses" :value="robustnessArray[0]">
+                                    Audio {{ robustnessArray[0] }}
+                                </option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="form-group col-sm">
-                        <select id="audio-robustness-selection" class="custom-select text-center"
-                            :disabled="isPlaying()" v-model="audioRobustnessKey">
-                            <option v-for="(robustnessArray, label) in audioRobustnesses" :value="robustnessArray[0]">
-                                Audio {{ robustnessArray[0] }}
-                            </option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group col-12">
-                        <div class="d-flex flex-row align-items-center">
-                            <div class="d-flex flex-row gap-2 w-100">
-                                <button class="btn flex-grow-1" 
-                                    :class="{ 'btn-primary': enabledDRM.widevine, 'btn-success': keySystem === 'com.widevine.alpha' }"
-                                    :disabled="isPlaying()"
-                                    @click="enabledDRM.widevine = !enabledDRM.widevine">
-                                    <i class="fas fa-shield-alt"></i>
-                                    Widevine
-                                </button>
-                                <button class="btn flex-grow-1"
-                                    :class="{ 'btn-primary': enabledDRM.playready, 'btn-success': keySystem === 'com.microsoft.playready' }"
-                                    :disabled="isPlaying()"
-                                    @click="enabledDRM.playready = !enabledDRM.playready">
-                                    <i class="fas fa-shield-alt"></i>
-                                    PlayReady
-                                </button>
-                                <button class="btn flex-grow-1"
-                                    :class="{ 'btn-primary': enabledDRM.fairplay, 'btn-success': keySystem && keySystem.startsWith('com.apple.fps') }"
-                                    :disabled="isPlaying()"
-                                    @click="enabledDRM.fairplay = !enabledDRM.fairplay">
-                                    <i class="fas fa-shield-alt"></i>
-                                    FairPlay
-                                </button>
+                    <div class="form-row">
+                        <div class="form-group col-12">
+                            <div class="d-flex flex-row align-items-center">
+                                <div class="d-flex flex-row gap-2 w-100">
+                                    <button class="btn flex-grow-1" 
+                                        :class="{ 'btn-primary': enabledDRM.widevine, 'btn-success': keySystem === 'com.widevine.alpha' }"
+                                        :disabled="isPlaying()"
+                                        @click="enabledDRM.widevine = !enabledDRM.widevine">
+                                        <i class="fas fa-shield-alt"></i>
+                                        Widevine
+                                    </button>
+                                    <button class="btn flex-grow-1"
+                                        :class="{ 'btn-primary': enabledDRM.playready, 'btn-success': keySystem === 'com.microsoft.playready' }"
+                                        :disabled="isPlaying()"
+                                        @click="enabledDRM.playready = !enabledDRM.playready">
+                                        <i class="fas fa-shield-alt"></i>
+                                        PlayReady
+                                    </button>
+                                    <button class="btn flex-grow-1"
+                                        :class="{ 'btn-primary': enabledDRM.fairplay, 'btn-success': keySystem && keySystem.startsWith('com.apple.fps') }"
+                                        :disabled="isPlaying()"
+                                        @click="enabledDRM.fairplay = !enabledDRM.fairplay">
+                                        <i class="fas fa-shield-alt"></i>
+                                        FairPlay
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -702,6 +704,7 @@
                     this.videoTracks = new Map();
                     this.videoTrack = 'Video';
                     this.videoTrackId = undefined;
+                    this.streamMetadata = null;
                     this.resetMessages();
 
                     this.player = null;
@@ -725,6 +728,7 @@
                 },
                 onMetadata(metadata) {
                     log(`onMetadata ${Util.stringify(metadata)}`).info();
+                    this.streamMetadata = metadata;
 
                     this.audioTracks = new Map();
                     this.videoTracks = new Map();
