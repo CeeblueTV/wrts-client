@@ -54,6 +54,19 @@ export type Resolution = {
     height: number;
 };
 
+export function typeToString(type: Type) {
+    switch (type) {
+        case Type.AUDIO:
+            return 'audio';
+        case Type.VIDEO:
+            return 'video';
+        case Type.DATA:
+            return 'data';
+        default:
+    }
+    return 'unknown';
+}
+
 export function screenResolution(): Resolution | undefined {
     if (typeof window === 'undefined' || !window.screen) {
         return;

@@ -415,6 +415,8 @@ export abstract class Source extends EventEmitter implements ICMCD {
     constructor(playing: IPlaying, protocol: string, params: Connect.Params, type: Connect.Type = Connect.Type.WRTS) {
         super();
         // (params.query = new URLSearchParams(params.query)).set('audio', 'none');
+        // (params.query = new URLSearchParams(params.query)).set('video', 'none');
+        // (params.query = new URLSearchParams(params.query)).set('data', 'none');
         this._url = Connect.buildURL(type, params, protocol);
         this._mediaExt = params.mediaExt || ''; // aftet buildURL call to get mediaExt possible correction
         this._streamName = params.streamName || '';
@@ -675,7 +677,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (this._closed) {
             return;
         }
-        // this.log("DATA", trackId, Util.stringify({time, data}, {noBin:true})).info();
+        // this.log("DATA", trackId, Util.stringify(sample)).info();
         if (this.dataTrack == null || !this.dataTrack.has(trackId)) {
             const count = this._ignoredTracks.size;
             if (this._ignoredTracks.add(trackId).size > count) {
@@ -738,7 +740,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 const newDuration = Math.max(1, sample.duration + delta);
                 if (Math.abs(delta) > TIMESTAMP_HOLE_TOLERANCE) {
                     // to limit log frequency for small correction (can happen sometime on timescale mistake)
-                    let log = `Timestamp fix ${sample.time / 1000}s to ${currentTime / 1000}s on ${type === Media.Type.AUDIO ? 'audio' : 'video'} track ${trackId}`;
+                    let log = `Timestamp fix ${sample.time / 1000}s to ${currentTime / 1000}s on ${Media.typeToString(type)} track ${trackId}`;
                     log += ` (duration: ${Math.abs(sample.duration)} => ${newDuration}ms)`;
                     this.log(log)[delta < 0 ? 'warn' : 'info']();
                 }
