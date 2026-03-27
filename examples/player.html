@@ -769,16 +769,7 @@
                     });
                 },
                 pushMessage(track, time, data) {
-                    const decoder = new TextDecoder();
-                    let message;
-                    try {
-                        message = decoder.decode(data).trim();
-                    } catch(_) {
-                        message = Array.from(data).join(' ');
-                    }
-                    if(!message) {
-                        message = '[binary data]';
-                    }
+                    const message = Util.stringify(data);
                     this.messages.push({
                         track,
                         receivedAt: this.formatReceptionTime(),
