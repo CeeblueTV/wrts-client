@@ -600,6 +600,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
             init = true;
             if (initTracks?.data == null) {
                 this._requestedTracks.data = new Set();
+                // By default we receive all data tracks, even subtitle to allow a immediate switch
                 for (const dataTrack of metadata.dataTracks) {
                     this._requestedTracks.data.add(dataTrack.id);
                 }
