@@ -45,7 +45,7 @@ export class MediaTrack {
      */
     channels: number = 0;
     /**
-     * Language of the track in ISO639, for example for subtitle or audio tracks
+     * Language of the track in ISO639-2, for example for subtitle or audio tracks
      */
     language?: string;
     /**
