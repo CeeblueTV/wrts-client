@@ -58,16 +58,6 @@ export abstract class Reader extends EventEmitter {
         this.log(`${types[type]} sample uncatched on track ${trackId}`).warn();
     }
 
-    /**
-     * Event fired on a generic message
-     * @param name
-     * @param data
-     * @event
-     */
-    onMessage(name: string, time: number, duration: number, data: Uint8Array) {
-        this.log(`Uncaught message ${Util.stringify({ name, time, duration, data })}`).warn();
-    }
-
     private _data?: Uint8Array;
     constructor() {
         super();

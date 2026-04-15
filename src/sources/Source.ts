@@ -159,14 +159,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     onData(trackId: number, sample: Media.Sample) {}
 
     /**
-     * Event fired on a generic message
-     * @param name
-     * @param data
-     * @event
-     */
-    onMessage(name: string, time: number, duration: number, data: Uint8Array) {}
-
-    /**
      * @event
      * Fired when the URL and headers can be finalized before sending the request to the server.
      *
@@ -729,17 +721,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     }
 
     /**
-     * Ingest generic message
-     * @param name
-     * @param sample
-     */
-    protected readMessage(name: string, time: number, duration: number, data: Uint8Array) {
-        if (!this._closed) {
-            this.onMessage(name, time, duration, data);
-        }
-    }
-
-    /**
      * Utility dispatcher that forwards a media sample to the appropriate
      * reader (readAudio, readVideo, or readData) based on its type.
      *
@@ -841,9 +822,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
         reader.onSample = (type: Media.Type, trackId: number, sample: Media.Sample) => {
             this.readSample(type, trackId, sample);
-        };
-        reader.onMessage = (name: string, time: number, duration: number, data: Uint8Array) => {
-            this.readMessage(name, time, duration, data);
         };
         reader.onMetadata = (metadata: Metadata) => this.readMetadata(metadata);
         reader.onError = (error: ReaderError) => this.close(error);
