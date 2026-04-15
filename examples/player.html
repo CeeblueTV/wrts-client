@@ -263,9 +263,7 @@
                     stats: new Map(),
                     times: new Array(),
                     hasMetrics:false,
-                    stalls: 0,
-                    skippedAudio: 0,
-                    skippedVideo: 0,
+                    deltaStats: {},
                     uiStats: null,
                     player: null,
                     latencies: [],
@@ -306,6 +304,7 @@
 
                 const drawContext = this.canvas.getContext('2d');
 
+                // Stats to be displayed in the UI
                 const bandwidths = []; this.stats.set("Bandwidth", bandwidths);
                 const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
                 const latencies = this.latencies; this.stats.set("Latency", latencies);
@@ -333,26 +332,29 @@
                     const player = this.player;
                     if(player) {
                         this.hasMetrics = true;
+                        const stats = player.computeStats();
+                       // For bandwidth calculation, using player.recvByteRate is faster than
+                       // summing stats.audioByteRate + stats.videoByteRate + stats.dataByteRate.
                         if(bandwidths.length || player.recvByteRate) {
-                            bandwidths.push(Math.round(player.recvByteRate*8/1000)+"kbps");
+                            bandwidths.push(Math.round(player.recvByteRate *8/1000)+"kbps");
                         }
-                        if(bufferAmounts.length || player.bufferAmount) {
-                            bufferAmounts.push(player.bufferAmount+"ms");
+                        if(bufferAmounts.length || stats.bufferAmount) {
+                            bufferAmounts.push((stats.bufferAmount || 0)+"ms");
                         }
-                        if(latencies.length || (options.latency && player.latency)) {
-                            latencies.push(player.latency+"ms");
+                        if(latencies.length || (options.latency && stats.latency)) {
+                            latencies.push((stats.latency || 0) +"ms");
                         }
                       
-                        playbackRates.push(player.playbackRate.toFixed(2));
-                        playbackSpeeds.push(player.playbackSpeed.toFixed(2));
-                        fps.push(player.videoPerSecond.toFixed(2));
-                        let track = player.metadata.tracks.get(player.audioTrack);
-                        trackAudio.push(((track && track.bandwidth || 0) *8/1000).toFixed() + 'kbps');
-                        track = player.metadata.tracks.get(player.videoTrack);
-                        trackVideo.push(((track && track.bandwidth || 0) *8/1000).toFixed() + 'kbps');
-                        skippedAudio.push(this.skippedAudio.toFixed(1)+"s");
-                        skippedVideo.push(this.skippedVideo.toFixed(1)+"s");
-                        stalls.push(this.stalls);
+                        playbackRates.push((stats.playbackRate || 0).toFixed(2));
+                        playbackSpeeds.push((stats.playbackSpeed || 0).toFixed(2));
+                        fps.push((stats.videoPerSecond || 0).toFixed(2));
+                        trackAudio.push(((stats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
+                        trackVideo.push(((stats.videoTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
+
+                        skippedAudio.push((((stats.skippedAudio || 0) - (this.deltaStats.skippedAudio || 0)) /1000).toFixed(1)+"s");
+                        skippedVideo.push((((stats.skippedVideo || 0) - (this.deltaStats.skippedVideo || 0)) /1000).toFixed(1)+"s");
+
+                        stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
 
                         const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
                         if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
@@ -447,19 +449,7 @@
                     this.player.onStop = this.onStop.bind(this);
                     this.player.onTrackChange = this.onTrackChange.bind(this);
                     this.player.onMetadata = this.onMetadata.bind(this);
-                    this.player.onStall = () => {
-                        log('Playback stall').warn();
-                        ++this.stalls;
-                    }
-                    this.player.onAudioSkipping = (holeMs) => {
-                        log(`Audio skips ${holeMs} ms`).warn();
-                        this.skippedAudio += holeMs / 1000;
-                    }
-                    this.player.onVideoSkipping = (holeMs) => {
-                        log(`Video skips ${holeMs} ms`).warn();
-                        this.skippedVideo += holeMs / 1000;
-                    }
-              
+                   
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
                     this.player.onData = (track, time, duration, data) => {
@@ -551,14 +541,21 @@
                 },
                 resetMetrics(all=false) {
                     this.uiStats.reset();
-                    this.stalls = 0;
-                    this.skippedAudio = 0;
-                    this.skippedVideo = 0;
+                    // reset incremental metrics counters
+                    if (this.player) {
+                        let playerStats = this.player.computeStats();
+                        const {skippedAudio, skippedVideo, stallCount} = playerStats;
+                        this.deltaStats = { skippedAudio, skippedVideo, stallCount} ;
+                    }
                     const displayableCount = all ? 0 : this.uiStats.displayableCount;
                     for(let [_, values] of this.stats) {
                         values.splice(0, Math.max(0, values.length - displayableCount));
                     }
                     this.times.splice(0, Math.max(0, this.times.length - displayableCount));
+                    if (all){
+                        this.hasMetrics = false;
+                        this.deltaStats = {};
+                    }
                 },
                 download(name, data, type) {
                     const url = URL.createObjectURL(new Blob([data], {type}));
