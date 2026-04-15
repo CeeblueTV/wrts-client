@@ -66,7 +66,13 @@ export default [
             ...tsPlugin.configs['flat/eslint-recommended'].rules,
             ...tsPlugin.configs['flat/recommended'][2].rules,
             'no-unused-vars': 'off',
-            '@typescript-eslint/no-unused-vars': ['error', { args: 'none' }],
+            '@typescript-eslint/no-unused-vars': [
+                'error',
+                {
+                    args: 'none',
+                    caughtErrors: 'none'
+                }
+            ],
             '@typescript-eslint/no-unsafe-function-type': 'off'
         }
     },
