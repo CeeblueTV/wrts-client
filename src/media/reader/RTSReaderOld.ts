@@ -41,7 +41,7 @@ export class RTSReaderOld extends Reader {
     }
 
     protected parse(packet: Uint8Array): number {
-        const reader = new BinaryReader(packet as Uint8Array<ArrayBuffer>);
+        const reader = new BinaryReader(packet);
         while (reader.available()) {
             if (!this._header) {
                 if (!this._params.withSize) {
@@ -57,7 +57,7 @@ export class RTSReaderOld extends Reader {
             }
 
             // header here is full!
-            const header = new BinaryReader(this._header as Uint8Array<ArrayBuffer>);
+            const header = new BinaryReader(this._header);
 
             // Read header
             let type = header.read7Bit();

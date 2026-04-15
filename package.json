@@ -39,7 +39,7 @@
     },
     "simple-git-hooks": {
         "pre-commit": "npx lint-staged",
-        "pre-push": "npm run build",
+        "pre-push": "npm run build && npm run build:docs",
         "commit-msg": "npx --no -- commitlint --edit $1"
     },
     "author": "Ceeblue B.V.",
@@ -84,7 +84,7 @@
         "access": "public"
     },
     "dependencies": {
-        "@ceeblue/web-utils": "^7.8.0",
+        "@ceeblue/web-utils": "^7.8.1",
         "abortcontroller-polyfill": "^1.7.8"
     }
 }

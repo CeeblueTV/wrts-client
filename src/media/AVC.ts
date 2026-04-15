@@ -32,7 +32,7 @@ export function nalType(byte: number): NAL {
 }
 
 export function readVideoConfig(data: Uint8Array): VideoConfig {
-    const reader = new BinaryReader(data as Uint8Array<ArrayBuffer>);
+    const reader = new BinaryReader(data);
     reader.next(5); // skip avcC version 1 + 3 bytes of profile, compatibility, level + 1 byte xFF
     // SPS and PPS
     let count = reader.read8() & 0x1f;
@@ -226,7 +226,7 @@ export function readCodecString(codecString: string, out: { codec: Media.Codec; 
  * @returns
  */
 export function parseSPS(sps: Uint8Array, out: { resolution: Media.Resolution; rate: number }): boolean {
-    const reader = new BitReader(sps as Uint8Array<ArrayBuffer>);
+    const reader = new BitReader(sps);
     if ((reader.read8() & 0x1f) !== 7) {
         log('Invalid SPS data').error();
         return false;

@@ -40,7 +40,7 @@ export class RTSReader extends Reader {
     }
 
     protected parse(packet: Uint8Array): number {
-        const reader = new BinaryReader(packet as Uint8Array<ArrayBuffer>);
+        const reader = new BinaryReader(packet);
         while (reader.available()) {
             let size = reader.available();
             if (this._params.withSize) {
@@ -51,7 +51,7 @@ export class RTSReader extends Reader {
                 }
             } // else Is a frame protocol like WebSocket!
 
-            const frame = new BinaryReader(reader.read(size) as Uint8Array<ArrayBuffer>);
+            const frame = new BinaryReader(reader.read(size));
 
             // Read header
             let type = frame.read7Bit();

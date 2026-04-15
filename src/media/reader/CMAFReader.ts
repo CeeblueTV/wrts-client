@@ -83,7 +83,7 @@ export class CMAFReader extends Reader {
     }
 
     protected parse(packet: Uint8Array): number {
-        const reader = new BinaryReader(packet as Uint8Array<ArrayBuffer>);
+        const reader = new BinaryReader(packet);
 
         // Read packet!
         while (reader.available() >= 4) {
@@ -104,7 +104,7 @@ export class CMAFReader extends Reader {
     }
 
     private _parseBox(box: Uint8Array): ReaderError | undefined {
-        const reader = new BinaryReader(box as Uint8Array<ArrayBuffer>);
+        const reader = new BinaryReader(box);
         const boxType = String.fromCharCode(...reader.read(4));
 
         //this.log({boxType, size:reader.available()}).info();
@@ -505,7 +505,7 @@ export class CMAFReader extends Reader {
             const type = String.fromCharCode(...extension.subarray(0, (i = 4)));
             switch (type) {
                 case 'btrt': {
-                    const config = new BinaryReader(extension.subarray(i, end) as Uint8Array<ArrayBuffer>);
+                    const config = new BinaryReader(extension.subarray(i, end));
                     config.next(4); // bufferSizeDB
                     const maxBitrate = config.read32();
                     const avgBitrate = config.read32();

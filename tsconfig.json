@@ -5,6 +5,7 @@
         "noImplicitAny": true,
         "esModuleInterop": true,
         "strict": true,
+        "skipLibCheck": true,
         "moduleResolution": "Node",
         "sourceMap": true,
         "target": "ES6", // ES6 by default
