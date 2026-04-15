@@ -5,7 +5,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-    branches: [main]
 
 permissions:
   contents: read
@@ -14,7 +13,7 @@ jobs:
   build-and-deploy:
     name: build and deploy docs
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
     permissions:
       contents: write
     steps:
@@ -24,7 +23,6 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@b39b52d1213e96004bfcb1c61a8a6fa8ab84f3e8 # v4.0.1
         with:
-          cache: npm
           node-version: lts/*
 
       - name: Install dependencies
