@@ -100,6 +100,8 @@ export class Metadata extends Loggable {
 
             const type = (track.type || '').toLowerCase();
 
+            mTrack.language = (track.lang || track.language || '').toLowerCase();
+
             if (type === 'data') {
                 mTrack.type = Media.Type.DATA;
                 this.dataTracks.push(mTrack);

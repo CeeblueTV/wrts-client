@@ -23,7 +23,9 @@ export enum Codec {
     AAC = 'AAC',
     OPUS = 'OPUS',
     // Data
-    ID3 = 'ID3'
+    ID3 = 'ID3',
+    JSON = 'JSON',
+    SUBTITLE = 'SUBTITLE'
 }
 
 export type Sample = {

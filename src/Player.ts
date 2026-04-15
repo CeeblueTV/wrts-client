@@ -129,16 +129,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Event fired on a generic message
-     * @param name
-     * @param data
-     * @event
-     */
-    onMessage(name: string, time: number, duration: number, data: Uint8Array) {
-        this.log(`Message reception ${Util.stringify({ name, time, duration, data })}`).info();
-    }
-
-    /**
      * {@inheritDoc Source.onMetadata}
      * @event {@link Source.onMetadata}
      */
@@ -757,9 +747,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._source.onData = (trackId: number, sample: Media.Sample) => {
                 this.onData(trackId, sample.time, sample.duration, sample.data);
             };
-            this._source.onMessage = (name: string, time: number, duration: number, data: Uint8Array) => {
-                this.onMessage(name, time, duration, data);
-            };
             this._source.onClose = (error?: SourceError) => this.stop(error);
 
             this.onStart();
@@ -927,7 +914,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     this._source.onAudio = Util.EMPTY_FUNCTION;
                     this._source.onVideo = Util.EMPTY_FUNCTION;
                     this._source.onData = Util.EMPTY_FUNCTION;
-                    this._source.onMessage = Util.EMPTY_FUNCTION;
                     this._source.onTrackChange = Util.EMPTY_FUNCTION;
                 }
 
