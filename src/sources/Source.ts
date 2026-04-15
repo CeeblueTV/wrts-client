@@ -9,10 +9,10 @@ import { CMCD, CMCDMode, ICMCD } from '../media/CMCD';
 import { Metadata } from '../media/Metadata';
 import { CMAFReader } from '../media/reader/CMAFReader';
 import { RTSReader } from '../media/reader/RTSReader';
+import { RTSReaderOld } from '../media/reader/RTSReaderOld';
 import { Reader, ReaderError } from '../media/reader/Reader';
 import { IPlaying } from './IPlaying';
-import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError } from '@ceeblue/web-utils';
-import { Cmcd, CmcdObjectType, CmcdStreamType, toCmcdHeaders, encodeCmcd } from '@svta/common-media-library/cmcd';
+import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError, CML, PlayerStats } from '@ceeblue/web-utils';
 import { MediaTrack } from '../media/MediaTrack';
 
 const TIMESTAMP_HOLE_TOLERANCE = 7; // ms of timestamp acceptable
@@ -102,8 +102,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
      *
      * @param audioTrack
      * @param videoTrack
+     * @param dataTrack
      */
-    onTrackChange(audioTrack: number, videoTrack: number) {}
+    onTrackChange(audioTrack: number, videoTrack: number, dataTrack: Set<number>) {}
 
     /**
      * Event fired when metadata is available in the stream.
@@ -129,25 +130,33 @@ export abstract class Source extends EventEmitter implements ICMCD {
 
     /**
      * @event
-     * Fire on new audio or video {@link Media.Sample}
+     * Fire any new audio sample {@link Media.Sample}
      *
      * @param trackId
      * @param sample
      *
      */
-    onSample(trackId: number, sample: Media.Sample) {}
+    onAudio(trackId: number, sample: Media.Sample) {}
 
     /**
      * @event
-     * Fire when data is received in the stream.
+     * Fire any new video sample {@link Media.Sample}
      *
      * @param trackId
-     * @param time
-     * @param data
-     * @event
+     * @param sample
+     *
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onData(trackId: number, time: number, data: any) {}
+    onVideo(trackId: number, sample: Media.Sample) {}
+
+    /**
+     * @event
+     * Fire any new data sample {@link Media.Sample}
+     *
+     * @param trackId
+     * @param sample
+     *
+     */
+    onData(trackId: number, sample: Media.Sample) {}
 
     /**
      * @event
@@ -219,7 +228,11 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @remarks Manually setting a track disables any Adaptive Bitrate algorithm.
      */
     set videoTrack(idx: number | undefined) {
-        this._selectTracks({ video: idx, audio: this._selectedTracks.audio });
+        this._selectTracks({
+            audio: this._selectedTracks.audio,
+            video: idx,
+            data: this._selectedTracks.data
+        });
     }
 
     /**
@@ -240,14 +253,59 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * Select a audio track to the index provided, or indicates automatic with undefined
      */
     set audioTrack(idx: number | undefined) {
-        this._selectTracks({ audio: idx, video: this._selectedTracks.video });
+        this._selectTracks({
+            audio: idx,
+            video: this._selectedTracks.video,
+            data: this._selectedTracks.data
+        });
+    }
+
+    /**
+     * Index of the data track being received, can be undefined on start
+     */
+    get dataTrack(): Set<number> | undefined {
+        return this._tracks.data;
+    }
+
+    /**
+     * Index of the manual data selection, undefined indicates all tracks
+     */
+    get dataSelected(): Set<number> | undefined {
+        return this._selectedTracks.data;
+    }
+
+    /**
+     * Select a or multiple data track to the index provided.
+     * When set to `undefined` it selects all data tracks available.
+     */
+    set dataTrack(idx: number | Array<number> | Set<number> | undefined) {
+        if (typeof idx === 'number') {
+            idx = [idx];
+        }
+        this._selectTracks({
+            audio: this._selectedTracks.audio,
+            video: this._selectedTracks.video,
+            data: idx ? new Set(idx) : undefined
+        });
     }
 
     /**
      * Returns true if manual track selection is supported by the source implementation
      */
     get trackSelectable(): boolean {
-        return this._setTracks !== Source.prototype._setTracks;
+        return this.setTracks !== Source.prototype.setTracks;
+    }
+
+    get audioByteRate(): number {
+        return this._audioByteRate.value();
+    }
+
+    get videoByteRate(): number {
+        return this._videoByteRate.value();
+    }
+
+    get dataByteRate(): number {
+        return Math.max(0, this._recvByteRate.value() - this.audioByteRate - this.videoByteRate);
     }
 
     get recvByteRate(): ByteRate {
@@ -258,7 +316,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return this._reliable;
     }
     set reliable(value: boolean) {
-        this._setReliable(value);
+        this.setReliable(value);
     }
 
     get mediaExt(): string {
@@ -278,7 +336,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * {@inheritDoc ICMCD.cmcd}
      */
     set cmcd(value: CMCD | undefined) {
-        throw new Error(this.name + " doesn't support CMCD");
+        if (value != null) {
+            throw new Error(this.name + " doesn't support CMCD");
+        }
     }
 
     /**
@@ -327,6 +387,20 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return this._videoPerSecond.exact();
     }
 
+    /**
+     * Get the total duration of audio skipped in milliseconds
+     */
+    get skippedAudio(): number {
+        return this._skippedAudio;
+    }
+
+    /**
+     * Get the total duration of video skipped in milliseconds
+     */
+    get skippedVideo(): number {
+        return this._skippedVideo;
+    }
+
     private _reliable: boolean;
     private _name: string;
     private _url: URL;
@@ -336,21 +410,25 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _tracks: Media.Tracks; // effective tracks
     private _selectedTracks: Media.Tracks; // tracks selected by the user
     private _requestedTracks: Media.Tracks; // tracks requested
-    private _firstSamples?: Media.Samples;
     private _audioTime: number;
     private _videoTime: number;
     private _dataTime: number;
     private _playing: IPlaying;
     private _mediaExt: string;
+    private _audioByteRate: ByteRate;
+    private _videoByteRate: ByteRate;
     private _recvByteRate: ByteRate;
     private _running: boolean;
     private _cmcdMode?: CMCDMode;
     private _cmcdSid?: string;
-    private _lastStalls: number; // last stalls count sent to CMCD
+    private _prevStats: PlayerStats = new PlayerStats();
     private _trackRequest?: NodeJS.Timeout;
     private _fixLiveTime: number;
     private _audioPerSecond: ByteRate;
     private _videoPerSecond: ByteRate;
+    private _ignoredTracks: Set<number> = new Set();
+    private _skippedVideo: number = 0;
+    private _skippedAudio: number = 0;
 
     /**
      * Create a new Source, to be passed to a Player
@@ -358,13 +436,12 @@ export abstract class Source extends EventEmitter implements ICMCD {
     constructor(playing: IPlaying, protocol: string, params: Connect.Params, type: Connect.Type = Connect.Type.WRTS) {
         super();
         // (params.query = new URLSearchParams(params.query)).set('audio', 'none');
+        // (params.query = new URLSearchParams(params.query)).set('video', 'none');
+        // (params.query = new URLSearchParams(params.query)).set('data', 'none');
         this._url = Connect.buildURL(type, params, protocol);
         this._mediaExt = params.mediaExt || ''; // aftet buildURL call to get mediaExt possible correction
         this._streamName = params.streamName || '';
         this._running = false;
-        this._lastStalls = 0;
-        this._audioPerSecond = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
-        this._videoPerSecond = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
         if (type === Connect.Type.WRTS) {
             // WRTS
             this._name = (this._url.protocol.toLowerCase().slice(0, -1) + '-' + this._mediaExt).toLowerCase();
@@ -372,6 +449,10 @@ export abstract class Source extends EventEmitter implements ICMCD {
             // OTHER
             this._name = type;
         }
+        this._audioPerSecond = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
+        this._videoPerSecond = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
+        this._audioByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
+        this._videoByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
         this._recvByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
         this._closed = false;
         this._audioTime = -1;
@@ -381,11 +462,8 @@ export abstract class Source extends EventEmitter implements ICMCD {
         this._reliable = false; // false by default!
         this._selectedTracks = {};
         this._requestedTracks = {};
-        this._firstSamples = new Media.Samples();
         this._playing = playing;
         this._fixLiveTime = 0;
-        playing.on('Stall', () => ++this._lastStalls, playing);
-
         Promise.resolve().then(() => this._run());
     }
 
@@ -396,8 +474,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
         this._closed = true;
         clearTimeout(this._trackRequest);
-        if (error && error.type === 'SourceError' && error.name === 'Request error') {
-            // morph a possible request error to a stream
+        if (error && error.type === 'SourceError' && 'detail' in error) {
+            // WIP MF fix = >morph a possible request error to a stream unavailable
+            // Could be fixed in server side, but it impacts a  lot of code.
             const detail = error.detail.toLowerCase();
             if (detail.startsWith('stream open failed') || detail.startsWith('404')) {
                 error = { type: 'SourceError', name: 'Resource unavailable' };
@@ -405,8 +484,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
         this._selectedTracks = {};
         this._tracks = {};
-        this._firstSamples = undefined;
-        this._lastStalls = 0;
+        this._prevStats = new PlayerStats();
         this.onClose(error);
     }
 
@@ -424,10 +502,80 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return url;
     }
 
+    /**
+     * Init tracks to play
+     *
+     * Should be called in first to announce track to receive
+     * If tracks.audio or tracks.video is null, it means no video or audio track
+     * If tracks.data is null, it means no specific data track so all can be received
+     * Otherwise reception must be limited to the tracks.data indexes
+     *
+     * @param tracks
+     */
+    /**
+     * Initializes the tracks to be received.
+     *
+     * This method must be called first to declare which tracks should be negotiated and received.
+     *
+     * Audio / Video:
+     *  - undefined or -1 → Track disabled
+     *  - >= 0      → Receive the specified track index.
+     *
+     * Data:
+     *  - undefined → Receive all data tracks.
+     *  - Set<number> → Receive only the specified data track indexes.
+     *
+     * @param tracks Track selection configuration.
+     */
+    protected initTracks(tracks: Media.Tracks) {
+        if (this.closed) {
+            return;
+        }
+        if (!this.metadata) {
+            this.log(`${this.constructor.name} hasn't fill metadata before to call initTracks`);
+        }
+        // reset ignoredTrack on each initTracks
+        this._ignoredTracks = new Set();
+        // convert null to -1
+        if (tracks.audio == null) {
+            tracks.audio = -1;
+        }
+        if (tracks.video == null) {
+            tracks.video = -1;
+        }
+        if (tracks.data == null) {
+            tracks.data = new Set();
+            // get all metadata data tracks!
+            for (const dataTrack of this.metadata?.dataTracks ?? []) {
+                tracks.data.add(dataTrack.id);
+            }
+        }
+        // see if there is a change
+        if (
+            this._tracks.audio === tracks.audio &&
+            this._tracks.video === tracks.video &&
+            Util.equal(tracks.data, this._tracks.data)
+        ) {
+            return;
+        }
+        // set the change
+        this._tracks = { ...tracks };
+        // displays tracks disabled
+        if (tracks.audio < 0) {
+            this.log(`Track audio disabled`).info();
+        }
+        if (tracks.video < 0) {
+            this.log(`Track video disabled`).info();
+        }
+        // inform user
+        this.onTrackChange(tracks.audio, tracks.video, tracks.data);
+    }
+
     protected readMetadata(metadata: Metadata) {
         if (this.closed) {
             return;
         }
+
         // fix metadata
         (this._metadata = metadata).fix();
 
@@ -443,15 +591,21 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (this._requestedTracks.audio == null) {
             init = true;
             this._requestedTracks.audio = initTracks?.audio ?? this._autoFirstTrack(metadata.audioTracks);
-            if (this._requestedTracks.audio < 0) {
-                this._updateTrack('audio', -1);
-            }
         }
         if (this._requestedTracks.video == null) {
             init = true;
             this._requestedTracks.video = initTracks?.video ?? this._autoFirstTrack(metadata.videoTracks);
-            if (this._requestedTracks.video < 0) {
-                this._updateTrack('video', -1);
+        }
+        if (this._requestedTracks.data == null) {
+            init = true;
+            if (initTracks?.data == null) {
+                this._requestedTracks.data = new Set();
+                // By default we receive all data tracks, even subtitle to allow an immediate switch
+                for (const dataTrack of metadata.dataTracks) {
+                    this._requestedTracks.data.add(dataTrack.id);
+                }
+            } else {
+                this._requestedTracks.data = new Set(initTracks.data);
             }
         }
         if (init) {
@@ -469,19 +623,25 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @param trackId
      * @param sample
      */
-    protected readAudio(trackId: number, sample?: Media.Sample) {
-        // this.log("AUDIO", trackId, sample ? Util.stringify(sample, {noBin:true}) : "").info();
-        if (sample) {
-            this._audioPerSecond.addBytes(1);
-            if (trackId < 0) {
-                sample = undefined;
-                this.log(`Disabled audio track ${trackId} cannot receive sample`).error();
-            } else {
-                // Fix timestamp
-                this._audioTime = this.fixTimestamp(Media.Type.AUDIO, trackId, this._audioTime, sample);
-            }
+    protected readAudio(trackId: number, sample: Media.Sample) {
+        if (this._closed) {
+            return;
         }
-        this._onSample(this._updateTrack('audio', trackId), sample);
+        // this.log("AUDIO", trackId, Util.stringify(sample, {noBin:true})).info();
+        // compute byteRate
+        this._audioByteRate.addBytes(sample.data.byteLength);
+        // filter unannounced track
+        if (trackId !== this.audioTrack) {
+            const count = this._ignoredTracks.size;
+            if (this._ignoredTracks.add(trackId).size > count) {
+                this.log('Audio track ' + trackId + ' unannounced before').error();
+            }
+            return;
+        }
+        this._audioPerSecond.addBytes(1);
+        // Fix timestamp
+        this._audioTime = this.fixTimestamp(Media.Type.AUDIO, trackId, this._audioTime, sample);
+        this.onAudio(trackId, sample);
     }
 
     /**
@@ -490,45 +650,52 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @param trackId
      * @param sample
      */
-    protected readVideo(trackId: number, sample?: Media.Sample) {
-        // this.log("VIDEO", trackId, sample ? Util.stringify(sample, { noBin: true }) : "").info();
-        if (sample) {
-            if (trackId < 0) {
-                sample = undefined;
-                this.log(`Disabled video track ${trackId} cannot receive sample`).error();
-            } else {
-                this._videoPerSecond.addBytes(1);
-
-                // Assign extendable duration and fix sample.duration
-                let extendableDuration;
-                if (sample.duration < 0) {
-                    sample.duration = extendableDuration = -sample.duration;
-                }
-
-                // Fix timestamp
-                this._videoTime = this.fixTimestamp(Media.Type.VIDEO, trackId, this._videoTime, sample);
-
-                // Extends time to fix sync if need
-                const delay = this.currentTime - this._videoTime;
-                if (extendableDuration && delay > 0) {
-                    sample.duration += delay;
-                    this._videoTime = this.currentTime;
-                    this.log(
-                        `Extends video duration from ${sample.duration - delay} to ${sample.duration}ms track ${trackId}`
-                    ).warn();
-                    this._playing.onVideoSkipping(delay);
-                }
-
-                if (sample.isKeyFrame) {
-                    // compute an average on each GOP
-                    this._recvByteRate.clip();
-                    this._videoPerSecond.clip();
-                    this._audioPerSecond.clip();
-                }
+    protected readVideo(trackId: number, sample: Media.Sample) {
+        if (this._closed) {
+            return;
+        }
+        // this.log("VIDEO", trackId, Util.stringify(sample, { noBin: true })).info();
+        // compute byteRate
+        this._videoByteRate.addBytes(sample.data.byteLength);
+        // filter unannounced track
+        if (trackId !== this.videoTrack) {
+            const count = this._ignoredTracks.size;
+            if (this._ignoredTracks.add(trackId).size > count) {
+                this.log('Video track ' + trackId + ' unannounced before').error();
             }
+            return;
+        }
+        this._videoPerSecond.addBytes(1);
+
+        // Assign extendable duration and fix sample.duration
+        let extendableDuration;
+        if (sample.duration < 0) {
+            sample.duration = extendableDuration = -sample.duration;
         }
 
-        this._onSample(this._updateTrack('video', trackId), sample);
+        // Fix timestamp
+        this._videoTime = this.fixTimestamp(Media.Type.VIDEO, trackId, this._videoTime, sample);
+
+        // Extends time to fix sync if need
+        const delay = this.currentTime - this._videoTime;
+        if (extendableDuration && delay > 0) {
+            sample.duration += delay;
+            this._videoTime = this.currentTime;
+            this.log(`Extends video duration from ${sample.duration - delay} to ${sample.duration}ms track ${trackId}`).warn();
+            this._skippedVideo += delay;
+            this._playing.onVideoSkipping(delay);
+        }
+
+        if (sample.isKeyFrame) {
+            // compute an average on each GOP
+            this._audioByteRate.clip();
+            this._videoByteRate.clip();
+            this._recvByteRate.clip();
+            this._videoPerSecond.clip();
+            this._audioPerSecond.clip();
+        }
+
+        this.onVideo(trackId, sample);
     }
 
     /**
@@ -537,23 +704,51 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @param time
      * @param data
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    protected readData(trackId: number, time: number, data: any) {
-        // this.log("DATA", trackId, Util.stringify({time, data}, {noBin:true})).info();
+    protected readData(trackId: number, sample: Media.Sample) {
+        if (this._closed) {
+            return;
+        }
+        // this.log("DATA", trackId, Util.stringify(sample)).info();
+        if (this.dataTrack == null || !this.dataTrack.has(trackId)) {
+            const count = this._ignoredTracks.size;
+            if (this._ignoredTracks.add(trackId).size > count) {
+                this.log('Video track ' + trackId + ' unannounced before').error();
+            }
+            return;
+        }
         // No bufferize on start in firstSamples for data, delivers the data immediately
-        if (!this._closed) {
-            const sample = { time };
-            this._dataTime = this.fixTimestamp(Media.Type.DATA, trackId, this._dataTime, sample);
-            this.onData(trackId, sample.time, data);
+        this._dataTime = this.fixTimestamp(Media.Type.DATA, trackId, this._dataTime, sample);
+        this.onData(trackId, sample);
+    }
+
+    /**
+     * Utility dispatcher that forwards a media sample to the appropriate
+     * reader (readAudio, readVideo, or readData) based on its type.
+     *
+     * This is a convenience method — callers may invoke readAudio,
+     * readVideo, or readData directly if the media type is already known.
+     *
+     * @param type    Media type (AUDIO, VIDEO, DATA)
+     * @param trackId Track identifier
+     * @param sample  Media sample to process
+     */
+    protected readSample(type: Media.Type, trackId: number, sample: Media.Sample) {
+        switch (type) {
+            case Media.Type.AUDIO:
+                this.readAudio(trackId, sample);
+                break;
+            case Media.Type.VIDEO:
+                this.readVideo(trackId, sample);
+                break;
+            case Media.Type.DATA:
+                this.readData(trackId, sample);
+                break;
+            default:
+                this.log('Media type ' + type + ' unknown').error();
         }
     }
 
-    protected fixTimestamp(
-        type: Media.Type,
-        trackId: number,
-        currentTime: number,
-        sample: { time: number; duration?: number }
-    ): number {
+    protected fixTimestamp(type: Media.Type, trackId: number, currentTime: number, sample: Media.Sample): number {
         // Fix current time to be continuous and always increasing
         const delta = currentTime >= 0 ? sample.time - currentTime : 0;
         if (delta) {
@@ -562,32 +757,30 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 // Audio: Don't fill a audio hole to skip it on playing, but fix if crossed or minor hole
                 // Video: Never skip a frame to keep decoding reliable!
                 // Keep minimum duration superior to 0 otherwise decoding can ignore this frame on iPad/iPhone and break decoding (artefact)
-                const newDuration = sample.duration != null ? Math.max(1, sample.duration + delta) : 0;
+                const newDuration = Math.max(1, sample.duration + delta);
                 if (Math.abs(delta) > TIMESTAMP_HOLE_TOLERANCE) {
                     // to limit log frequency for small correction (can happen sometime on timescale mistake)
-                    let log = `Timestamp fix ${sample.time / 1000}s to ${currentTime / 1000}s on ${type === Media.Type.AUDIO ? 'audio' : 'video'} track ${trackId}`;
-                    if (sample.duration != null) {
-                        log += ` (duration: ${Math.abs(sample.duration)} => ${newDuration}ms)`;
-                    }
+                    let log = `Timestamp fix ${sample.time / 1000}s to ${currentTime / 1000}s on ${Media.typeToString(type)} track ${trackId}`;
+                    log += ` (duration: ${Math.abs(sample.duration)} => ${newDuration}ms)`;
                     this.log(log)[delta < 0 ? 'warn' : 'info']();
                 }
                 sample.time = currentTime;
-                if (newDuration) {
-                    sample.duration = newDuration; // increase/decrease duration to keep the same next time as the input
-                }
+                sample.duration = newDuration; // increase/decrease duration to keep the same next time as the input
             }
         }
 
         // audio/video skipping AFTER timestamp fix (to get an ordered log information)
         if (delta > 0) {
             if (type === Media.Type.AUDIO) {
+                this._skippedAudio += delta;
                 this._playing.onAudioSkipping(delta);
             } else if (type === Media.Type.VIDEO) {
+                this._skippedVideo += delta;
                 this._playing.onVideoSkipping(delta);
             }
         }
 
-        currentTime = sample.time + (sample.duration ?? 0);
+        currentTime = sample.time + sample.duration;
         // Fix liveTime if need
         if (this._metadata) {
             const fixLiveTime = currentTime - this._metadata.liveTime;
@@ -602,43 +795,45 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return currentTime;
     }
 
-    protected _onSample(trackId: number, sample?: Media.Sample) {
-        if (this.closed) {
-            return;
-        }
-
-        if (this._firstSamples) {
-            // We are waiting first samples !
-            if (sample) {
-                this._firstSamples.push(trackId, sample);
-            }
-
-            if (this.audioTrack == null || this.videoTrack == null) {
-                // wait explicit tracks set (can become -1 if disabled)
-                return;
-            }
-
-            /// flush
-            this.log(
-                `Flush ${this._firstSamples.duration}ms of firstSamples tracks [${this._firstSamples.tracks}] to sync ${Util.stringify(this._tracks)} (${this._firstSamples.startTime / 1000}s to ${this._firstSamples.endTime / 1000}s)`
-            ).info();
-
-            for (const [trackId, firstSamples] of this._firstSamples) {
-                if (trackId !== this.audioTrack && trackId !== this.videoTrack) {
-                    this.log(`Useless first samples track ${trackId} to play tracks ${Util.stringify(this._tracks)}`).warn();
-                    continue;
+    /**
+     * Create a Reader usable to feed the Source and matching mediaExt
+     * Can throw an exception if no demuxer is found for the related media extension
+     * @param params
+     * @returns
+     */
+    protected newReader(params = { isStream: true }): Reader {
+        // default behavior is to select the correct reader related with the file extension in the url
+        let reader: Reader;
+        switch (this._mediaExt) {
+            case 'rts': {
+                // WIP remove old version when there is no more old nodes
+                const protocolVersion = this.metadata?.protocolVersion;
+                if (protocolVersion && protocolVersion.major <= 1) {
+                    reader = new RTSReaderOld({ withSize: params.isStream });
+                } else {
+                    reader = new RTSReader({ withSize: params.isStream });
                 }
-                for (const firstSample of firstSamples) {
-                    this.onSample(trackId, firstSample);
-                    if (this.closed) {
-                        return;
-                    }
-                }
+                break;
             }
-            this._firstSamples = undefined;
-        } else if (sample) {
-            this.onSample(trackId, sample);
+            case 'mp4':
+                reader = new CMAFReader(this._playing.passthroughCMAF);
+                break;
+            default:
+                throw Error('No demuxer found for ' + this._url.pathname);
         }
+        reader.onSample = (type: Media.Type, trackId: number, sample: Media.Sample) => {
+            this.readSample(type, trackId, sample);
+        };
+        reader.onMetadata = (metadata: Metadata) => this.readMetadata(metadata);
+        reader.onError = (error: ReaderError) => this.close(error);
+        reader.log = this.log.bind(this) as ILog;
+        reader.read = (data: BufferSource | string) => {
+            if (!this._closed) {
+                this._recvByteRate.addBytes(typeof data == 'string' ? data.length : data.byteLength);
+                Object.getPrototypeOf(reader).read.call(reader, data);
+            }
+        };
+        return reader;
     }
 
     /**
@@ -646,7 +841,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @param tracks
      * @returns
      */
-    protected _autoFirstTrack(tracks: Array<MediaTrack>): number {
+    private _autoFirstTrack(tracks: Array<MediaTrack>): number {
         let track = tracks[Math.floor(tracks.length / 2)];
         if (!track) {
             return -1;
@@ -662,11 +857,15 @@ export abstract class Source extends EventEmitter implements ICMCD {
      *
      * @param tracks tracks to select, undefined mean "auto" selection
      */
-    protected _selectTracks(tracks: Media.Tracks) {
+    private _selectTracks(tracks: Media.Tracks) {
         if (this._closed) {
             return;
         }
-        if (this._selectedTracks.audio === tracks.audio && this._selectedTracks.video === tracks.video) {
+        if (
+            this._selectedTracks.audio === tracks.audio &&
+            this._selectedTracks.video === tracks.video &&
+            Util.equal(this._selectedTracks.data, tracks.data)
+        ) {
             // No change
             return;
         }
@@ -684,6 +883,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (tracks.audio) {
             this._requestedTracks.audio = tracks.audio;
         }
+        if (tracks.data) {
+            this._requestedTracks.data = tracks.data;
+        }
 
         // Call in async to get sync with multiple track assignation!
         if (this._trackRequest != null) {
@@ -697,54 +899,11 @@ export abstract class Source extends EventEmitter implements ICMCD {
             }
             try {
                 this.log(`Select tracks ${Util.stringify(this._selectedTracks)}`).info();
-                await this._setTracks({ ...this._selectedTracks });
-                // After a track deactivation we don't receive any more data on this track
-                // so we have to disable the track now
-                if (this._requestedTracks.audio && this._requestedTracks.audio < 0) {
-                    this.readAudio(-1);
-                }
-                if (this._requestedTracks.video && this._requestedTracks.video < 0) {
-                    this.readVideo(-1);
-                }
+                await this.setTracks({ ...this._selectedTracks });
             } catch (e: unknown) {
                 this.close({ type: 'SourceError', name: 'Unexpected source issue', detail: Util.stringify(e) });
             }
         }, 0);
-    }
-
-    /**
-     * Create a Reader usable to feed the Source and matching mediaExt
-     * Can throw an exception if no demuxer is found for the related media extension
-     * @param params
-     * @returns
-     */
-    protected _newReader(params = { isStream: true }): Reader {
-        // default behavior is to select the correct reader related with the file extension in the url
-        let reader: Reader;
-        switch (this._mediaExt) {
-            case 'rts':
-                reader = new RTSReader({ withSize: params.isStream });
-                break;
-            case 'mp4':
-                reader = new CMAFReader(this._playing.passthroughCMAF);
-                break;
-            default:
-                throw Error('No demuxer found for ' + this._url.pathname);
-        }
-        reader.onAudio = (trackId: number, sample: Media.Sample) => this.readAudio(trackId, sample);
-        reader.onVideo = (trackId: number, sample: Media.Sample) => this.readVideo(trackId, sample);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        reader.onData = (trackId: number, time: number, data: any) => this.readData(trackId, time, data);
-        reader.onMetadata = (metadata: Metadata) => this.readMetadata(metadata);
-        reader.onError = (error: ReaderError) => this.close(error);
-        reader.log = this.log.bind(this) as ILog;
-        reader.read = (data: BufferSource | string) => {
-            if (!this._closed) {
-                this._recvByteRate.addBytes(typeof data == 'string' ? data.length : data.byteLength);
-                Object.getPrototypeOf(reader).read.call(reader, data);
-            }
-        };
-        return reader;
     }
 
     private async _run() {
@@ -759,34 +918,19 @@ export abstract class Source extends EventEmitter implements ICMCD {
             // - non blocking and return immediately
             // - blocking and stays processing during all the life-time
             this._requestedTracks = { ...this._selectedTracks };
-            await this._play(this._url, this._requestedTracks, this._playing);
+            await this.play(this._url, this._requestedTracks, this._playing);
         } catch (e: unknown) {
             this.close({ type: 'SourceError', name: 'Unexpected source issue', detail: Util.stringify(e) });
         }
     }
 
-    private _updateTrack(type: 'audio' | 'video', track: number): number {
-        if (!this.closed && this._tracks[type] !== track) {
-            this._tracks[type] = track;
-            if (track === -1) {
-                this.log(`Track ${type} ${track} disabled`).info();
-            }
-            if (this._tracks.audio != null && this._tracks.video != null) {
-                // Ready to play!
-                this.onTrackChange(this._tracks.audio, this._tracks.video);
-            }
-        }
-
-        return track;
-    }
-
-    protected async _setReliable(reliable: boolean) {
+    protected async setReliable(reliable: boolean) {
         if (reliable === this._reliable) {
             return;
         }
         try {
             if (this._running) {
-                await this._setReliability(reliable);
+                await this.setReliability(reliable);
             } // else wait running!
             this._reliable = reliable;
         } catch (e: unknown) {
@@ -799,49 +943,35 @@ export abstract class Source extends EventEmitter implements ICMCD {
      *
      * @param url full URL of the media object
      */
-    protected async fetchMedia(url: URL, type: Media.Type, options: RequestInit = {}): Promise<Response & { error?: string }> {
+    protected async fetchMedia(
+        url: URL,
+        trackIds: Array<number>,
+        options: RequestInit = {}
+    ): Promise<Response & { error?: string }> {
         const withCMCD = this.cmcd !== CMCD.NONE;
+        let stats;
         if (withCMCD) {
-            // Add CMCD headers
-            const trackId = type === Media.Type.AUDIO ? this.audioTrack : type === Media.Type.VIDEO ? this.videoTrack : -1;
-            const bandwidth = (trackId && trackId >= 0 && this.metadata?.tracks.get(trackId)?.bandwidth) || 0;
-            // Basic CMCD
-            const cmcd = {
-                br: bandwidth,
-                bl: this._playing.bufferAmount, // NOTE: CMCD says it MUST be rounded to the nearest 100ms
-                bs: this._lastStalls > 0,
-                mtp: this._playing.recvByteRate,
-                pr: this._playing.playbackRate,
-                sf: 'o', // there is no way to say it's WebRTS)
-                sid: this.cmcdSid,
-                su: this._playing.bufferAmount === 0
-            } as Cmcd;
-            // Full CMCD
-            if (this.cmcd === CMCD.FULL) {
-                cmcd.cid = url.pathname.split('/').pop();
-                cmcd.dl = this._playing.bufferAmount * this._playing.playbackRate;
-                cmcd.ot =
-                    type === Media.Type.AUDIO
-                        ? CmcdObjectType.AUDIO
-                        : type === Media.Type.VIDEO
-                          ? CmcdObjectType.VIDEO
-                          : CmcdObjectType.OTHER;
-                cmcd.st = CmcdStreamType.LIVE;
-                cmcd.v = 1;
+            stats = this._playing.computeStats();
+            const cmcd = stats.toCmcd(url, trackIds, this._prevStats);
+            // If asking for the short version of the cmcd payload remove the following fields
+            if (this.cmcd === CMCD.SHORT) {
+                delete cmcd.cid;
+                delete cmcd.dl;
+                delete cmcd.ot;
+                delete cmcd.st;
             }
-
             // Mode
             if (this.cmcdMode === CMCDMode.QUERY) {
-                url.searchParams.set('cmcd', encodeCmcd(cmcd));
+                url.searchParams.set('cmcd', CML.encodeCmcd(cmcd));
             } else {
-                options.headers = toCmcdHeaders(cmcd);
+                options.headers = CML.toCmcdHeaders(cmcd);
             }
         }
 
         const response = await this.fetch(url, options);
-        if (response.ok && withCMCD) {
-            // Update last stalls count only if the request was successful
-            this._lastStalls = 0;
+        if (response.ok && stats) {
+            // Update prev stats only if the request was successful
+            this._prevStats = stats;
         }
         return response;
     }
@@ -886,7 +1016,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @param tracks
      * @param playing
      */
-    protected abstract _play(url: URL, tracks: Media.Tracks, playing: IPlaying): void;
-    protected abstract _setReliability(reliable: boolean): void;
-    protected abstract _setTracks(tracks: Media.Tracks): void;
+    protected abstract play(url: URL, tracks: Media.Tracks, playing: IPlaying): void;
+    protected abstract setReliability(reliable: boolean): void;
+    protected abstract setTracks(tracks: Media.Tracks): void;
 }

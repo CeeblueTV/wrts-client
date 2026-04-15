@@ -120,6 +120,12 @@ export function readAudioConfig(data: Uint8Array): { rate: number; channels: num
 
 export function writeCodecString(codec: Media.Codec, config?: Uint8Array): string {
     switch (codec) {
+        case Media.Codec.ID3: {
+            return 'id3';
+        }
+        case Media.Codec.OPUS: {
+            return 'opus';
+        }
         case Media.Codec.AAC: {
             let desc = 'mp4a.40';
             if (config && config.byteLength) {
@@ -145,6 +151,9 @@ export function writeCodecString(codec: Media.Codec, config?: Uint8Array): strin
             }
             return desc;
         }
+        case Media.Codec.VP8: {
+            return 'vp8';
+        }
     }
     log(`Miss support of ${codec} codec`).error();
     return '';
@@ -158,6 +167,26 @@ export function readCodecString(codecString: string, out: { codec: Media.Codec; 
     }
     let codec = (fields[0]?.trim() || '').toLowerCase();
     switch (codec) {
+        case 'id3':
+            out.codec = Media.Codec.ID3;
+            out.type = Media.Type.DATA;
+            return true;
+        case 'json':
+            out.codec = Media.Codec.JSON;
+            out.type = Media.Type.DATA;
+            return true;
+        case 'subtitle':
+            out.codec = Media.Codec.SUBTITLE;
+            out.type = Media.Type.DATA;
+            return true;
+        case 'opus':
+            out.codec = Media.Codec.OPUS;
+            out.type = Media.Type.AUDIO;
+            return true;
+        case 'vp8':
+            out.codec = Media.Codec.VP8;
+            out.type = Media.Type.VIDEO;
+            return true;
         case '40':
             codec = fields[1]?.trim() || '';
         // eslint-disable-next-line no-fallthrough

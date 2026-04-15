@@ -18,3 +18,6 @@ docs/assets
 *.sublime-project
 *.tmproj
 .vscode/
+
+# AI
+.codex

@@ -4,7 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { ILog, Connect, Util, EventEmitter, ByteRate } from '@ceeblue/web-utils';
+import { ILog, Connect, Util, EventEmitter, ByteRate, PlayerStats } from '@ceeblue/web-utils';
 import { Source, SourceError } from './sources/Source';
 import { ICMCD, CMCD, CMCDMode } from './media/CMCD';
 import { BufferState, IPlaying } from './sources/IPlaying';
@@ -17,6 +17,7 @@ const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 150; // ms
 const BUFFER_LIMIT_HIGH = 550; // ms
 const TIMEOUT = 14000; // at least superior to max gop duration (10s)
+const BUFFER_CHANGE_STEP = 50; // ms
 
 const root = typeof window !== 'undefined' ? window : global;
 
@@ -121,13 +122,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Event fired when data is received in the stream
-     * @param trackId
-     * @param time
-     * @param data
      * @event
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onData(trackId: number, time: number, data: any) {}
+    onData(track: number, time: number, duration: number, data: Uint8Array) {
+        this.log(`Data reception ${Util.stringify({ track, time, duration, data })}`).info();
+    }
 
     /**
      * {@inheritDoc Source.onMetadata}
@@ -141,8 +140,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * {@inheritDoc Source.onTrackChange}
      * @event {@link Source.onTrackChange}
      */
-    onTrackChange(audioTrack: number, videoTrack: number) {
-        this.log(Util.stringify({ audioTrack, videoTrack })).info();
+    onTrackChange(audioTrack: number, videoTrack: number, dataTrack: Set<number>) {
+        this.log(Util.stringify({ audioTrack, videoTrack, dataTrack })).info();
     }
 
     /**
@@ -158,24 +157,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onBufferState(oldState: BufferState) {
         this.log(`Buffer change from ${oldState} to ${this.bufferState} (bufferAmount=${this.bufferAmount}ms)`).info();
-
-        if (ManagedMediaSource) {
-            // iPhone/iOS/Safari doesn't implement a smooth dynamic playbackRate change: during live it creates sound noise
-            // So for now simply disable it for iPhone
-            return;
-        }
-        const playbackRate = this._video.playbackRate;
-        if (this.bufferState === BufferState.HIGH) {
-            this._video.playbackRate = 1.08;
-        } else if (this.bufferState === BufferState.LOW) {
-            this._video.playbackRate = 0.92;
-        } else {
-            // OK or NONE
-            this._video.playbackRate = 1;
-        }
-        if (playbackRate !== this._video.playbackRate) {
-            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
-        }
     }
 
     /**
@@ -216,6 +197,18 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @event
      */
     onVideoAppended(data: Uint8Array) {}
+
+    /**
+     * Event fire when the buffer amount changes  by at least BUFFER_CHANGE_STEP ms
+     * @event
+     */
+    onBufferChange(): void {
+        if (!ManagedMediaSource) {
+            // iPhone/iOS/Safari doesn't implement a smooth dynamic playbackRate change: during live it creates sound noise
+            // So by default disable it for iPhone, let the user re-enable it if needed
+            this.adjustPlaybackRate();
+        }
+    }
 
     /**
      * Returns true when player is running (between a {@link Player.start} and a {@link Player.stop})
@@ -265,6 +258,24 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             throw Error('Cannot assign video track on stopped player');
         }
         this._source.videoTrack = idx;
+    }
+
+    /**
+     * Select a or multiple data track to the index provided, must be set after {@link Player.onStart starting}.
+     * When set to `undefined` it selects all data tracks available.
+     */
+    set dataTrack(idx: number | Array<number> | Set<number> | undefined) {
+        if (!this._source) {
+            throw Error('Cannot assign data track on stopped player');
+        }
+        this._source.dataTrack = idx;
+    }
+
+    /**
+     * Index of the data track being received, can be undefined if the player is not playing
+     */
+    get dataTrack(): Set<number> | undefined {
+        return this._source?.dataTrack;
     }
 
     /**
@@ -404,6 +415,30 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     get recvByteRate(): number {
         return this._source?.recvByteRate.value() || 0;
+    }
+
+    /**
+     * @override
+     * {@inheritDoc IPlaying.audioByteRate}
+     */
+    get audioByteRate(): number {
+        return this._source?.audioByteRate || 0;
+    }
+
+    /**
+     * @override
+     * {@inheritDoc IPlaying.videoByteRate}
+     */
+    get videoByteRate(): number {
+        return this._source?.videoByteRate || 0;
+    }
+
+    /**
+     * @override
+     * {@inheritDoc IPlaying.dataByteRate}
+     */
+    get dataByteRate(): number {
+        return this._source?.dataByteRate || 0;
     }
 
     /**
@@ -571,6 +606,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
+    private _previousBufferAmount: number;
+    private _stallCount: number = 0;
+
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
      * with an optionally {@link Source} to custom how getting the stream.
@@ -603,6 +641,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // Set buffer as OK at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
+        this._previousBufferAmount = 0;
     }
 
     /**
@@ -681,14 +720,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 this._timeout.value
             );
 
-            // Add a preload param to optimize starting-time
-            params.query = new URLSearchParams(params.query);
-            params.query.set('preload', this._bufferLimitMiddle.toFixed());
-
             const protocol = params.endPoint.substring(0, params.endPoint.indexOf('://'));
             this._source = new (this.SourceClass || Source.getClass(protocol) || HTTPAdaptiveSource)(this, params);
             this._source.log = this.log.bind(this, this._source?.name + ':') as ILog;
-            this._source.onTrackChange = this._onTrackChange.bind(this);
+            this._source.onTrackChange = (audioTrack: number, videoTrack: number, dataTrack: Set<number>) => {
+                if (!this._playback) {
+                    return;
+                }
+                this._playback.audioEnabled = audioTrack >= 0;
+                this._playback.videoEnabled = videoTrack >= 0;
+                this.onTrackChange(audioTrack, videoTrack, dataTrack);
+            };
             this._source.onMetadata = (metadata: Metadata) => {
                 this._metadata = metadata;
                 return this.onMetadata(metadata);
@@ -696,23 +738,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._source.onFinalizeRequest = (url: URL, headers: Headers) => {
                 this.onFinalizeRequest(url, headers);
             };
-            this._source.onSample = (trackId: number, sample: Media.Sample) => {
-                if (!this._playback) {
-                    this.stop({
-                        type: 'PlayerError',
-                        name: 'Playback error',
-                        detail: 'Append sample before to have initialized media playback'
-                    });
-                    return;
-                }
-                if (trackId === this._source?.videoTrack) {
-                    this._playback.appendVideo(this._metadata, trackId, sample);
-                } else {
-                    this._playback.appendAudio(this._metadata, trackId, sample);
-                }
+            this._source.onAudio = (trackId: number, sample: Media.Sample) => {
+                this._playback?.appendAudio(this._metadata, trackId, sample);
             };
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            this._source.onData = (trackId: number, time: number, data: any) => this.onData(trackId, time, data);
+            this._source.onVideo = (trackId: number, sample: Media.Sample) => {
+                this._playback?.appendVideo(this._metadata, trackId, sample);
+            };
+            this._source.onData = (trackId: number, sample: Media.Sample) => {
+                this.onData(trackId, sample.time, sample.duration, sample.data);
+            };
             this._source.onClose = (error?: SourceError) => this.stop(error);
 
             this.onStart();
@@ -757,6 +791,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 return;
             }
             // STALL !
+            ++this._stallCount;
             /// start data timeout
             clearTimeout(this._timeout.id);
             this._timeout.id = setTimeout(() => this.stop({ type: 'PlayerError', name: 'Data timeout' }), this._timeout.value);
@@ -874,10 +909,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     this._source.close();
                     // remove events to prevent against an incorrect Source implementation
                     this._source.onClose = Util.EMPTY_FUNCTION;
-                    this._source.onData = Util.EMPTY_FUNCTION;
                     this._source.onMetadata = Util.EMPTY_FUNCTION;
                     this._source.onFinalizeRequest = Util.EMPTY_FUNCTION;
-                    this._source.onSample = Util.EMPTY_FUNCTION;
+                    this._source.onAudio = Util.EMPTY_FUNCTION;
+                    this._source.onVideo = Util.EMPTY_FUNCTION;
+                    this._source.onData = Util.EMPTY_FUNCTION;
                     this._source.onTrackChange = Util.EMPTY_FUNCTION;
                 }
 
@@ -899,10 +935,76 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._metadata = new Metadata();
         this._playbackSpeed.clear();
         this._playbackPrevTime = undefined;
+        this._stallCount = 0;
+        this._previousBufferAmount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
 
         this.onStop(error);
+    }
+
+    /**
+     * Calculate and return current player statistics as a {@link PlayerStats} object
+     */
+    computeStats(): PlayerStats {
+        const stats = new PlayerStats();
+        stats.protocol = 'WebRTS';
+
+        stats.bufferAmount = this.bufferAmount;
+        stats.buffering = this.buffering;
+        stats.currentTime = this.currentTime;
+        stats.latency = this.latency;
+        stats.playbackRate = this.playbackRate;
+        stats.playbackSpeed = this.playbackSpeed;
+
+        stats.dataByteRate = this.dataByteRate;
+
+        stats.audioPerSecond = this.audioPerSecond;
+        stats.audioTrackId = this.audioTrack;
+        stats.audioByteRate = this.audioByteRate;
+        if (stats.audioTrackId != null) {
+            stats.audioTrackBandwidth = this.metadata.tracks.get(stats.audioTrackId)?.bandwidth;
+        }
+        stats.skippedAudio = this._source?.skippedAudio;
+
+        stats.videoPerSecond = this.videoPerSecond;
+        stats.videoTrackId = this.videoTrack;
+        stats.videoByteRate = this.videoByteRate;
+        if (stats.videoTrackId != null) {
+            stats.videoTrackBandwidth = this.metadata.tracks.get(stats.videoTrackId)?.bandwidth;
+        }
+        stats.skippedVideo = this._source?.skippedVideo;
+
+        stats.stallCount = this._stallCount;
+
+        return stats;
+    }
+
+    /**
+     * Adjust playback rate according to buffer state to avoid buffer overrun or underrun
+     */
+    private adjustPlaybackRate() {
+        const playbackRate = this._video.playbackRate;
+        if (this.bufferState === BufferState.HIGH) {
+            // Increase playback rate linearly between [1.08,1.16], reaches the max when bufferAmount > bufferLimitHigh + (bufferLimitHigh - bufferLimitMiddle)
+            const ratio =
+                Math.max(0, this.bufferAmount - this.bufferLimitHigh) /
+                Math.max(1, 2 * (this.bufferLimitHigh - this.bufferLimitMiddle));
+            this._video.playbackRate = Math.max(this._video.playbackRate, Math.round(108 + 8 * Math.min(ratio, 1)) / 100);
+        } else if (this.bufferState === BufferState.LOW) {
+            // Decrease playback rate linearly between [0.92,0.84], reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow),
+            // Note: this threshold can be negative and thus never reached
+            const ratio =
+                Math.max(0, this.bufferLimitMiddle - this.bufferAmount) /
+                Math.max(1, 2 * (this.bufferLimitMiddle - this.bufferLimitLow));
+            this._video.playbackRate = Math.min(Math.round(92 + 8 * Math.min(ratio, 1)) / 100, this._video.playbackRate);
+        } else {
+            // OK or NONE
+            this._video.playbackRate = 1;
+        }
+        if (playbackRate !== this._video.playbackRate) {
+            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
+        }
     }
 
     private _setBufferState(state: BufferState) {
@@ -928,15 +1030,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.log('new ManagedMediaSource').info();
             return new ManagedMediaSource();
         }
-    }
-
-    private _onTrackChange(audioTrack: number, videoTrack: number) {
-        if (!this._playback) {
-            return;
-        }
-        this._playback.audioEnabled = audioTrack >= 0;
-        this._playback.videoEnabled = videoTrack >= 0;
-        this.onTrackChange(audioTrack, videoTrack);
     }
 
     private async _tryToPlay() {
@@ -1019,8 +1112,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._playback.startTime = currentTime - PAST_BUFFER;
         }
 
-        // Playing progress => check buffering!
         const bufferAmount = this.bufferAmount;
+
+        // Playing progress => check buffering!
         if (bufferAmount > this._bufferLimitLow) {
             // OK or HIGH
 
@@ -1042,6 +1136,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             }
         } else {
             this._setBufferState(BufferState.LOW);
+        }
+
+        // Buffer change detection
+        if (this.running && Math.abs(this._previousBufferAmount - bufferAmount) >= BUFFER_CHANGE_STEP) {
+            this._previousBufferAmount = bufferAmount;
+            this.onBufferChange();
         }
     }
 }

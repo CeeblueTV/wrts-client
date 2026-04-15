@@ -4,8 +4,6 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { FixMap } from '@ceeblue/web-utils';
-
 export const MAX_GOP_DURATION = 10000; // ms
 
 export enum Type {
@@ -16,10 +14,18 @@ export enum Type {
 
 export enum Codec {
     UNKNOWN = '',
+    // Video
     H264 = 'H264',
     HEVC = 'HEVC',
+    VP8 = 'VP8',
+    // Audio
     MP3 = 'MP3',
-    AAC = 'AAC'
+    AAC = 'AAC',
+    OPUS = 'OPUS',
+    // Data
+    ID3 = 'ID3',
+    JSON = 'JSON',
+    SUBTITLE = 'SUBTITLE'
 }
 
 export type Sample = {
@@ -39,12 +45,29 @@ export type Tracks = {
      * Video track, undefined = MBR, -1 = Remove the track
      */
     video?: number;
+    /**
+     * Datas tracks to receive, undefined = ALL
+     */
+    data?: Set<number>;
 };
 
 export type Resolution = {
     width: number;
     height: number;
 };
+
+export function typeToString(type: Type) {
+    switch (type) {
+        case Type.AUDIO:
+            return 'audio';
+        case Type.VIDEO:
+            return 'video';
+        case Type.DATA:
+            return 'data';
+        default:
+    }
+    return 'unknown';
+}
 
 export function screenResolution(): Resolution | undefined {
     if (typeof window === 'undefined' || !window.screen) {
@@ -68,41 +91,4 @@ export function screenResolution(): Resolution | undefined {
  */
 export function overScreenSize(resolution: Resolution, screen?: Resolution) {
     return screen && resolution.height > screen.height && resolution.width > screen.width;
-}
-
-export class Samples {
-    [Symbol.iterator](): IterableIterator<[number, Sample[]]> {
-        return this._samples[Symbol.iterator]();
-    }
-    get tracks(): Array<number> {
-        return [...this._tracks.keys()]; // WIP replace by FixMap::keys()
-    }
-    get startTime(): number {
-        return this._startTime;
-    }
-    get endTime(): number {
-        return this._endTime;
-    }
-    get duration(): number {
-        return this.endTime - this.startTime;
-    }
-
-    private _samples: FixMap<number, Array<Sample>>;
-    private _startTime: number;
-    private _endTime: number;
-    private _tracks: Set<number>;
-    constructor() {
-        this._samples = new FixMap<number, Array<Sample>>(() => []);
-        this._tracks = new Set<number>();
-        this._startTime = 0;
-        this._endTime = 0;
-    }
-
-    push(trackId: number, sample: Sample): Samples {
-        this._startTime = this._samples.size ? Math.min(this._startTime, sample.time) : sample.time;
-        this._endTime = Math.max(this._endTime, sample.time + sample.duration);
-        this._samples.get(trackId).push(sample);
-        this._tracks.add(trackId);
-        return this;
-    }
 }

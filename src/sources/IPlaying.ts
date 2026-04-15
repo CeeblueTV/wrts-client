@@ -4,7 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { EventEmitter } from '@ceeblue/web-utils';
+import { EventEmitter, PlayerStats } from '@ceeblue/web-utils';
 import * as Media from '../media/Media';
 
 /**
@@ -45,6 +45,12 @@ export interface IPlaying extends EventEmitter {
      * @event
      */
     onBufferState(oldState: BufferState): void;
+
+    /**
+     * Event fire when buffer amount changes by a configured threshold
+     * @event
+     */
+    onBufferChange(): void;
 
     /**
      * Event fire on playback stall
@@ -109,9 +115,27 @@ export interface IPlaying extends EventEmitter {
     get bufferState(): BufferState;
 
     /**
-     * Gets the current receive byte rate
+     * Gets the current receive byte rate including audio, video and data channels
      */
     get recvByteRate(): number;
+
+    /**
+     * Gets the audio byte rate in bytes per second,
+     * include only the audio payload data.
+     */
+    get audioByteRate(): number;
+
+    /**
+     * Gets the video byte rate in bytes per second,
+     * include only the video payload data.
+     */
+    get videoByteRate(): number;
+
+    /**
+     * Gets the data byte rate in bytes per second,
+     * include messages and other non-media payload data like container overhead.
+     */
+    get dataByteRate(): number;
 
     /**
      * Get the number of video frame per second currently decoding
@@ -146,4 +170,11 @@ export interface IPlaying extends EventEmitter {
      * activable when you set {@link Connect.Params.mediaExt} to 'cmaf'
      */
     get passthroughCMAF(): boolean | undefined;
+
+    /**
+     * Retrieves current player statistics.
+     *
+     * @returns An object containing the current player statistics as a {@link PlayerStats} object.
+     */
+    computeStats(): PlayerStats;
 }
