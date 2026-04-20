@@ -171,6 +171,14 @@ export function readCodecString(codecString: string, out: { codec: Media.Codec; 
             out.codec = Media.Codec.ID3;
             out.type = Media.Type.DATA;
             return true;
+        case 'json':
+            out.codec = Media.Codec.JSON;
+            out.type = Media.Type.DATA;
+            return true;
+        case 'subtitle':
+            out.codec = Media.Codec.SUBTITLE;
+            out.type = Media.Type.DATA;
+            return true;
         case 'opus':
             out.codec = Media.Codec.OPUS;
             out.type = Media.Type.AUDIO;

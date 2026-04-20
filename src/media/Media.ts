@@ -23,7 +23,9 @@ export enum Codec {
     AAC = 'AAC',
     OPUS = 'OPUS',
     // Data
-    ID3 = 'ID3'
+    ID3 = 'ID3',
+    JSON = 'JSON',
+    SUBTITLE = 'SUBTITLE'
 }
 
 export type Sample = {
@@ -54,6 +56,19 @@ export type Resolution = {
     width: number;
     height: number;
 };
+
+export function typeToString(type: Type) {
+    switch (type) {
+        case Type.AUDIO:
+            return 'audio';
+        case Type.VIDEO:
+            return 'video';
+        case Type.DATA:
+            return 'data';
+        default:
+    }
+    return 'unknown';
+}
 
 export function screenResolution(): Resolution | undefined {
     if (typeof window === 'undefined' || !window.screen) {

@@ -184,7 +184,7 @@ export class DRMEngine extends EventEmitter {
                     .then(keySystemAccess => keySystemAccess.createMediaKeys())
                     .then(createdMediaKeys => {
                         if (this._certificate) {
-                            createdMediaKeys.setServerCertificate(this._certificate);
+                            createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>);
                         }
                         return this._video.setMediaKeys(createdMediaKeys);
                     })

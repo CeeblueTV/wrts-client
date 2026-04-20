@@ -4,7 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { BinaryReader, BinaryWriter, log } from '@ceeblue/web-utils';
+import { BinaryReader, BinaryWriter, log, Util } from '@ceeblue/web-utils';
 import { Reader, ReaderError } from './Reader';
 import * as Media from '../Media';
 import * as AVC from '../AVC';
@@ -48,6 +48,16 @@ enum SampleFlags {
 }
 
 export class CMAFReader extends Reader {
+    /**
+     * Event fired on a generic message (emsg box)
+     * @param name
+     * @param data
+     * @event
+     */
+    onMessage(name: string, time: number, duration: number, data: Uint8Array) {
+        this.log(`Uncaught message ${Util.stringify({ name, time, duration, data })}`).warn();
+    }
+
     private _tracks: Map<number, Track>;
     private _initTracks?: Media.Tracks;
     private _track?: Track;

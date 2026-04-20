@@ -234,7 +234,7 @@ export class MediaBuffer extends Loggable {
                         } else {
                             this._waitBFrames = 0;
                         }
-                        this._buffer.appendBuffer(packet);
+                        this._buffer.appendBuffer(packet as Uint8Array<ArrayBuffer>);
                         this.onDataAppended(packet);
                     }
                     this._packets.shift(); // shift just on appendBuffer success

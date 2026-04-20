@@ -4,7 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { ILog, Connect, Util, EventEmitter, ByteRate } from '@ceeblue/web-utils';
+import { ILog, Connect, Util, EventEmitter, ByteRate, PlayerStats } from '@ceeblue/web-utils';
 import { Source, SourceError } from './sources/Source';
 import { ICMCD, CMCD, CMCDMode } from './media/CMCD';
 import { BufferState, IPlaying } from './sources/IPlaying';
@@ -131,16 +131,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onData(track: number, time: number, duration: number, data: Uint8Array) {
         this.log(`Data reception ${Util.stringify({ track, time, duration, data })}`).info();
-    }
-
-    /**
-     * Event fired on a generic message
-     * @param name
-     * @param data
-     * @event
-     */
-    onMessage(name: string, time: number, duration: number, data: Uint8Array) {
-        this.log(`Message reception ${Util.stringify({ name, time, duration, data })}`).info();
     }
 
     /**
@@ -444,6 +434,30 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * @override
+     * {@inheritDoc IPlaying.audioByteRate}
+     */
+    get audioByteRate(): number {
+        return this._source?.audioByteRate || 0;
+    }
+
+    /**
+     * @override
+     * {@inheritDoc IPlaying.videoByteRate}
+     */
+    get videoByteRate(): number {
+        return this._source?.videoByteRate || 0;
+    }
+
+    /**
+     * @override
+     * {@inheritDoc IPlaying.dataByteRate}
+     */
+    get dataByteRate(): number {
+        return this._source?.dataByteRate || 0;
+    }
+
+    /**
+     * @override
      * {@inheritDoc IPlaying.reliable}
      */
     get reliable(): boolean {
@@ -617,6 +631,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
     private _previousBufferAmount: number;
+    private _stallCount: number = 0;
+
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
      * with an optionally {@link Source} to custom how getting the stream.
@@ -785,9 +801,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._source.onData = (trackId: number, sample: Media.Sample) => {
                 this.onData(trackId, sample.time, sample.duration, sample.data);
             };
-            this._source.onMessage = (name: string, time: number, duration: number, data: Uint8Array) => {
-                this.onMessage(name, time, duration, data);
-            };
             this._source.onClose = (error?: SourceError) => this.stop(error);
 
             // Create MediaPlayback to render frame
@@ -832,6 +845,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 return;
             }
             // STALL !
+            ++this._stallCount;
             /// start data timeout
             clearTimeout(this._timeout.id);
             this._timeout.id = setTimeout(() => this.stop({ type: 'PlayerError', name: 'Data timeout' }), this._timeout.value);
@@ -954,7 +968,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     this._source.onAudio = Util.EMPTY_FUNCTION;
                     this._source.onVideo = Util.EMPTY_FUNCTION;
                     this._source.onData = Util.EMPTY_FUNCTION;
-                    this._source.onMessage = Util.EMPTY_FUNCTION;
                     this._source.onTrackChange = Util.EMPTY_FUNCTION;
                 }
 
@@ -981,11 +994,49 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._metadata = new Metadata();
         this._playbackSpeed.clear();
         this._playbackPrevTime = undefined;
+        this._stallCount = 0;
         this._previousBufferAmount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
 
         this.onStop(error);
+    }
+
+    /**
+     * Calculate and return current player statistics as a {@link PlayerStats} object
+     */
+    computeStats(): PlayerStats {
+        const stats = new PlayerStats();
+        stats.protocol = 'WebRTS';
+
+        stats.bufferAmount = this.bufferAmount;
+        stats.buffering = this.buffering;
+        stats.currentTime = this.currentTime;
+        stats.latency = this.latency;
+        stats.playbackRate = this.playbackRate;
+        stats.playbackSpeed = this.playbackSpeed;
+
+        stats.dataByteRate = this.dataByteRate;
+
+        stats.audioPerSecond = this.audioPerSecond;
+        stats.audioTrackId = this.audioTrack;
+        stats.audioByteRate = this.audioByteRate;
+        if (stats.audioTrackId != null) {
+            stats.audioTrackBandwidth = this.metadata.tracks.get(stats.audioTrackId)?.bandwidth;
+        }
+        stats.skippedAudio = this._source?.skippedAudio;
+
+        stats.videoPerSecond = this.videoPerSecond;
+        stats.videoTrackId = this.videoTrack;
+        stats.videoByteRate = this.videoByteRate;
+        if (stats.videoTrackId != null) {
+            stats.videoTrackBandwidth = this.metadata.tracks.get(stats.videoTrackId)?.bandwidth;
+        }
+        stats.skippedVideo = this._source?.skippedVideo;
+
+        stats.stallCount = this._stallCount;
+
+        return stats;
     }
 
     /**

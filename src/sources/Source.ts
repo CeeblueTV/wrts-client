@@ -12,8 +12,7 @@ import { RTSReader } from '../media/reader/RTSReader';
 import { RTSReaderOld } from '../media/reader/RTSReaderOld';
 import { Reader, ReaderError } from '../media/reader/Reader';
 import { IPlaying } from './IPlaying';
-import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError } from '@ceeblue/web-utils';
-import { Cmcd, CmcdObjectType, CmcdStreamType, toCmcdHeaders, encodeCmcd } from '@svta/common-media-library/cmcd';
+import { Connect, Util, EventEmitter, ByteRate, ILog, WebSocketReliableError, CML, PlayerStats } from '@ceeblue/web-utils';
 import { MediaTrack } from '../media/MediaTrack';
 
 const TIMESTAMP_HOLE_TOLERANCE = 7; // ms of timestamp acceptable
@@ -160,14 +159,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
     onData(trackId: number, sample: Media.Sample) {}
 
     /**
-     * Event fired on a generic message
-     * @param name
-     * @param data
-     * @event
-     */
-    onMessage(name: string, time: number, duration: number, data: Uint8Array) {}
-
-    /**
      * @event
      * Fired when the URL and headers can be finalized before sending the request to the server.
      *
@@ -305,6 +296,18 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return this.setTracks !== Source.prototype.setTracks;
     }
 
+    get audioByteRate(): number {
+        return this._audioByteRate.value();
+    }
+
+    get videoByteRate(): number {
+        return this._videoByteRate.value();
+    }
+
+    get dataByteRate(): number {
+        return Math.max(0, this._recvByteRate.value() - this.audioByteRate - this.videoByteRate);
+    }
+
     get recvByteRate(): ByteRate {
         return this._recvByteRate;
     }
@@ -388,6 +391,20 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return this._videoPerSecond.exact();
     }
 
+    /**
+     * Get the total duration of audio skipped in milliseconds
+     */
+    get skippedAudio(): number {
+        return this._skippedAudio;
+    }
+
+    /**
+     * Get the total duration of video skipped in milliseconds
+     */
+    get skippedVideo(): number {
+        return this._skippedVideo;
+    }
+
     private _reliable: boolean;
     private _name: string;
     private _url: URL;
@@ -402,16 +419,20 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _dataTime: number;
     private _playing: IPlaying;
     private _mediaExt: string;
+    private _audioByteRate: ByteRate;
+    private _videoByteRate: ByteRate;
     private _recvByteRate: ByteRate;
     private _running: boolean;
     private _cmcdMode?: CMCDMode;
     private _cmcdSid?: string;
-    private _lastStalls: number; // last stalls count sent to CMCD
+    private _prevStats: PlayerStats = new PlayerStats();
     private _trackRequest?: NodeJS.Timeout;
     private _fixLiveTime: number;
     private _audioPerSecond: ByteRate;
     private _videoPerSecond: ByteRate;
     private _ignoredTracks: Set<number> = new Set();
+    private _skippedVideo: number = 0;
+    private _skippedAudio: number = 0;
 
     /**
      * Create a new Source, to be passed to a Player
@@ -419,13 +440,12 @@ export abstract class Source extends EventEmitter implements ICMCD {
     constructor(playing: IPlaying, protocol: string, params: Connect.Params, type: Connect.Type = Connect.Type.WRTS) {
         super();
         // (params.query = new URLSearchParams(params.query)).set('audio', 'none');
+        // (params.query = new URLSearchParams(params.query)).set('video', 'none');
+        // (params.query = new URLSearchParams(params.query)).set('data', 'none');
         this._url = Connect.buildURL(type, params, protocol);
         this._mediaExt = params.mediaExt || ''; // aftet buildURL call to get mediaExt possible correction
         this._streamName = params.streamName || '';
         this._running = false;
-        this._lastStalls = 0;
-        this._audioPerSecond = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
-        this._videoPerSecond = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
         if (type === Connect.Type.WRTS) {
             // WRTS
             this._name = (this._url.protocol.toLowerCase().slice(0, -1) + '-' + this._mediaExt).toLowerCase();
@@ -433,6 +453,10 @@ export abstract class Source extends EventEmitter implements ICMCD {
             // OTHER
             this._name = type;
         }
+        this._audioPerSecond = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
+        this._videoPerSecond = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
+        this._audioByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
+        this._videoByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
         this._recvByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
         this._closed = false;
         this._audioTime = -1;
@@ -444,8 +468,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
         this._requestedTracks = {};
         this._playing = playing;
         this._fixLiveTime = 0;
-        playing.on('Stall', () => ++this._lastStalls, playing);
-
         Promise.resolve().then(() => this._run());
     }
 
@@ -466,7 +488,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
         this._selectedTracks = {};
         this._tracks = {};
-        this._lastStalls = 0;
+        this._prevStats = new PlayerStats();
         this.onClose(error);
     }
 
@@ -557,6 +579,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (this.closed) {
             return;
         }
+
         // fix metadata
         (this._metadata = metadata).fix();
 
@@ -581,6 +604,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
             init = true;
             if (initTracks?.data == null) {
                 this._requestedTracks.data = new Set();
+                // By default we receive all data tracks, even subtitle to allow an immediate switch
                 for (const dataTrack of metadata.dataTracks) {
                     this._requestedTracks.data.add(dataTrack.id);
                 }
@@ -608,6 +632,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
             return;
         }
         // this.log("AUDIO", trackId, Util.stringify(sample, {noBin:true})).info();
+        // compute byteRate
+        this._audioByteRate.addBytes(sample.data.byteLength);
+        // filter unannounced track
         if (trackId !== this.audioTrack) {
             const count = this._ignoredTracks.size;
             if (this._ignoredTracks.add(trackId).size > count) {
@@ -632,6 +659,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
             return;
         }
         // this.log("VIDEO", trackId, Util.stringify(sample, { noBin: true })).info();
+        // compute byteRate
+        this._videoByteRate.addBytes(sample.data.byteLength);
+        // filter unannounced track
         if (trackId !== this.videoTrack) {
             const count = this._ignoredTracks.size;
             if (this._ignoredTracks.add(trackId).size > count) {
@@ -656,11 +686,14 @@ export abstract class Source extends EventEmitter implements ICMCD {
             sample.duration += delay;
             this._videoTime = this.currentTime;
             this.log(`Extends video duration from ${sample.duration - delay} to ${sample.duration}ms track ${trackId}`).warn();
+            this._skippedVideo += delay;
             this._playing.onVideoSkipping(delay);
         }
 
         if (sample.isKeyFrame) {
             // compute an average on each GOP
+            this._audioByteRate.clip();
+            this._videoByteRate.clip();
             this._recvByteRate.clip();
             this._videoPerSecond.clip();
             this._audioPerSecond.clip();
@@ -679,7 +712,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (this._closed) {
             return;
         }
-        // this.log("DATA", trackId, Util.stringify({time, data}, {noBin:true})).info();
+        // this.log("DATA", trackId, Util.stringify(sample)).info();
         if (this.dataTrack == null || !this.dataTrack.has(trackId)) {
             const count = this._ignoredTracks.size;
             if (this._ignoredTracks.add(trackId).size > count) {
@@ -690,17 +723,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
         // No bufferize on start in firstSamples for data, delivers the data immediately
         this._dataTime = this.fixTimestamp(Media.Type.DATA, trackId, this._dataTime, sample);
         this.onData(trackId, sample);
-    }
-
-    /**
-     * Ingest generic message
-     * @param name
-     * @param sample
-     */
-    protected readMessage(name: string, time: number, duration: number, data: Uint8Array) {
-        if (!this._closed) {
-            this.onMessage(name, time, duration, data);
-        }
     }
 
     /**
@@ -746,7 +768,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 const newDuration = Math.max(1, sample.duration + delta);
                 if (Math.abs(delta) > TIMESTAMP_HOLE_TOLERANCE) {
                     // to limit log frequency for small correction (can happen sometime on timescale mistake)
-                    let log = `Timestamp fix ${sample.time / 1000}s to ${currentTime / 1000}s on ${type === Media.Type.AUDIO ? 'audio' : 'video'} track ${trackId}`;
+                    let log = `Timestamp fix ${sample.time / 1000}s to ${currentTime / 1000}s on ${Media.typeToString(type)} track ${trackId}`;
                     log += ` (duration: ${Math.abs(sample.duration)} => ${newDuration}ms)`;
                     this.log(log)[delta < 0 ? 'warn' : 'info']();
                 }
@@ -758,8 +780,10 @@ export abstract class Source extends EventEmitter implements ICMCD {
         // audio/video skipping AFTER timestamp fix (to get an ordered log information)
         if (delta > 0) {
             if (type === Media.Type.AUDIO) {
+                this._skippedAudio += delta;
                 this._playing.onAudioSkipping(delta);
             } else if (type === Media.Type.VIDEO) {
+                this._skippedVideo += delta;
                 this._playing.onVideoSkipping(delta);
             }
         }
@@ -807,9 +831,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
         reader.onSample = (type: Media.Type, trackId: number, sample: Media.Sample) => {
             this.readSample(type, trackId, sample);
-        };
-        reader.onMessage = (name: string, time: number, duration: number, data: Uint8Array) => {
-            this.readMessage(name, time, duration, data);
         };
         reader.onMetadata = (metadata: Metadata) => this.readMetadata(metadata);
         reader.onError = (error: ReaderError) => this.close(error);
@@ -936,74 +957,29 @@ export abstract class Source extends EventEmitter implements ICMCD {
         options: RequestInit = {}
     ): Promise<Response & { error?: string }> {
         const withCMCD = this.cmcd !== CMCD.NONE;
+        let stats;
         if (withCMCD) {
-            // Add CMCD headers
-            let bandwidth = 0;
-            let hasVideo = false;
-            let hasAudio = false;
-            let hasSubtitle = false;
-            for (const trackId of trackIds) {
-                const mTrack = this.metadata?.tracks.get(trackId);
-                if (!mTrack) {
-                    continue;
-                }
-                bandwidth += mTrack.bandwidth;
-                switch (mTrack.type) {
-                    case Media.Type.AUDIO:
-                        hasAudio = true;
-                        break;
-                    case Media.Type.VIDEO:
-                        hasVideo = true;
-                        break;
-                    case Media.Type.DATA:
-                        if (mTrack.codecString.toLowerCase() === 'subtitle') {
-                            hasSubtitle = true;
-                        }
-                        break;
-                }
+            stats = this._playing.computeStats();
+            const cmcd = stats.toCmcd(url, trackIds, this._prevStats);
+            // If asking for the short version of the cmcd payload remove the following fields
+            if (this.cmcd === CMCD.SHORT) {
+                delete cmcd.cid;
+                delete cmcd.dl;
+                delete cmcd.ot;
+                delete cmcd.st;
             }
-            // Basic CMCD
-            const cmcd = {
-                br: bandwidth,
-                bl: this._playing.bufferAmount, // NOTE: CMCD says it MUST be rounded to the nearest 100ms
-                bs: this._lastStalls > 0,
-                mtp: this._playing.recvByteRate,
-                pr: this._playing.playbackRate,
-                sf: 'o', // there is no way to say it's WebRTS)
-                sid: this.cmcdSid,
-                su: this._playing.bufferAmount === 0
-            } as Cmcd;
-            // Full CMCD
-            if (this.cmcd === CMCD.FULL) {
-                cmcd.cid = url.pathname.split('/').pop();
-                cmcd.dl = this._playing.bufferAmount * this._playing.playbackRate;
-                if (hasAudio) {
-                    if (hasVideo) {
-                        cmcd.ot = CmcdObjectType.MUXED;
-                    } else {
-                        cmcd.ot = CmcdObjectType.AUDIO;
-                    }
-                } else if (hasVideo) {
-                    cmcd.ot = CmcdObjectType.VIDEO;
-                } else if (hasSubtitle) {
-                    cmcd.ot = CmcdObjectType.CAPTION;
-                }
-                cmcd.st = CmcdStreamType.LIVE;
-                cmcd.v = 1;
-            }
-
             // Mode
             if (this.cmcdMode === CMCDMode.QUERY) {
-                url.searchParams.set('cmcd', encodeCmcd(cmcd));
+                url.searchParams.set('cmcd', CML.encodeCmcd(cmcd));
             } else {
-                options.headers = toCmcdHeaders(cmcd);
+                options.headers = CML.toCmcdHeaders(cmcd);
             }
         }
 
         const response = await this.fetch(url, options);
-        if (response.ok && withCMCD) {
-            // Update last stalls count only if the request was successful
-            this._lastStalls = 0;
+        if (response.ok && stats) {
+            // Update prev stats only if the request was successful
+            this._prevStats = stats;
         }
         return response;
     }

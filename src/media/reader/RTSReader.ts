@@ -90,7 +90,11 @@ export class RTSReader extends Reader {
 
                     const value = frame.read7Bit();
                     const duration = value >> 2;
-                    const compositionOffset = value & 2 ? frame.read7Bit() : 0;
+                    let compositionOffset = 0;
+                    if (value & 2) {
+                        // can be negative, so sign extend the 16 bits value
+                        compositionOffset = ((frame.read7Bit() & 0xffff) << 16) >> 16;
+                    }
                     const isKeyFrame = value & 1 ? true : false;
 
                     const sample: Media.Sample = { time, duration, isKeyFrame, compositionOffset, data: new Uint8Array() };

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 docs/**/*.html
+docs/media/*
 docs/.nojekyll
 docs/assets
 
@@ -18,3 +19,6 @@ docs/assets
 *.sublime-project
 *.tmproj
 .vscode/
+
+# AI
+.codex
