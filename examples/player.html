@@ -147,7 +147,7 @@
                             {{ streamErrorMessage }}
                         </div>
 
-                        <video autoplay :key="videoKey" id="video" ref="video" @click="fullscreen()" playsinline></video>
+                        <video autoplay id="video" ref="video" @click="fullscreen()" playsinline></video>
                         <div ref="play-btn" class="play-btn" @click="player.paused = false" v-show="player && player.paused">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26">
                                 <polygon class="play-btn__svg" points="9.33 6.69 9.33 19.39 19.3 13.04 9.33 6.69"></polygon>
@@ -386,7 +386,6 @@
                     audioDump: options.dump ? new BinaryWriter() : undefined,
                     videoDump: options.dump ? new BinaryWriter() : undefined,
 
-                    videoKey: 0, // counter to force video element reload
                     keySystem: null,
                     enabledDRM: {
                         widevine: true,
@@ -694,10 +693,6 @@
                     this.player = null;
                     this.playState = PlayState.STOPPED;
                     this.keySystem = null;
-
-                    // Reset the video element, this is necessary to be able to set the mediaKeys again
-                    // in case of a new stream with DRM
-                    this.videoKey += 1;
                 },
                 onTrackChange(audioTrack, videoTrack, dataTrack) {
                     log(`onTrackChange ${Util.stringify({audioTrack, videoTrack, dataTrack})}`).info();

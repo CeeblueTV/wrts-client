@@ -982,6 +982,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (this._drmEngine) {
             this._drmEngine.onError = Util.EMPTY_FUNCTION;
             this._drmEngine = undefined;
+            this._video.setMediaKeys(null);
         }
 
         // Reset values
