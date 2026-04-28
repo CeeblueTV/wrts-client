@@ -397,8 +397,8 @@ export class DRMEngine extends EventEmitter {
 
     // PlayReady specific message parsing
     private static _parsePlayReadyMessage(message: ArrayBuffer): { headers: Record<string, string>; body: ArrayBuffer } {
-        // Convert the message to a string, assuming UTF-16 encoding
-        const messageString = String.fromCharCode(...new Uint16Array(message));
+        // Decode UTF-16LE without spreading the full payload into function arguments.
+        const messageString = new TextDecoder('utf-16le').decode(message);
 
         try {
             // Try to parse as XML first
