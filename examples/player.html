@@ -186,7 +186,7 @@
                             v-model="stream">
                     </div>
                 </div>
-                <div id="content-protection" v-if="!streamMetadata || streamMetadata.contentProtection?.size">
+                <div id="content-protection" v-if="enableDRM || (streamMetadata && streamMetadata.contentProtection?.size)">
                     <div class="form-row">
                         <label class="col-2">Widevine robustness:</label>
                         <div class="form-group col-sm">
@@ -412,6 +412,7 @@
 
                     startTime: 0,
                     adaptiveFrameSkipping: true,
+                    enableDRM: false,
                     streamMetadata: null,
                     netDescription: "",
                     videoTracks: new Map(),
@@ -460,6 +461,7 @@
                 this.controls = false;    
 
                 // init values
+                this.enableDRM = options.drm || false;
                 this.adaptiveFrameSkipping = options.reliable ? false : true;
                 const host = options.host;
                 this.host = new NetAddress(host || location.host, 443);
@@ -967,6 +969,9 @@
                         }
                         if(options.host != null) {
                             path += "&host=" + options.host;
+                        }
+                        if(options.drm) {
+                            path += "&drm";
                         }
                         history.pushState({path},'',path);
                     }
