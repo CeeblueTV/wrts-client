@@ -654,10 +654,10 @@
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
                         ).info();
                     };
-                    this.player.onMediaKeysReady = (drmEngine) => {
-                        log('DRMEngine started').info();
+                    this.player.onMediaKeys = (drmEngine) => {
+                        log('DRMEngine', drmEngine? 'started' : 'stopped').info();
                         // Update enabled DRM based on the active key system
-                        this.keySystem = drmEngine.keySystem;
+                        this.keySystem = drmEngine? drmEngine.keySystem : null;
                     }
               
                     this.setBuffer(); // to set buffer size!

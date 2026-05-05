@@ -177,10 +177,4 @@ export interface IPlaying extends EventEmitter {
      * @returns An object containing the current player statistics as a {@link PlayerStats} object.
      */
     computeStats(): PlayerStats;
-
-    /**
-     * Gets whether playback is waiting an event before flushing
-     * Usefull for example to wait for MediaKeys to be set
-     */
-    get waitingInit(): boolean;
 }

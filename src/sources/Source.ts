@@ -319,10 +319,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
         this.setReliable(value);
     }
 
-    get waitingInit(): boolean {
-        return this._playing.waitingInit;
-    }
-
     get mediaExt(): string {
         return this._mediaExt;
     }
@@ -737,10 +733,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * @param sample  Media sample to process
      */
     protected readSample(type: Media.Type, trackId: number, sample: Media.Sample) {
-        if (this.waitingInit) {
-            // wait explicitely for the player to be ready
-            return;
-        }
         switch (type) {
             case Media.Type.AUDIO:
                 this.readAudio(trackId, sample);

@@ -9,6 +9,23 @@ import { Metadata } from '../Metadata';
 import * as Media from '../Media';
 import { CMAFReader } from '../reader/CMAFReader';
 
+type DRMKeySystemConfig = {
+    licenseUrl: string;
+    certificate?: string | Uint8Array;
+    headers?: Record<string, string>;
+    audioRobustness?: string[];
+    videoRobustness?: string[];
+    audioContentType?: string | string[];
+    videoContentType?: string | string[];
+    supportedConfigurations?: MediaKeySystemConfiguration[];
+};
+
+type SessionHandlers = {
+    session: MediaKeySession;
+    message: (evt: MediaKeyMessageEvent) => void;
+    keystatuseschange: EventListener;
+};
+
 export type DRMEngineError =
     /**
      * Represents a MediaKeys issue
@@ -67,14 +84,29 @@ function buildDrmConfigs(
     return configs;
 }
 
+function asDrmKeySystemConfig(keySystemConfig: Connect.KeySystem): DRMKeySystemConfig | undefined {
+    return typeof keySystemConfig === 'string' ? undefined : (keySystemConfig as DRMKeySystemConfig);
+}
+
+function normalizeContentTypes(contentType?: string | string[]): string[] {
+    if (!contentType) {
+        return [];
+    }
+    return Array.isArray(contentType) ? contentType.filter(Boolean) : [contentType];
+}
+
 /**
  * DRMEngine is a class that handles DRM operations for a video element
  * It supports multiple DRM systems: Widevine, PlayReady, and FairPlay
  * It also supports multiple robustness configurations for each DRM system
  * It also supports multiple key systems for each DRM system
+ *
+ * For convenience, DRMEngine is integrated in {@link Player} but it can
+ * also be used standalone.
  */
 export class DRMEngine extends EventEmitter {
-    static START_TIMEOUT: number = 8000;
+    static MEDIA_KEYS_TIMEOUT: number = 8000;
+    static STOP_TIMEOUT: number = 5000;
     /**
      * Event fired on {@link MediaBufferError}
      * @event
@@ -86,6 +118,9 @@ export class DRMEngine extends EventEmitter {
         const tracks = this._keyIdToTracks.get(keyId) || [];
         this.log(`Key status for ${keyId}: ${status} (tracks: ${tracks.join(', ')})`).info();
     }
+    onMediaKeys() {
+        this.log('MediaKeys are ready and attached to video element').info();
+    }
 
     /**
      * Get the current key system
@@ -93,6 +128,10 @@ export class DRMEngine extends EventEmitter {
      */
     get keySystem(): string | undefined {
         return this._keySystem;
+    }
+
+    get started(): boolean {
+        return this._isStarted;
     }
 
     private _video: HTMLVideoElement;
@@ -103,100 +142,146 @@ export class DRMEngine extends EventEmitter {
     // Current License server URL and parameters
     private _keySystemConfig?: Connect.KeySystem;
 
-    private _initDataMap: Map<string, MediaKeySession> = new Map();
+    private _initDataMap: Map<string, SessionHandlers> = new Map();
     private _keyIdToTracks: Map<string, Array<number>> = new Map();
     private _fairplayAssetIds: WeakMap<MediaKeySession, string> = new WeakMap();
     private _certificate?: Uint8Array;
     private _isStarted: boolean = false;
+    private _stopping: boolean = false;
+    private _encryptedHandler: (event: MediaEncryptedEvent) => void;
+    private _metadata?: Metadata;
+    private _mediaKeysPromise?: Promise<unknown>;
 
     constructor(video: HTMLVideoElement) {
         super();
         this._video = video;
+        this._encryptedHandler = this._handleEncryptedEvent.bind(this);
         if (video.mediaKeys) {
             throw new Error('MediaKeys already created in the video element');
         }
     }
 
-    start(metadata: Metadata, params: Connect.Params) {
+    /**
+     * Start the DRM engine by listening to encrypted events on the video element
+     * and setting up MediaKeys when needed.
+     *
+     * Call this when receiving the event onMetadata or before if you want to force
+     * the capabilities used in the MediaKeySystemConfiguration.
+     */
+    start(params: Connect.Params, metadata?: Metadata): boolean {
+        if (!params.contentProtection) {
+            this.onError({
+                type: 'DRMEngineError',
+                name: 'MediaKeys issue',
+                detail: 'No content protection field found in the settings'
+            });
+            return false;
+        }
+        if (this._isStarted) {
+            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'DRMEngine already started' });
+            return false;
+        }
+        if (this._stopping) {
+            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'DRMEngine is stopping' });
+            return false;
+        }
+        if (this._mediaKeysPromise) {
+            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'MediaKeys setup already in progress' });
+            return false;
+        }
+        if (this._video.mediaKeys) {
+            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'MediaKeys already set on video element' });
+            return false;
+        }
+
+        this._isStarted = true;
+        this._stopping = false;
+        this._settings.clear();
+        for (const keySystem in params.contentProtection) {
+            this._settings.set(keySystem, params.contentProtection[keySystem]);
+        }
+
+        if (metadata) {
+            this._metadata = metadata;
+            this._keyIdToTracks.clear();
+            for (const [, track] of this._metadata.tracks) {
+                if (!track.contentProtection) {
+                    continue;
+                }
+                const keyIds = this._keyIdToTracks.get(track.contentProtection) || [];
+                keyIds.push(track.id);
+                this._keyIdToTracks.set(track.contentProtection, keyIds);
+            }
+        }
+
+        this._video.addEventListener('encrypted', this._encryptedHandler);
+        return true;
+    }
+
+    /**
+     * Stop the DRM engine by releasing all resources and detaching from the video element.
+     *
+     * @returns a promise that resolves when the DRM engine has released all
+     * resources and detached from the video element, or rejects on failure
+     */
+    stop(error?: DRMEngineError): Promise<unknown> {
         return Util.safePromise(
-            DRMEngine.START_TIMEOUT,
-            new Promise((resolve, reject) => {
-                if (this._isStarted) {
-                    this.log('DRMEngine already started').info();
-                    resolve(true);
+            DRMEngine.STOP_TIMEOUT,
+            new Promise((resolve: (result?: unknown) => void, reject: (reason?: string) => void) => {
+                if (!this._isStarted && !this._video.mediaKeys) {
+                    this.log('DRMEngine already stopped').info();
+                    this._isStarted = false;
+                    this._stopping = false;
+                    resolve();
                     return;
                 }
-                this._isStarted = true;
-                if (this._video.mediaKeys) {
-                    this.log('MediaKeys already created').info();
-                    resolve(true);
-                    return;
-                }
-                if (!params.contentProtection) {
-                    reject('No content protection field found in the settings');
-                    return;
-                }
+                this._stopping = true;
+                this._metadata = undefined;
 
-                // Copy the content protection settings to the DRM engine
-                for (const keySystem in params.contentProtection) {
-                    this._settings.set(keySystem, params.contentProtection[keySystem]);
-                }
-                // Generate the mapping of key ID to tracks for quick lookup when receiving key status updates
-                for (const [, track] of metadata.tracks) {
-                    if (track.contentProtection) {
-                        const keyIds = this._keyIdToTracks.get(track.contentProtection) || [];
-                        keyIds.push(track.id);
-                        this._keyIdToTracks.set(track.contentProtection, keyIds);
-                    }
-                }
-                // For other DRM systems (Widevine, PlayReady), use standard EME
-                const drmConfig: MediaKeySystemConfiguration = {
-                    initDataTypes: ['cenc', 'sinf', 'skd', 'keyids'],
-                    videoCapabilities: [],
-                    audioCapabilities: [],
-                    distinctiveIdentifier: 'optional',
-                    persistentState: 'optional',
-                    sessionTypes: ['temporary']
-                };
+                // Remove sessions and event listeners
+                const closePromises: Promise<unknown>[] = [];
+                this._initDataMap.forEach(sessionHandlers => {
+                    const { session, message, keystatuseschange } = sessionHandlers;
+                    session.removeEventListener('message', message);
+                    session.removeEventListener('keystatuseschange', keystatuseschange);
+                    closePromises.push(
+                        session.close().catch(err => {
+                            this.log('Failed to close session', err).warn();
+                        })
+                    );
+                });
+                this._initDataMap.clear();
+                this._video.removeEventListener('encrypted', this._encryptedHandler);
 
-                // Add the capabilities for the tracks
-                const tmpVideoCapabilities: Map<string, MediaKeySystemMediaCapability> = new Map();
-                const tmpAudioCapabilities: Map<string, MediaKeySystemMediaCapability> = new Map();
-                for (const [, track] of metadata.tracks) {
-                    if (!track.contentProtection) {
-                        continue; // Skip tracks without content protection
-                    }
-                    if (track.type === Media.Type.VIDEO) {
-                        tmpVideoCapabilities.set(track.codecString, {
-                            contentType: `video/mp4; codecs="${track.codecString}"`
-                        });
-                    } else if (track.type === Media.Type.AUDIO) {
-                        tmpAudioCapabilities.set(track.codecString, {
-                            contentType: `audio/mp4; codecs="${track.codecString}"`
-                        });
-                    }
-                }
-                drmConfig.videoCapabilities = Array.from(tmpVideoCapabilities.values());
-                drmConfig.audioCapabilities = Array.from(tmpAudioCapabilities.values());
-
-                // Request MediaKeySystemAccess and create MediaKeys
-                this._requestKeySystemAccess(drmConfig)
-                    .then(keySystemAccess => keySystemAccess.createMediaKeys())
-                    .then(createdMediaKeys => {
-                        if (this._certificate) {
-                            createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>);
-                        }
-                        return this._video.setMediaKeys(createdMediaKeys);
+                Promise.resolve(this._mediaKeysPromise)
+                    .catch(() => undefined)
+                    .then(() => Promise.allSettled(closePromises))
+                    .then(() => {
+                        return this._video.setMediaKeys(null);
                     })
                     .then(() => {
-                        this.log(`MediaKeys created and attached to video element with key system ${this._keySystem}`).info();
-                        this._video.addEventListener('encrypted', (e: MediaEncryptedEvent) => this._handleEncryptedEvent(e));
-                        resolve(true);
+                        this.log('MediaKeys detached from video element').info();
+                        resolve();
                     })
                     .catch(err => {
-                        this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: err });
+                        this.log('Failed to detach MediaKeys from video element', err).warn();
                         reject(err);
+                    })
+                    .finally(() => {
+                        this._settings.clear();
+                        this._keySystem = undefined;
+                        this._keySystemConfig = undefined;
+                        this._keyIdToTracks.clear();
+                        this._fairplayAssetIds = new WeakMap();
+                        this._certificate = undefined;
+                        this._isStarted = false;
+                        this._stopping = false;
+                        this._mediaKeysPromise = undefined;
                     });
+
+                if (error) {
+                    this.onError(error);
+                }
             })
         );
     }
@@ -209,7 +294,10 @@ export class DRMEngine extends EventEmitter {
         const drmConfigMap = new Map<string, MediaKeySystemConfiguration[]>();
         for (const [keySystem, keySystemConfig] of this._settings.entries()) {
             let configs: MediaKeySystemConfiguration[];
-            if (typeof keySystemConfig === 'object') {
+            const explicitConfig = asDrmKeySystemConfig(keySystemConfig);
+            if (explicitConfig?.supportedConfigurations?.length) {
+                configs = explicitConfig.supportedConfigurations;
+            } else if (typeof keySystemConfig === 'object') {
                 configs = buildDrmConfigs(baseConfig, keySystemConfig);
             } else {
                 configs = [baseConfig];
@@ -249,9 +337,144 @@ export class DRMEngine extends EventEmitter {
         throw new Error('No supported key system found');
     }
 
-    private _handleEncryptedEvent(event: MediaEncryptedEvent) {
+    /**
+     * Build the base MediaKeySystemConfiguration for the DRM engine.
+     * It will be used as a template to build the final configurations for each key system,
+     * either by using the content types from the metadata or from the settings.
+     */
+    private _buildBaseConfig(): MediaKeySystemConfiguration {
+        const drmConfig: MediaKeySystemConfiguration = {
+            initDataTypes: ['cenc', 'sinf', 'skd', 'keyids'],
+            distinctiveIdentifier: 'optional',
+            persistentState: 'optional',
+            sessionTypes: ['temporary']
+        };
+
+        // By default we use the content types discovered in the metadata for each track with content protection
+        if (this._metadata) {
+            const tmpVideoCapabilities: Map<string, MediaKeySystemMediaCapability> = new Map();
+            const tmpAudioCapabilities: Map<string, MediaKeySystemMediaCapability> = new Map();
+            for (const [, track] of this._metadata.tracks) {
+                if (!track.contentProtection) {
+                    continue;
+                }
+                if (track.type === Media.Type.VIDEO) {
+                    tmpVideoCapabilities.set(track.codecString, {
+                        contentType: `video/mp4; codecs="${track.codecString}"`
+                    });
+                } else if (track.type === Media.Type.AUDIO) {
+                    tmpAudioCapabilities.set(track.codecString, {
+                        contentType: `audio/mp4; codecs="${track.codecString}"`
+                    });
+                }
+            }
+            if (tmpVideoCapabilities.size) {
+                drmConfig.videoCapabilities = Array.from(tmpVideoCapabilities.values());
+            }
+            if (tmpAudioCapabilities.size) {
+                drmConfig.audioCapabilities = Array.from(tmpAudioCapabilities.values());
+            }
+        } else {
+            // Otherwise, we can use the content types provided in the settings for each key system
+            for (const [, keySystemConfig] of this._settings) {
+                const config = asDrmKeySystemConfig(keySystemConfig);
+                if (!config || config.supportedConfigurations?.length) {
+                    continue;
+                }
+                const audioCapabilities = normalizeContentTypes(config.audioContentType).map(contentType => ({ contentType }));
+                const videoCapabilities = normalizeContentTypes(config.videoContentType).map(contentType => ({ contentType }));
+                if (audioCapabilities.length) {
+                    drmConfig.audioCapabilities = [...(drmConfig.audioCapabilities || []), ...audioCapabilities];
+                }
+                if (videoCapabilities.length) {
+                    drmConfig.videoCapabilities = [...(drmConfig.videoCapabilities || []), ...videoCapabilities];
+                }
+            }
+
+            if (!drmConfig.audioCapabilities?.length && !drmConfig.videoCapabilities?.length) {
+                this.log('No content types found in metadata or settings, setMediaKeys will probably fail').warn();
+            }
+        }
+        return drmConfig;
+    }
+
+    private _setupMediaKeys(): Promise<unknown> {
+        // Already set up, just return
+        if (this._video.mediaKeys) {
+            return Promise.resolve();
+        }
+        // If a setup is already in progress, return the existing promise
+        if (this._mediaKeysPromise) {
+            return this._mediaKeysPromise;
+        }
+
+        this._mediaKeysPromise = Util.safePromise(
+            DRMEngine.MEDIA_KEYS_TIMEOUT,
+            new Promise((resolve: (result?: unknown) => void, reject: (reason?: string) => void) => {
+                if (this._stopping || !this._isStarted) {
+                    resolve();
+                    return;
+                }
+
+                this._requestKeySystemAccess(this._buildBaseConfig())
+                    .then(keySystemAccess => keySystemAccess.createMediaKeys())
+                    .then(createdMediaKeys => {
+                        if (this._stopping || !this._isStarted) {
+                            resolve();
+                            return;
+                        }
+                        if (this._certificate) {
+                            createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>);
+                        }
+                        this._video
+                            .setMediaKeys(createdMediaKeys)
+                            .then(() => {
+                                if (this._stopping || !this._isStarted) {
+                                    this._video
+                                        .setMediaKeys(null)
+                                        .catch(() => undefined)
+                                        .finally(() => resolve());
+                                    return;
+                                }
+                                this.log('MediaKeys set on video element').info();
+                                this.onMediaKeys();
+                                resolve();
+                            })
+                            .catch(err => {
+                                reject(err);
+                            });
+                    })
+                    .catch(err => {
+                        reject(err);
+                    })
+                    .finally(() => {
+                        if (!this._stopping) {
+                            this._mediaKeysPromise = undefined;
+                        }
+                    });
+            })
+        );
+        return this._mediaKeysPromise;
+    }
+
+    private async _handleEncryptedEvent(event: MediaEncryptedEvent) {
+        if (this._stopping || !this._isStarted) {
+            this.log('Ignoring encrypted event because DRMEngine is stopping').warn();
+            return;
+        }
         if (!this._video.mediaKeys) {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'MediaKeys not supported' });
+            try {
+                await this._setupMediaKeys();
+            } catch (_) {
+                if (!this._stopping) {
+                    this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'MediaKeys not supported' });
+                }
+                return;
+            }
+        }
+
+        if (!this._video.mediaKeys) {
+            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'Failed to set up MediaKeys' });
             return;
         }
 
@@ -282,10 +505,15 @@ export class DRMEngine extends EventEmitter {
             this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'Failed to create session' });
             return;
         }
-        this._initDataMap.set(initDataString, session);
+        const sessionHandler: SessionHandlers = {
+            session,
+            message: (e: MediaKeyMessageEvent) => this._handleMessage(e, session),
+            keystatuseschange: (e: Event) => this._handleKeyStatusesChange(e, session)
+        };
+        this._initDataMap.set(initDataString, sessionHandler);
 
-        session.addEventListener('message', ((e: MediaKeyMessageEvent) => this._handleMessage(e, session)) as EventListener);
-        session.addEventListener('keystatuseschange', ((e: Event) => this._handleKeyStatusesChange(e, session)) as EventListener);
+        session.addEventListener('message', sessionHandler.message);
+        session.addEventListener('keystatuseschange', sessionHandler.keystatuseschange);
         if (this._keySystem?.startsWith('com.apple.fps')) {
             const fairplayAssetId = this._extractAssetIdFromInitData(event.initDataType, byteArray);
             if (fairplayAssetId) {
@@ -300,6 +528,10 @@ export class DRMEngine extends EventEmitter {
     }
 
     private _handleMessage(event: MediaKeyMessageEvent, session: MediaKeySession) {
+        if (!this._isStarted) {
+            this.log('Ignoring DRM message because DRMEngine is stopped').warn();
+            return;
+        }
         this.log(`Handle message type ${event.messageType} of size ${event.message.byteLength}`).info();
         if (!this._keySystemConfig) {
             this.log('No key system configuration set').info();
@@ -360,6 +592,10 @@ export class DRMEngine extends EventEmitter {
             .then(license => {
                 // Provide the license back to the CDM
                 this.log(`License response received, size ${license.byteLength}`).info();
+                if (!this._isStarted) {
+                    this.log('Ignoring license response because DRMEngine is stopped').warn();
+                    return;
+                }
                 return session.update(license);
             })
             .catch(err => {

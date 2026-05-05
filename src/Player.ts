@@ -216,14 +216,14 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Event fired when MediaKeys are ready if contentProtection is found in the metadata
+     * Event fired when MediaKeys state changes if contentProtection is found in the metadata
      *
      * DRM support can be disabled by setting no contentProtection in the player parameters
      *
-     * @param drmEngine The DRM engine instance
+     * @param drmEngine The DRM engine instance when ready, undefined when released
      * @event
      */
-    onMediaKeysReady(drmEngine: DRMEngine) {}
+    onMediaKeys(drmEngine?: DRMEngine) {}
 
     /**
      * Returns true when player is running (between a {@link Player.start} and a {@link Player.stop})
@@ -494,13 +494,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * @override{@inheritDoc IPlaying.waitingInit}
-     */
-    get waitingInit(): boolean {
-        return this._waitingInit;
-    }
-
-    /**
      * Returns true if player is paused
      */
     get paused(): boolean {
@@ -626,7 +619,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _maximumResolution?: Media.Resolution;
     private _paused: boolean;
     private _drmEngine?: DRMEngine;
-    private _waitingInit: boolean = false;
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
@@ -697,6 +689,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     start(params: Connect.Params, idleTimeout?: number) {
         this.stop();
 
+        if (this._drmEngine) {
+            this.stop({
+                type: 'PlayerError',
+                name: 'Playback error',
+                detail: 'DRM Engine must be released before starting a new playback'
+            });
+            return;
+        }
+
         // stop player on window unload, to avoid issue with iFrame refresh!
         window.addEventListener('beforeunload', () => this.stop(), this._controller);
 
@@ -759,35 +760,28 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             };
             this._source.onMetadata = (metadata: Metadata) => {
                 this._metadata = metadata;
-                const tracks = this.onMetadata(metadata);
 
-                // Start DRM MediaKeys if needed
-                if (!this._drmEngine && metadata.contentProtection.size > 0) {
-                    if (!params.contentProtection) {
-                        this.log('Ignoring contentProtection because no DRMEngine parameters provided').info();
-                    } else {
-                        this.log('ContentProtection found, starting the DRMEngine...').info();
-                        this._waitingInit = true; // waiting DRMEngine to be ready (MediaKeys to be attached)
-                        this._drmEngine = new DRMEngine(this._video);
-                        this._drmEngine.onError = error => {
-                            this.stop(error);
-                        };
-                        this._drmEngine.log = this.log.bind(this, 'DRMEngine:') as ILog;
-                        this._drmEngine
-                            .start(metadata, params)
-                            .then(() => {
-                                if (this._drmEngine) {
-                                    this._waitingInit = false; // DRMEngine is ready
-                                    this.onMediaKeysReady(this._drmEngine);
-                                }
-                            })
-                            .catch(error => {
+                // Start DRM MediaKeys if metadata contains contentProtection and DRMEngine parameters are provided
+                if (metadata.contentProtection.size > 0) {
+                    if (params.contentProtection) {
+                        if (!this._drmEngine) {
+                            this._drmEngine = new DRMEngine(this._video);
+                            this._drmEngine.onMediaKeys = () => {
+                                this.onMediaKeys(this._drmEngine as DRMEngine);
+                            };
+                            this._drmEngine.onError = error => {
                                 this.stop(error);
-                            });
+                            };
+                            this._drmEngine.log = this.log.bind(this, 'DRMEngine:') as ILog;
+                            this.log('ContentProtection found, starting the DRMEngine...').info();
+                            this._drmEngine.start(params, metadata);
+                        }
+                    } else {
+                        this.log('Ignoring contentProtection because no DRMEngine parameters provided').warn();
                     }
                 }
 
-                return tracks;
+                return this.onMetadata(metadata);
             };
             this._source.onFinalizeRequest = (url: URL, headers: Headers) => {
                 this.onFinalizeRequest(url, headers);
@@ -980,9 +974,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         if (this._drmEngine) {
-            this._drmEngine.onError = Util.EMPTY_FUNCTION;
-            this._drmEngine = undefined;
-            this._video.setMediaKeys(null);
+            const drmEngine = this._drmEngine;
+            drmEngine.onMediaKeys = Util.EMPTY_FUNCTION;
+            drmEngine.onError = Util.EMPTY_FUNCTION;
+            drmEngine.stop().then(() => {
+                // Reset drmEngine only when the MediaKeys have been released
+                if (this._drmEngine === drmEngine) {
+                    this._drmEngine = undefined;
+                    this.onMediaKeys();
+                }
+            });
         }
 
         // Reset values
