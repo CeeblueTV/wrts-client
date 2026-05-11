@@ -7,7 +7,7 @@
 import { Connect, Util } from '@ceeblue/web-utils';
 import { Metadata } from '../Metadata';
 import { CMAFReader } from '../reader/CMAFReader';
-import { DRMConfig } from './DRMConfig';
+import { MediaKeysConfig } from './MediaKeysConfig';
 
 type SessionHandlers = {
     session: MediaKeySession;
@@ -15,19 +15,19 @@ type SessionHandlers = {
     keystatuseschange: EventListener;
 };
 
-export type DRMEngineError =
+export type MediaKeysEngineError =
     /**
      * Represents a MediaKeys issue
      */
-    | { type: 'DRMEngineError'; name: 'MediaKeys issue'; detail: string }
+    | { type: 'MediaKeysEngineError'; name: 'MediaKeys issue'; detail: string }
     /**
      * Represents an error when creating WebKitMediaKeys
      */
-    | { type: 'DRMEngineError'; name: 'Unable to create WebKitMediaKeys'; detail: string }
+    | { type: 'MediaKeysEngineError'; name: 'Unable to create WebKitMediaKeys'; detail: string }
     /**
      * Represents an error when creating a session with WebKitMediaKeys
      */
-    | { type: 'DRMEngineError'; name: 'Unable to create session with WebKitMediaKeys' };
+    | { type: 'MediaKeysEngineError'; name: 'Unable to create session with WebKitMediaKeys' };
 
 function bufferSourceToUint8Array(source: BufferSource): Uint8Array {
     if (source instanceof ArrayBuffer) {
@@ -39,19 +39,20 @@ function bufferSourceToUint8Array(source: BufferSource): Uint8Array {
 }
 
 /**
- * DRMEngine handles DRM operations for an `HTMLVideoElement`. It supports Widevine, PlayReady
- * and FairPlay, multiple robustness configurations per key system, and multiple key systems
- * negotiated in order until one is supported by the browser.
+ * MediaKeysEngine handles EME (Encrypted Media Extensions) operations for an `HTMLVideoElement`.
+ * It supports the standard key systems — Widevine, PlayReady, FairPlay, and Clear Key — with
+ * multiple robustness configurations per key system, negotiated in order until one is supported
+ * by the browser.
  *
- * For convenience, DRMEngine is integrated in {@link Player}, but it can also be used standalone
+ * For convenience, MediaKeysEngine is integrated in {@link Player}, but it can also be used standalone
  * — useful when you want to drive capabilities explicitly without relying on stream metadata:
  *
  * @example
- * const drmEngine = new DRMEngine(videoElement);
- * drmEngine.onMediaKeys = () => console.log('DRM ready on', drmEngine.keySystem);
- * drmEngine.onError = error => console.error('DRM error', error);
+ * const mediaKeysEngine = new MediaKeysEngine(videoElement);
+ * mediaKeysEngine.onMediaKeys = () => console.log('MediaKeys ready on', mediaKeysEngine.keySystem);
+ * mediaKeysEngine.onError = error => console.error('MediaKeysEngine error', error);
  *
- * drmEngine.start({
+ * mediaKeysEngine.start({
  *     contentProtection: {
  *         'com.widevine.alpha': {
  *             license: 'https://widevine.example/getLicense',
@@ -64,16 +65,16 @@ function bufferSourceToUint8Array(source: BufferSource): Uint8Array {
  * });
  *
  * // later
- * await drmEngine.stop();
+ * await mediaKeysEngine.stop();
  */
-export class DRMEngine extends DRMConfig {
+export class MediaKeysEngine extends MediaKeysConfig {
     static MEDIA_KEYS_TIMEOUT: number = 8000;
     static STOP_TIMEOUT: number = 5000;
     /**
      * Event fired on {@link MediaBufferError}
      * @event
      */
-    onError(error: DRMEngineError) {
+    onError(error: MediaKeysEngineError) {
         this.log(error).error();
     }
     onKeyStatusChanged(keyId: string, status: MediaKeyStatus) {
@@ -124,7 +125,7 @@ export class DRMEngine extends DRMConfig {
     }
 
     /**
-     * Start the DRM engine by listening to encrypted events on the video element
+     * Start the engine by listening to encrypted events on the video element
      * and setting up MediaKeys when needed.
      *
      * Call this when receiving the event onMetadata or before if you want to force
@@ -133,7 +134,7 @@ export class DRMEngine extends DRMConfig {
     start(params: Connect.Params, metadata?: Metadata): boolean {
         if (!params.contentProtection) {
             this.onError({
-                type: 'DRMEngineError',
+                type: 'MediaKeysEngineError',
                 name: 'MediaKeys issue',
                 detail: 'No content protection field found in the settings'
             });
@@ -141,14 +142,18 @@ export class DRMEngine extends DRMConfig {
         }
         if (this._isStarted || this._stopping || this._mediaKeysPromise) {
             this.onError({
-                type: 'DRMEngineError',
+                type: 'MediaKeysEngineError',
                 name: 'MediaKeys issue',
-                detail: 'DRMEngine already started or currently stopping'
+                detail: 'MediaKeysEngine already started or currently stopping'
             });
             return false;
         }
         if (this._video.mediaKeys) {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'MediaKeys already set on video element' });
+            this.onError({
+                type: 'MediaKeysEngineError',
+                name: 'MediaKeys issue',
+                detail: 'MediaKeys already set on video element'
+            });
             return false;
         }
 
@@ -177,17 +182,17 @@ export class DRMEngine extends DRMConfig {
     }
 
     /**
-     * Stop the DRM engine by releasing all resources and detaching from the video element.
+     * Stop the engine by releasing all resources and detaching from the video element.
      *
-     * @returns a promise that resolves when the DRM engine has released all
+     * @returns a promise that resolves when the engine has released all
      * resources and detached from the video element, or rejects on failure
      */
-    stop(error?: DRMEngineError): Promise<unknown> {
+    stop(error?: MediaKeysEngineError): Promise<unknown> {
         return Util.safePromise(
-            DRMEngine.STOP_TIMEOUT,
+            MediaKeysEngine.STOP_TIMEOUT,
             new Promise((resolve: (result?: unknown) => void, reject: (reason?: string) => void) => {
                 if (!this._isStarted && !this._video.mediaKeys) {
-                    this.log('DRMEngine already stopped').info();
+                    this.log('MediaKeysEngine already stopped').info();
                     this._isStarted = false;
                     this._stopping = false;
                     resolve();
@@ -249,14 +254,14 @@ export class DRMEngine extends DRMConfig {
      */
     private async _requestKeySystemAccess(): Promise<MediaKeySystemAccess> {
         // Build a map of key system => array of configurations.
-        const drmConfigMap = new Map<string, MediaKeySystemConfiguration[]>();
+        const keySystemConfigMap = new Map<string, MediaKeySystemConfiguration[]>();
         for (const [keySystem, keySystemConfig] of this._settings.entries()) {
             const configurations = this.buildKeySystemConfigurations(keySystemConfig, this._metadata);
-            drmConfigMap.set(keySystem, configurations);
+            keySystemConfigMap.set(keySystem, configurations);
         }
 
         // Try each key system with its array of configurations.
-        for (const [keySystem, configs] of drmConfigMap.entries()) {
+        for (const [keySystem, configs] of keySystemConfigMap.entries()) {
             try {
                 this.log(`Requesting key system ${keySystem} with configs`, JSON.stringify(configs)).debug();
                 const keySystemAccess = await navigator.requestMediaKeySystemAccess(keySystem, configs);
@@ -266,7 +271,7 @@ export class DRMEngine extends DRMConfig {
 
                 // Optionally, handle certificate loading if needed
                 if (this._keySystemConfig && typeof this._keySystemConfig !== 'string' && this._keySystemConfig.certificate) {
-                    const certificateConfig = DRMConfig.normalizeCertificate(this._keySystemConfig.certificate);
+                    const certificateConfig = MediaKeysConfig.normalizeCertificate(this._keySystemConfig.certificate);
                     if (certificateConfig.url) {
                         await fetch(certificateConfig.url, {
                             headers: certificateConfig.headers
@@ -303,7 +308,7 @@ export class DRMEngine extends DRMConfig {
         }
 
         this._mediaKeysPromise = Util.safePromise(
-            DRMEngine.MEDIA_KEYS_TIMEOUT,
+            MediaKeysEngine.MEDIA_KEYS_TIMEOUT,
             new Promise((resolve: (result?: unknown) => void, reject: (reason?: string) => void) => {
                 if (this._stopping || !this._isStarted) {
                     resolve();
@@ -353,7 +358,7 @@ export class DRMEngine extends DRMConfig {
 
     private async _handleEncryptedEvent(event: MediaEncryptedEvent) {
         if (this._stopping || !this._isStarted) {
-            this.log('Ignoring encrypted event because DRMEngine is stopping').warn();
+            this.log('Ignoring encrypted event because MediaKeysEngine is stopping').warn();
             return;
         }
         if (!this._video.mediaKeys) {
@@ -361,21 +366,21 @@ export class DRMEngine extends DRMConfig {
                 await this._setupMediaKeys();
             } catch (_) {
                 if (!this._stopping) {
-                    this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'MediaKeys not supported' });
+                    this.onError({ type: 'MediaKeysEngineError', name: 'MediaKeys issue', detail: 'MediaKeys not supported' });
                 }
                 return;
             }
         }
 
         if (!this._video.mediaKeys) {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'Failed to set up MediaKeys' });
+            this.onError({ type: 'MediaKeysEngineError', name: 'MediaKeys issue', detail: 'Failed to set up MediaKeys' });
             return;
         }
 
         // Compute the base64-encoded initDataType+initData which is the key of our initDataMap
         const initData = event.initData;
         if (!initData) {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'No init data provided' });
+            this.onError({ type: 'MediaKeysEngineError', name: 'MediaKeys issue', detail: 'No init data provided' });
             return;
         }
         this.log(`Received encrypted event, type: ${event.initDataType}, size: ${initData.byteLength}`).info();
@@ -396,7 +401,7 @@ export class DRMEngine extends DRMConfig {
         }
         const session = this._video.mediaKeys.createSession();
         if (!session) {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'Failed to create session' });
+            this.onError({ type: 'MediaKeysEngineError', name: 'MediaKeys issue', detail: 'Failed to create session' });
             return;
         }
         const sessionHandler: SessionHandlers = {
@@ -417,13 +422,13 @@ export class DRMEngine extends DRMConfig {
         }
 
         session.generateRequest(event.initDataType, byteArray).catch(err => {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'generateRequest failed: ' + err });
+            this.onError({ type: 'MediaKeysEngineError', name: 'MediaKeys issue', detail: 'generateRequest failed: ' + err });
         });
     }
 
     private _handleMessage(event: MediaKeyMessageEvent, session: MediaKeySession) {
         if (!this._isStarted) {
-            this.log('Ignoring DRM message because DRMEngine is stopped').warn();
+            this.log('Ignoring license message because MediaKeysEngine is stopped').warn();
             return;
         }
         this.log(`Handle message type ${event.messageType} of size ${event.message.byteLength}`).info();
@@ -438,7 +443,7 @@ export class DRMEngine extends DRMConfig {
             this.log('No license configuration set').info();
             return;
         }
-        licenseRequestConfig = DRMConfig.normalizeLicense(licenseRequestConfig);
+        licenseRequestConfig = MediaKeysConfig.normalizeLicense(licenseRequestConfig);
         const licenseServerUrl = licenseRequestConfig.url;
         let licenseRequestUrl = licenseServerUrl;
         const headers: Record<string, string> = {
@@ -451,7 +456,7 @@ export class DRMEngine extends DRMConfig {
         // Handle PlayReady specific message transformation
         if (this._keySystem === 'com.microsoft.playready') {
             // Parse the PlayReady message to extract headers and body
-            const { headers: playReadyHeaders, body } = DRMEngine._parsePlayReadyMessage(requestBody as ArrayBuffer);
+            const { headers: playReadyHeaders, body } = MediaKeysEngine._parsePlayReadyMessage(requestBody as ArrayBuffer);
             Object.assign(headers, playReadyHeaders);
             requestBody = body;
         }
@@ -490,7 +495,7 @@ export class DRMEngine extends DRMConfig {
                 // Provide the license back to the CDM
                 this.log(`License response received, size ${license.byteLength}`).info();
                 if (!this._isStarted) {
-                    this.log('Ignoring license response because DRMEngine is stopped').warn();
+                    this.log('Ignoring license response because MediaKeysEngine is stopped').warn();
                     return;
                 }
                 return session.update(license);
@@ -498,7 +503,7 @@ export class DRMEngine extends DRMConfig {
             .catch(err => {
                 this.log('License request failed:', err).error();
                 this.onError({
-                    type: 'DRMEngineError',
+                    type: 'MediaKeysEngineError',
                     name: 'MediaKeys issue',
                     detail: err instanceof Error ? err.message : 'License request failed'
                 });
@@ -609,7 +614,7 @@ export class DRMEngine extends DRMConfig {
             const kidHex = Array.from(encryption.kid)
                 .map(b => b.toString(16).padStart(2, '0'))
                 .join('');
-            return DRMEngine._normalizeKeyId(kidHex);
+            return MediaKeysEngine._normalizeKeyId(kidHex);
         }
         return undefined;
     }

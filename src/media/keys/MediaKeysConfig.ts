@@ -18,7 +18,7 @@ export type MetadataCapabilities = {
 };
 
 /**
- * Result of {@link DRMConfig.normalizeLicense}: a license server URL with optional request headers.
+ * Result of {@link MediaKeysConfig.normalizeLicense}: a license server URL with optional request headers.
  */
 export type NormalizedMediaKeyLicense = {
     url: string;
@@ -26,7 +26,7 @@ export type NormalizedMediaKeyLicense = {
 };
 
 /**
- * Result of {@link DRMConfig.normalizeCertificate}: either a `url` to fetch the certificate from
+ * Result of {@link MediaKeysConfig.normalizeCertificate}: either a `url` to fetch the certificate from
  * (with optional `headers`) or the certificate bytes directly in `data`. At most one of
  * `url` / `data` is set; both being absent means the input did not provide a usable certificate.
  */
@@ -37,13 +37,13 @@ export type NormalizedMediaKeyCertificate = {
 };
 
 /**
- * Base class regrouping the DRM configuration logic used by {@link DRMEngine}.
+ * Base class regrouping the EME / MediaKeys configuration logic used by {@link MediaKeysEngine}.
  *
- * Kept separate from `DRMEngine` for readability. `DRMEngine` inherits from this class so the
- * configuration helpers share the engine's `this.log` channel (each engine instance keeps its
- * own log interception) without forcing callers to pass a logger explicitly.
+ * Kept separate from `MediaKeysEngine` for readability. `MediaKeysEngine` inherits from this class
+ * so the configuration helpers share the engine's `this.log` channel (each engine instance keeps
+ * its own log interception) without forcing callers to pass a logger explicitly.
  */
-export abstract class DRMConfig extends EventEmitter {
+export abstract class MediaKeysConfig extends EventEmitter {
     /**
      * Base {@link MediaKeySystemConfiguration} used as a template when the caller does not
      * supply {@link Connect.MediaKeySystem.configurations}. Spread first so caller-provided
@@ -189,7 +189,7 @@ export abstract class DRMConfig extends EventEmitter {
     protected buildKeySystemConfigurations(
         keySystemConfig: Connect.MediaKeySystem,
         metadata?: Metadata,
-        baseConfig: MediaKeySystemConfiguration = DRMConfig.DefaultConfiguration
+        baseConfig: MediaKeySystemConfiguration = MediaKeysConfig.DefaultConfiguration
     ): MediaKeySystemConfiguration[] {
         const metadataDerivedCapabilities = this.metadataCapabilities(metadata);
         const explicitConfig = typeof keySystemConfig === 'string' ? undefined : keySystemConfig;

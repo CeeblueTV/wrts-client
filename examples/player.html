@@ -659,10 +659,10 @@
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
                         ).info();
                     };
-                    this.player.onMediaKeys = (drmEngine) => {
-                        log('DRMEngine', drmEngine? 'started' : 'stopped').info();
+                    this.player.onMediaKeys = (mediaKeysEngine) => {
+                        log('MediaKeysEngine', mediaKeysEngine? 'started' : 'stopped').info();
                         // Update enabled DRM based on the active key system
-                        this.keySystem = drmEngine? drmEngine.keySystem : null;
+                        this.keySystem = mediaKeysEngine? mediaKeysEngine.keySystem : null;
                     }
               
                     this.setBuffer(); // to set buffer size!
