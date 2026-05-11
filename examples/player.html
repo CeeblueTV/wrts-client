@@ -570,10 +570,15 @@
 
                     const contentProtection = {};
                     if (this.enabledDRM.widevine) {
-                        contentProtection['com.widevine.alpha'] = {
-                            licenseUrl: 'https://widevine-dash.ezdrm.com/widevine-php/widevine-foreignkey.php?pX=B752A3',
+                        // Use the helper to generate the MediaKeySystemConfiguration array based on the selected robustness levels for audio and video
+                        const configurations = Connect.createMediaKeySystemConfigurations({
                             audioRobustness: this.audioRobustnesses.get(this.audioRobustnessKey),
                             videoRobustness: this.videoRobustnesses.get(this.videoRobustnessKey)
+                        });
+                        log('Generated MediaKeySystemConfiguration for Widevine based on selected robustness levels', configurations).info();
+                        contentProtection['com.widevine.alpha'] = {
+                            license: 'https://widevine-dash.ezdrm.com/widevine-php/widevine-foreignkey.php?pX=B752A3',
+                            configurations
                         };
                     }
                     if (this.enabledDRM.playready) {
@@ -582,7 +587,7 @@
                     if (this.enabledDRM.fairplay) {
                         contentProtection['com.apple.fps.1_0'] = {
                             certificate: 'https://na-fps.ezdrm.com/demo/video/eleisure.cer',
-                            licenseUrl: 'https://fps.ezdrm.com/api/licenses/auth?pX=48EA94&assetid=c9e170a5-b3af-49d8-a8ad-fc2d90104744'
+                            license: 'https://fps.ezdrm.com/api/licenses/auth?pX=48EA94&assetid=c9e170a5-b3af-49d8-a8ad-fc2d90104744'
                         };
                     }
 

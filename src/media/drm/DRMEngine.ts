@@ -4,21 +4,10 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { Connect, EventEmitter, Util } from '@ceeblue/web-utils';
+import { Connect, Util } from '@ceeblue/web-utils';
 import { Metadata } from '../Metadata';
-import * as Media from '../Media';
 import { CMAFReader } from '../reader/CMAFReader';
-
-type DRMKeySystemConfig = {
-    licenseUrl: string;
-    certificate?: string | Uint8Array;
-    headers?: Record<string, string>;
-    audioRobustness?: string[];
-    videoRobustness?: string[];
-    audioContentType?: string | string[];
-    videoContentType?: string | string[];
-    supportedConfigurations?: MediaKeySystemConfiguration[];
-};
+import { DRMConfig } from './DRMConfig';
 
 type SessionHandlers = {
     session: MediaKeySession;
@@ -49,62 +38,35 @@ function bufferSourceToUint8Array(source: BufferSource): Uint8Array {
     }
 }
 
-// Helper: Build an array of DRM configurations by iterating over all robustness combinations.
-function buildDrmConfigs(
-    baseConfig: MediaKeySystemConfiguration,
-    keySystemConfig: Connect.KeySystem
-): MediaKeySystemConfiguration[] {
-    if (typeof keySystemConfig === 'string') {
-        return [baseConfig];
-    }
-    const audioRobustnesses = keySystemConfig.audioRobustness || [''];
-    const videoRobustnesses = keySystemConfig.videoRobustness || [''];
-    const configs: MediaKeySystemConfiguration[] = [];
-
-    for (const audioRobustness of audioRobustnesses) {
-        for (const videoRobustness of videoRobustnesses) {
-            const config: MediaKeySystemConfiguration = {
-                ...baseConfig,
-                // Update audio capabilities for the current audio robustness
-                audioCapabilities:
-                    baseConfig.audioCapabilities?.map(cap => ({
-                        ...cap,
-                        robustness: audioRobustness
-                    })) || [],
-                // Update video capabilities for the current video robustness
-                videoCapabilities:
-                    baseConfig.videoCapabilities?.map(cap => ({
-                        ...cap,
-                        robustness: videoRobustness
-                    })) || []
-            };
-            configs.push(config);
-        }
-    }
-    return configs;
-}
-
-function asDrmKeySystemConfig(keySystemConfig: Connect.KeySystem): DRMKeySystemConfig | undefined {
-    return typeof keySystemConfig === 'string' ? undefined : (keySystemConfig as DRMKeySystemConfig);
-}
-
-function normalizeContentTypes(contentType?: string | string[]): string[] {
-    if (!contentType) {
-        return [];
-    }
-    return Array.isArray(contentType) ? contentType.filter(Boolean) : [contentType];
-}
-
 /**
- * DRMEngine is a class that handles DRM operations for a video element
- * It supports multiple DRM systems: Widevine, PlayReady, and FairPlay
- * It also supports multiple robustness configurations for each DRM system
- * It also supports multiple key systems for each DRM system
+ * DRMEngine handles DRM operations for an `HTMLVideoElement`. It supports Widevine, PlayReady
+ * and FairPlay, multiple robustness configurations per key system, and multiple key systems
+ * negotiated in order until one is supported by the browser.
  *
- * For convenience, DRMEngine is integrated in {@link Player} but it can
- * also be used standalone.
+ * For convenience, DRMEngine is integrated in {@link Player}, but it can also be used standalone
+ * — useful when you want to drive capabilities explicitly without relying on stream metadata:
+ *
+ * @example
+ * const drmEngine = new DRMEngine(videoElement);
+ * drmEngine.onMediaKeys = () => console.log('DRM ready on', drmEngine.keySystem);
+ * drmEngine.onError = error => console.error('DRM error', error);
+ *
+ * drmEngine.start({
+ *     contentProtection: {
+ *         'com.widevine.alpha': {
+ *             license: 'https://widevine.example/getLicense',
+ *             configurations: Connect.createMediaKeySystemConfigurations({
+ *                 audioContentTypes: ['audio/mp4; codecs="mp4a.40.2"'],
+ *                 videoContentTypes: ['video/mp4; codecs="avc1.640028"']
+ *             })
+ *         }
+ *     }
+ * });
+ *
+ * // later
+ * await drmEngine.stop();
  */
-export class DRMEngine extends EventEmitter {
+export class DRMEngine extends DRMConfig {
     static MEDIA_KEYS_TIMEOUT: number = 8000;
     static STOP_TIMEOUT: number = 5000;
     /**
@@ -135,12 +97,12 @@ export class DRMEngine extends EventEmitter {
     }
 
     private _video: HTMLVideoElement;
-    private _settings: Map<string, Connect.KeySystem> = new Map();
+    private _settings: Map<string, Connect.MediaKeySystem> = new Map();
 
     // Current Key System
     private _keySystem?: string;
     // Current License server URL and parameters
-    private _keySystemConfig?: Connect.KeySystem;
+    private _keySystemConfig?: Connect.MediaKeySystem;
 
     private _initDataMap: Map<string, SessionHandlers> = new Map();
     private _keyIdToTracks: Map<string, Array<number>> = new Map();
@@ -177,16 +139,12 @@ export class DRMEngine extends EventEmitter {
             });
             return false;
         }
-        if (this._isStarted) {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'DRMEngine already started' });
-            return false;
-        }
-        if (this._stopping) {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'DRMEngine is stopping' });
-            return false;
-        }
-        if (this._mediaKeysPromise) {
-            this.onError({ type: 'DRMEngineError', name: 'MediaKeys issue', detail: 'MediaKeys setup already in progress' });
+        if (this._isStarted || this._stopping || this._mediaKeysPromise) {
+            this.onError({
+                type: 'DRMEngineError',
+                name: 'MediaKeys issue',
+                detail: 'DRMEngine already started or currently stopping'
+            });
             return false;
         }
         if (this._video.mediaKeys) {
@@ -289,20 +247,12 @@ export class DRMEngine extends EventEmitter {
     /**
      * Request the key system access and create the MediaKeys
      */
-    private async _requestKeySystemAccess(baseConfig: MediaKeySystemConfiguration): Promise<MediaKeySystemAccess> {
+    private async _requestKeySystemAccess(): Promise<MediaKeySystemAccess> {
         // Build a map of key system => array of configurations.
         const drmConfigMap = new Map<string, MediaKeySystemConfiguration[]>();
         for (const [keySystem, keySystemConfig] of this._settings.entries()) {
-            let configs: MediaKeySystemConfiguration[];
-            const explicitConfig = asDrmKeySystemConfig(keySystemConfig);
-            if (explicitConfig?.supportedConfigurations?.length) {
-                configs = explicitConfig.supportedConfigurations;
-            } else if (typeof keySystemConfig === 'object') {
-                configs = buildDrmConfigs(baseConfig, keySystemConfig);
-            } else {
-                configs = [baseConfig];
-            }
-            drmConfigMap.set(keySystem, configs);
+            const configurations = this.buildKeySystemConfigurations(keySystemConfig, this._metadata);
+            drmConfigMap.set(keySystem, configurations);
         }
 
         // Try each key system with its array of configurations.
@@ -316,16 +266,21 @@ export class DRMEngine extends EventEmitter {
 
                 // Optionally, handle certificate loading if needed
                 if (this._keySystemConfig && typeof this._keySystemConfig !== 'string' && this._keySystemConfig.certificate) {
-                    if (typeof this._keySystemConfig.certificate === 'string') {
-                        await fetch(this._keySystemConfig.certificate)
+                    const certificateConfig = DRMConfig.normalizeCertificate(this._keySystemConfig.certificate);
+                    if (certificateConfig.url) {
+                        await fetch(certificateConfig.url, {
+                            headers: certificateConfig.headers
+                        })
                             .then(response => response.arrayBuffer())
                             .then(certificate => {
                                 this._certificate = new Uint8Array(certificate);
                                 this.log(`${keySystem} certificate received, size ${this._certificate.byteLength}`).info();
                             });
-                    } else {
+                    } else if (certificateConfig.data) {
                         this.log(`${keySystem} certificate loaded from settings`).info();
-                        this._certificate = this._keySystemConfig.certificate;
+                        this._certificate = certificateConfig.data;
+                    } else {
+                        this.log(`${keySystem} certificate settings ignored because neither url nor data is provided`).warn();
                     }
                 }
 
@@ -335,67 +290,6 @@ export class DRMEngine extends EventEmitter {
             }
         }
         throw new Error('No supported key system found');
-    }
-
-    /**
-     * Build the base MediaKeySystemConfiguration for the DRM engine.
-     * It will be used as a template to build the final configurations for each key system,
-     * either by using the content types from the metadata or from the settings.
-     */
-    private _buildBaseConfig(): MediaKeySystemConfiguration {
-        const drmConfig: MediaKeySystemConfiguration = {
-            initDataTypes: ['cenc', 'sinf', 'skd', 'keyids'],
-            distinctiveIdentifier: 'optional',
-            persistentState: 'optional',
-            sessionTypes: ['temporary']
-        };
-
-        // By default we use the content types discovered in the metadata for each track with content protection
-        if (this._metadata) {
-            const tmpVideoCapabilities: Map<string, MediaKeySystemMediaCapability> = new Map();
-            const tmpAudioCapabilities: Map<string, MediaKeySystemMediaCapability> = new Map();
-            for (const [, track] of this._metadata.tracks) {
-                if (!track.contentProtection) {
-                    continue;
-                }
-                if (track.type === Media.Type.VIDEO) {
-                    tmpVideoCapabilities.set(track.codecString, {
-                        contentType: `video/mp4; codecs="${track.codecString}"`
-                    });
-                } else if (track.type === Media.Type.AUDIO) {
-                    tmpAudioCapabilities.set(track.codecString, {
-                        contentType: `audio/mp4; codecs="${track.codecString}"`
-                    });
-                }
-            }
-            if (tmpVideoCapabilities.size) {
-                drmConfig.videoCapabilities = Array.from(tmpVideoCapabilities.values());
-            }
-            if (tmpAudioCapabilities.size) {
-                drmConfig.audioCapabilities = Array.from(tmpAudioCapabilities.values());
-            }
-        } else {
-            // Otherwise, we can use the content types provided in the settings for each key system
-            for (const [, keySystemConfig] of this._settings) {
-                const config = asDrmKeySystemConfig(keySystemConfig);
-                if (!config || config.supportedConfigurations?.length) {
-                    continue;
-                }
-                const audioCapabilities = normalizeContentTypes(config.audioContentType).map(contentType => ({ contentType }));
-                const videoCapabilities = normalizeContentTypes(config.videoContentType).map(contentType => ({ contentType }));
-                if (audioCapabilities.length) {
-                    drmConfig.audioCapabilities = [...(drmConfig.audioCapabilities || []), ...audioCapabilities];
-                }
-                if (videoCapabilities.length) {
-                    drmConfig.videoCapabilities = [...(drmConfig.videoCapabilities || []), ...videoCapabilities];
-                }
-            }
-
-            if (!drmConfig.audioCapabilities?.length && !drmConfig.videoCapabilities?.length) {
-                this.log('No content types found in metadata or settings, setMediaKeys will probably fail').warn();
-            }
-        }
-        return drmConfig;
     }
 
     private _setupMediaKeys(): Promise<unknown> {
@@ -416,7 +310,7 @@ export class DRMEngine extends EventEmitter {
                     return;
                 }
 
-                this._requestKeySystemAccess(this._buildBaseConfig())
+                this._requestKeySystemAccess()
                     .then(keySystemAccess => keySystemAccess.createMediaKeys())
                     .then(createdMediaKeys => {
                         if (this._stopping || !this._isStarted) {
@@ -538,16 +432,19 @@ export class DRMEngine extends EventEmitter {
             return;
         }
 
-        // The license server URL can be a string or an object with a licenseUrl and optional headers
-        const licenseServerUrl =
-            typeof this._keySystemConfig === 'string' ? this._keySystemConfig : this._keySystemConfig.licenseUrl;
+        let licenseRequestConfig =
+            typeof this._keySystemConfig === 'string' ? this._keySystemConfig : this._keySystemConfig.license;
+        if (!licenseRequestConfig) {
+            this.log('No license configuration set').info();
+            return;
+        }
+        licenseRequestConfig = DRMConfig.normalizeLicense(licenseRequestConfig);
+        const licenseServerUrl = licenseRequestConfig.url;
         let licenseRequestUrl = licenseServerUrl;
         const headers: Record<string, string> = {
             'Content-Type': 'application/octet-stream'
         };
-        if (typeof this._keySystemConfig !== 'string' && this._keySystemConfig.headers) {
-            Object.assign(headers, this._keySystemConfig.headers);
-        }
+        Object.assign(headers, licenseRequestConfig.headers);
 
         // The "message" is the payload from the CDM to send to the license server
         let requestBody: ArrayBuffer | string = event.message;
