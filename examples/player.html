@@ -186,7 +186,7 @@
                 <div class="form-row">
                     <div class="form-group col-2">
                         <button class="btn btn-light" title="Mute or unmute audio" type="button" v-on:click="mute">
-                            <i class="fas" v-bind:class="{ 'fa-volume-up': !muted, 'fa-volume-off': muted }"></i>
+                            <i class="fas" v-bind:class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
                             <span class="d-none d-md-inline">
                                 sound
                             </span>
@@ -202,27 +202,30 @@
                         </button>
                     </div>
 
-                    <div class="form-group col-1">
-                        <button class="btn btn-light" title="Content protection settings" type="button" @click="showSettings = true">
-                            <i class="fas fa-lock"></i>
-                        </button>
-                    </div>
-
                     <div class="form-group col-3">
                         <button class="btn" type="button"
                             v-bind:class="{ 'btn-danger': isPlaying(), 'btn-success': isStopped(), 'btn-secondary': isStarting() }"
                             v-on:click="play">
                             <span>{{ playButtonCaption() }}</span>
-                            <span class="badge badge-light ml-2" v-if="activeDrmLabel()">
-                                <i class="fas fa-shield-alt"></i> {{ activeDrmLabel() }}
-                            </span>
                         </button>
                     </div>
 
-                    <div class="form-group col-4 text-center form-check">
-                        <input class="form-check-input align-middle" :disabled="!this.mutableReliability()" type="checkbox" v-model="adaptiveFrameSkipping"
-                            @change="onReliable()">
-                        Adaptive <span class="d-none d-md-inline">Frame-Skipping</span>
+                    <div class="form-group col-5 col-md-2 text-center">
+                        <div class="custom-control custom-switch d-inline-block text-left">
+                            <input type="checkbox" class="custom-control-input" id="adaptive-frame-skipping"
+                                :disabled="!mutableReliability()" v-model="adaptiveFrameSkipping" @change="onReliable()">
+                            <label class="custom-control-label small" for="adaptive-frame-skipping">Adaptive Frame-Skipping</label>
+                        </div>
+                    </div>
+
+                    <div class="form-group col-12 col-md-3">
+                        <button :disabled="isPlaying()" class="btn btn-light" :class="{ 'd-none': isPlaying() && !keySystem }"
+                            title="Content protection settings" type="button" @click="showSettings = true">
+                            <i class="fas fa-shield-alt"></i>
+                            <span class="ml-1">
+                                {{ activeDrmLabel() }}
+                            </span>
+                        </button>
                     </div>
 
                 </div>
@@ -489,13 +492,13 @@
                         ['All', '']
                     ]),
                     contentProtection: [
-                        { id: 'widevine', label: 'Widevine', keySystem: 'com.widevine.alpha',
+                        { id: 'widevine', label: 'widevine', keySystem: 'com.widevine.alpha',
                             enabled: true, license: '', headers: [],
                             audioRobustness: 'HW_SECURE_CRYPTO,SW_SECURE_CRYPTO',
                             videoRobustness: 'HW_SECURE_DECODE,SW_SECURE_DECODE' },
-                        { id: 'playready', label: 'PlayReady', keySystem: 'com.microsoft.playready',
+                        { id: 'playready', label: 'playready', keySystem: 'com.microsoft.playready',
                             enabled: true, license: '', headers: [], audioRobustness: '', videoRobustness: '' },
-                        { id: 'fairplay', label: 'FairPlay', keySystem: 'com.apple.fps.1_0',
+                        { id: 'fairplay', label: 'fairplay', keySystem: 'com.apple.fps.1_0',
                             enabled: true, license: '', certificate: '', headers: [], audioRobustness: '', videoRobustness: '' }
                     ],
 
@@ -1086,10 +1089,10 @@
                 },
                 activeDrmLabel() {
                     if (!this.keySystem) {
-                        return null;
+                        return 'protection';
                     }
                     const drm = this.contentProtection.find(d => this.isDrmActive(d));
-                    return drm ? drm.label : null;
+                    return drm ? drm.label : 'protection';
                 },
                 isPlaying() {
                     return this.playState === PlayState.PLAYING;
@@ -1169,7 +1172,7 @@
                         if (options.cmcdSid != null) {
                             path += "&cmcdSid=" + options.cmcdSid;
                         }
-                        if(options.reliable != null || !this.adaptiveFrameSkipping) {
+                        if(!this.adaptiveFrameSkipping) {
                             path += "&reliable";
                         }
                         if(options.dump) {
@@ -1197,6 +1200,10 @@
                         this.player.reliable = !this.adaptiveFrameSkipping;
                     }
                     this.updateURL();
+                },
+                toggleAdaptive() {
+                    this.adaptiveFrameSkipping = !this.adaptiveFrameSkipping;
+                    this.onReliable();
                 }
             },
         }).mount('#main');
