@@ -114,6 +114,7 @@ export class MediaBuffer extends Loggable {
     private _startTime: number;
     private _waitBFrames: number;
     private _onUpdating: boolean;
+
     constructor(mediaSource: MediaSource, mimeType: string, isAlreadyCMAF: boolean = false) {
         super();
         this._onUpdating = false;

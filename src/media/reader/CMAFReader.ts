@@ -578,7 +578,7 @@ export class CMAFReader extends Reader {
                 for (let i = 0; i < count; i++) {
                     if (version === 0 || (version === 2 && track.encryption?.isProtected)) {
                         const sample = this._pendingSamples[i].sample;
-                        const useSubSample = version === 2 || flags & 0x02;
+                        const useSubSample = version === 2 || (flags & 0x02) !== 0;
                         reader.next(track.encryption?.perSampleIVSize ?? 0);
                         const numSubSamples = useSubSample ? reader.read16() : 0;
                         if (useSubSample) {

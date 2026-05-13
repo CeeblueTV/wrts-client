@@ -159,7 +159,7 @@ export class Metadata extends Loggable {
                     continue;
                 }
                 if (kid.length !== 32) {
-                    this.log(`KID length is not 32 bytes`).warn();
+                    this.log('Invalid KID length').warn();
                     continue;
                 }
                 const keySettings = {
