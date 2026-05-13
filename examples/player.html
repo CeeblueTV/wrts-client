@@ -210,15 +210,18 @@
                         </button>
                     </div>
 
-                    <div class="form-group col-5 col-md-2 text-center">
+                    <div class="form-group col-5 col-md-3 text-center d-flex align-items-center justify-content-center">
                         <div class="custom-control custom-switch d-inline-block text-left">
                             <input type="checkbox" class="custom-control-input" id="adaptive-frame-skipping"
                                 :disabled="!mutableReliability()" v-model="adaptiveFrameSkipping" @change="onReliable()">
-                            <label class="custom-control-label small" for="adaptive-frame-skipping">Adaptive Frame-Skipping</label>
+                            <label class="custom-control-label" for="adaptive-frame-skipping">
+                                <span class="small d-md-none">Adaptive Frame</span>
+                                <span class="d-none d-md-inline">Adaptive Frame-Skipping</span>
+                            </label>
                         </div>
                     </div>
 
-                    <div class="form-group col-12 col-md-3">
+                    <div class="form-group col-12 col-md-2">
                         <button :disabled="isPlaying()" class="btn btn-light" :class="{ 'd-none': isPlaying() && !keySystem }"
                             title="Content protection settings" type="button" @click="showSettings = true">
                             <i class="fas fa-shield-alt"></i>
