@@ -158,6 +158,10 @@ export class Metadata extends Loggable {
                 if (!kid) {
                     continue;
                 }
+                if (kid.length !== 32) {
+                    this.log(`KID length is not 32 bytes`).warn();
+                    continue;
+                }
                 const keySettings = {
                     scheme: ProtectionScheme.CBCS,
                     kid,

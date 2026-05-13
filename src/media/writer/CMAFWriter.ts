@@ -457,14 +457,7 @@ export class CMAFWriter extends EventEmitter {
                 }
                 writer.write8(1); // isProtected
                 writer.write8(scheme === ProtectionScheme.CBCS ? 0 : 16); // Per Sample IV Size, 0 if CBCS
-                if (contentProtection.kid.length !== 32) {
-                    this.log(`KID length is not 32 bytes, ignoring`).warn();
-                    writer.write([
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-                    ]);
-                } else {
-                    writer.writeHex(contentProtection.kid);
-                }
+                writer.writeHex(contentProtection.kid);
                 if (scheme === ProtectionScheme.CBCS) {
                     writer.write8(16); // iv size
                     if (contentProtection.iv.length !== 32) {
