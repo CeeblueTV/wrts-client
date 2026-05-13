@@ -678,6 +678,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * Starts playing the stream
      *
+     * If a MediaKeys engine is already running, it means that the previous playback has not been properly released,
+     * so the player stops and throws a {@link PlayerError} error to avoid unexpected behavior.
+     *
      * @param params Connection parameters {@link Connect.Params}
      * @param idleTimeout  idle timeout, default value is around 14s. It sets the timeout error in the absence of
      * connection activity or data fetching, you can tune it to implement your reliable and consistent fallback mechanism.

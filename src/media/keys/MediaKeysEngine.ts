@@ -86,8 +86,8 @@ export class MediaKeysEngine extends MediaKeysConfig {
     }
 
     /**
-     * Get the current key system
-     * @returns The current key system
+     * Get the current key system name, or undefined if MediaKeysEngine is not started
+     * or no key system has been successfully set up yet.
      */
     get keySystem(): string | undefined {
         return this._keySystem;
@@ -400,10 +400,6 @@ export class MediaKeysEngine extends MediaKeysConfig {
             return;
         }
         const session = this._video.mediaKeys.createSession();
-        if (!session) {
-            this.onError({ type: 'MediaKeysEngineError', name: 'MediaKeys issue', detail: 'Failed to create session' });
-            return;
-        }
         const sessionHandler: SessionHandlers = {
             session,
             message: (e: MediaKeyMessageEvent) => this._handleMessage(e, session),

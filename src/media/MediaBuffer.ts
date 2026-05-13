@@ -106,6 +106,7 @@ export class MediaBuffer extends Loggable {
     private _cmafWriter: CMAFWriter;
     private _packets: Array<Uint8Array | string>;
     private _trackId?: number;
+    private _contentProtection?: ContentProtection;
     private _codecString?: string;
     private _mimeType: string;
     private _isVideo: boolean;
@@ -113,7 +114,6 @@ export class MediaBuffer extends Loggable {
     private _startTime: number;
     private _waitBFrames: number;
     private _onUpdating: boolean;
-
     constructor(mediaSource: MediaSource, mimeType: string, isAlreadyCMAF: boolean = false) {
         super();
         this._onUpdating = false;
@@ -153,19 +153,16 @@ export class MediaBuffer extends Loggable {
     }
 
     append(metadata: Metadata, trackId: number, sample: Media.Sample) {
-        const track = metadata.tracks.get(trackId);
-        let contentProtection: ContentProtection | undefined;
-        if (track?.contentProtection) {
-            contentProtection = metadata.contentProtection.get(track.contentProtection);
-        }
         if (trackId !== this._trackId) {
+            const track = metadata.tracks.get(trackId);
             // INIT
             if (!track) {
                 this.onError({ type: 'MediaBufferError', name: 'Track without metadata', track: trackId });
                 return;
             }
             // to call changeType, before cmafWriter.init!
-            // Note: If EME+PlayReady don't change the codecString, otherwise it fails
+            // PlayReady (and some other EME stacks) reject SourceBuffer.changeType() with the same codecString
+            // only push a changeType packet when the codec actually changed
             if (this._codecString !== track.codecString) {
                 const packet = this._mimeType + '; codecs="' + track.codecString + '"';
                 this.log(`Update track${this._trackId == null ? ' ' : ` from ${this._trackId} to `}${trackId} ${packet}`).info();
@@ -173,13 +170,16 @@ export class MediaBuffer extends Loggable {
             }
             this._trackId = trackId;
             this._codecString = track.codecString;
-            const error = this._cmafWriter.init(track, contentProtection);
+            this._contentProtection = track.contentProtection
+                ? metadata.contentProtection.get(track.contentProtection)
+                : undefined;
+            const error = this._cmafWriter.init(track, this._contentProtection);
             if (error) {
                 this.onError(error);
                 return;
             }
         }
-        this._cmafWriter.write(sample, contentProtection);
+        this._cmafWriter.write(sample, this._contentProtection);
         return this;
     }
 
