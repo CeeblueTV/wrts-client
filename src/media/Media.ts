@@ -35,6 +35,7 @@ export type Sample = {
     compositionOffset?: number;
     isKeyFrame?: boolean;
     subSamples?: Array<{ clearBytes: number; encryptedBytes: number }>; // DRM field for SENC box
+    iv?: Uint8Array; // DRM per-sample IV (when ContentProtection.ivMode === 'sample')
 };
 
 export type Tracks = {

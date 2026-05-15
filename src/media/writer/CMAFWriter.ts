@@ -456,11 +456,14 @@ export class CMAFWriter extends EventEmitter {
                     writer.write8(0);
                 }
                 writer.write8(1); // isProtected
-                writer.write8(scheme === ProtectionScheme.CBCS ? 0 : 16); // Per Sample IV Size, 0 if CBCS
+                // In sample IV mode the IV travels with each sample (senc); otherwise CBCS keeps a constant IV in tenc.
+                const sampleIVMode = contentProtection.ivMode === 'sample';
+                const perSampleIVSize = sampleIVMode || scheme !== ProtectionScheme.CBCS ? 16 : 0;
+                writer.write8(perSampleIVSize);
                 writer.writeHex(contentProtection.kid);
-                if (scheme === ProtectionScheme.CBCS) {
+                if (scheme === ProtectionScheme.CBCS && !sampleIVMode) {
                     writer.write8(16); // iv size
-                    if (contentProtection.iv.length !== 32) {
+                    if (contentProtection.iv?.length !== 32) {
                         this.log(`IV length is not 32 bytes, ignoring`).warn();
                         writer.write([
                             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
@@ -483,14 +486,21 @@ export class CMAFWriter extends EventEmitter {
         let sizeSenc = 0,
             sizeSaiz = 0,
             sizeSaio = 0;
+        // hasIVInSenc reflects perSampleIVSize=16 in tenc — in sample-IV mode every sample carries its IV
+        // (including audio CBCS, which otherwise relies on the constant IV in tenc).
+        const sampleIVMode = contentProtection?.ivMode === 'sample';
+        const hasIVInSenc =
+            !!contentProtection &&
+            (sampleIVMode
+                ? sample.iv?.byteLength === 16
+                : contentProtection.scheme !== ProtectionScheme.CBCS && contentProtection.iv?.length === 32);
         if (contentProtection) {
-            if (this._isVideo || contentProtection.scheme !== ProtectionScheme.CBCS) {
+            if (this._isVideo || contentProtection.scheme !== ProtectionScheme.CBCS || hasIVInSenc) {
                 sizeSaiz += 18;
                 sizeSaio += 20;
             }
-            if (contentProtection.scheme !== ProtectionScheme.CBCS && contentProtection.iv.length === 32) {
+            if (hasIVInSenc) {
                 sizeSenc += 16;
-                //sizeSaiz += 1;
             }
             sizeSenc += 16 + (sample.subSamples?.length ? 2 + sample.subSamples.length * 6 : 0);
         }
@@ -549,16 +559,14 @@ export class CMAFWriter extends EventEmitter {
             writer.write32(sample.compositionOffset || 0);
         }
         if (contentProtection) {
-            if (this._isVideo || contentProtection.scheme !== ProtectionScheme.CBCS) {
+            if (this._isVideo || contentProtection.scheme !== ProtectionScheme.CBCS || hasIVInSenc) {
                 // saiz
                 writer.write32(sizeSaiz);
                 writer.write([0x73, 0x61, 0x69, 0x7a]); // saiz
                 writer.write([0x00, 0x00, 0x00, 0x00]); // version + flags
                 writer.write8(0); // default_sample_info_size
                 writer.write32(1); // sample_count (always one for now)
-                const sampleInfoSize =
-                    (this._isVideo ? 6 * (sample.subSamples?.length || 0) + 2 : 0) +
-                    (contentProtection.scheme === ProtectionScheme.CBCS ? 0 : 16);
+                const sampleInfoSize = (this._isVideo ? 6 * (sample.subSamples?.length || 0) + 2 : 0) + (hasIVInSenc ? 16 : 0);
                 writer.write8(sampleInfoSize); // sample_info_size
 
                 // saio
@@ -575,8 +583,12 @@ export class CMAFWriter extends EventEmitter {
             const flags = sample.subSamples?.length ? 0x02 : 0x00;
             writer.write([0x00, 0x00, 0x00, flags]); // version + flags
             writer.write32(1); // sample_count
-            if (contentProtection.scheme !== ProtectionScheme.CBCS && contentProtection.iv.length === 32) {
-                writer.writeHex(contentProtection.iv);
+            if (hasIVInSenc) {
+                if (sampleIVMode) {
+                    writer.write(sample.iv!);
+                } else {
+                    writer.writeHex(contentProtection.iv!);
+                }
             }
             if (sample.subSamples?.length) {
                 writer.write16(sample.subSamples.length);

@@ -10,7 +10,8 @@ import { Metadata } from '../Metadata';
 import { Reader } from './Reader';
 
 enum CustomType {
-    SUBSAMPLE_ENCRYPTED = 1
+    SUBSAMPLE_ENCRYPTED = 1,
+    SAMPLE_IV = 2
 }
 
 /**
@@ -139,6 +140,12 @@ export class RTSReader extends Reader {
                                 encryptedBytes: typeReader.read7Bit()
                             });
                         }
+                    }
+                    break;
+                }
+                case CustomType.SAMPLE_IV: {
+                    if (sample) {
+                        sample.iv = typeReader.read();
                     }
                     break;
                 }

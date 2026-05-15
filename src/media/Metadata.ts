@@ -26,9 +26,15 @@ export type ContentProtection = {
      */
     kid: string;
     /**
-     * Initialization Vector
+     * Initialization Vector (undefined when ivMode === 'sample')
      */
-    iv: string;
+    iv?: string;
+    /**
+     * Initialization Vector mode:
+     * - 'constant' (default): one IV reused for every sample, carried in metadata
+     * - 'sample': each sample carries its own IV in Media.Sample.iv
+     */
+    ivMode: 'constant' | 'sample';
     /**
      * Map of ID of the DRM system to PSSH box
      */
@@ -162,10 +168,12 @@ export class Metadata extends Loggable {
                     this.log('Invalid KID length').warn();
                     continue;
                 }
-                const keySettings = {
+                const ivMode = contentProtection.ivMode === 'sample' ? 'sample' : 'constant';
+                const keySettings: ContentProtection = {
                     scheme: ProtectionScheme.CBCS,
                     kid,
-                    iv: contentProtection.iv || '',
+                    iv: ivMode === 'sample' ? undefined : contentProtection.iv || '',
+                    ivMode,
                     pssh: new Map<string, string>()
                 };
                 switch (contentProtection.scheme.toLowerCase()) {
