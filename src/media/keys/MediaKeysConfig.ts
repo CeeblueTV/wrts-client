@@ -193,6 +193,11 @@ export abstract class MediaKeysConfig extends EventEmitter {
     ): MediaKeySystemConfiguration[] {
         const metadataDerivedCapabilities = this.metadataCapabilities(metadata);
         const explicitConfig = typeof keySystemConfig === 'string' ? undefined : keySystemConfig;
+        // When metadata is available, drop capabilities for media types that have no protected
+        // tracks in the stream — they have no contentType to apply to and would only cause
+        // requestMediaKeySystemAccess to fail.
+        const hasProtectedAudio = !metadata || !!metadataDerivedCapabilities.audioCapabilities?.length;
+        const hasProtectedVideo = !metadata || !!metadataDerivedCapabilities.videoCapabilities?.length;
 
         if (!explicitConfig?.configurations?.length) {
             const configuration: MediaKeySystemConfiguration = {
@@ -217,16 +222,19 @@ export abstract class MediaKeysConfig extends EventEmitter {
                 ...configurationRest
             } = configConfiguration;
 
-            const audioCapabilities = this.mergeConfigCapabilities(
-                configAudioCapabilities,
-                metadataDerivedCapabilities.audioCapabilities,
-                'audio'
-            );
-            const videoCapabilities = this.mergeConfigCapabilities(
-                configVideoCapabilities,
-                metadataDerivedCapabilities.videoCapabilities,
-                'video'
-            );
+            if (configAudioCapabilities?.length && !hasProtectedAudio) {
+                this.log('Stream has no protected audio, dropping audioCapabilities from configuration').info();
+            }
+            if (configVideoCapabilities?.length && !hasProtectedVideo) {
+                this.log('Stream has no protected video, dropping videoCapabilities from configuration').info();
+            }
+
+            const audioCapabilities = hasProtectedAudio
+                ? this.mergeConfigCapabilities(configAudioCapabilities, metadataDerivedCapabilities.audioCapabilities, 'audio')
+                : undefined;
+            const videoCapabilities = hasProtectedVideo
+                ? this.mergeConfigCapabilities(configVideoCapabilities, metadataDerivedCapabilities.videoCapabilities, 'video')
+                : undefined;
 
             const configuration: MediaKeySystemConfiguration = {
                 ...baseConfig,
