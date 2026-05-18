@@ -604,6 +604,25 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         return this._passthroughCMAF;
     }
 
+    /**
+     * @override
+     * {@inheritDoc IPlaying.tracksCombinable}
+     */
+    get tracksCombinable(): boolean | undefined {
+        return this._source?.tracksCombinable;
+    }
+
+    /**
+     * Set whether tracks can be combined in the same request,
+     * by default tracks are combinable to optimize the number of requests
+     */
+    set tracksCombinable(value: boolean) {
+        if (!this._source) {
+            throw Error('Cannot change tracksCombinable on stopped player');
+        }
+        this._source.tracksCombinable = value;
+    }
+
     private _mediaSource?: MediaSource;
     private _source?: Source;
     private _video: HTMLVideoElement;
