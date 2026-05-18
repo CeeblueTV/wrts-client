@@ -495,13 +495,13 @@
                         ['All', '']
                     ]),
                     contentProtection: [
-                        { id: 'widevine', label: 'widevine', keySystem: 'com.widevine.alpha',
+                        { id: 'widevine', label: 'Widevine', keySystem: 'com.widevine.alpha',
                             enabled: true, license: '', headers: [],
                             audioRobustness: 'HW_SECURE_CRYPTO,SW_SECURE_CRYPTO',
                             videoRobustness: 'HW_SECURE_DECODE,SW_SECURE_DECODE' },
-                        { id: 'playready', label: 'playready', keySystem: 'com.microsoft.playready',
+                        { id: 'playready', label: 'PlayReady', keySystem: 'com.microsoft.playready',
                             enabled: true, license: '', headers: [], audioRobustness: '', videoRobustness: '' },
-                        { id: 'fairplay', label: 'fairplay', keySystem: 'com.apple.fps.1_0',
+                        { id: 'fairplay', label: 'FairPlay', keySystem: 'com.apple.fps.1_0',
                             enabled: true, license: '', certificate: '', headers: [], audioRobustness: '', videoRobustness: '' }
                     ],
 
@@ -753,21 +753,19 @@
                 },
 
                 serializeContentProtection() {
-                    // Only emit DRMs that diverge from defaults (disabled or with any field set).
+                    // A DRM with no license can't be exercised at playback time, so its other
+                    // settings (enabled flag, headers, robustness) are dead weight in the URL.
                     const compact = [];
                     for (const drm of this.contentProtection) {
-                        const entry = { id: drm.id };
+                        if (!drm.license) { continue; }
+                        const entry = { id: drm.id, license: drm.license };
                         if (!drm.enabled) { entry.enabled = false; }
-                        if (drm.license) { entry.license = drm.license; }
                         if (drm.id === 'fairplay' && drm.certificate) { entry.certificate = drm.certificate; }
                         const headers = drm.headers.filter(h => h.name);
                         if (headers.length) { entry.headers = headers; }
                         if (drm.audioRobustness) { entry.audioRobustness = drm.audioRobustness; }
                         if (drm.videoRobustness) { entry.videoRobustness = drm.videoRobustness; }
-                        // Only keep entries with more than just an id (i.e. they differ from defaults).
-                        if (Object.keys(entry).length > 1) {
-                            compact.push(entry);
-                        }
+                        compact.push(entry);
                     }
                     return compact.length ? JSON.stringify(compact) : null;
                 },
