@@ -4,7 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
-import { BinaryReader, BinaryWriter, Util } from '@ceeblue/web-utils';
+import { BinaryReader, BinaryWriter, log, Util } from '@ceeblue/web-utils';
 import { Reader, ReaderError } from './Reader';
 import * as Media from '../Media';
 import * as AVC from '../AVC';
@@ -20,7 +20,15 @@ type Track = {
     defaultDuration?: number;
     defaultFlags?: number;
     defaultSampleSize?: number;
+    encryption?: {
+        isProtected: boolean;
+        perSampleIVSize: number;
+        kid: Uint8Array;
+        iv?: Uint8Array;
+    };
 };
+
+export type TrackEncryption = Track['encryption'];
 
 type Sample = Media.Sample & { size?: number };
 
@@ -66,6 +74,31 @@ export class CMAFReader extends Reader {
         if (passthrough) {
             this._passthrough = new BinaryWriter();
         }
+    }
+
+    /**
+     * Parse initData as sinf/schi payload using the same recursive parser path as CMAFReader.
+     * Returns a lightweight track object populated with encryption when tenc is found.
+     */
+    static parseSinfTrack(initData: Uint8Array): TrackEncryption | undefined {
+        const parser = new CMAFReader(false);
+        parser.onError = error => {
+            log('Error while parsing sinf payload:', error).warn();
+        };
+
+        // We need to set a dummy track in the parser to be able to parse the tenc box and extract encryption info.
+        const track: Track = {
+            id: -1,
+            type: Media.Type.DATA,
+            timeScale: 1000,
+            time: 0
+        };
+        parser._track = track;
+
+        // Try parsing as a full packet containing sized MP4 boxes.
+        parser.parse(initData);
+
+        return track.encryption;
     }
 
     read(data: BufferSource) {
@@ -220,7 +253,9 @@ export class CMAFReader extends Reader {
             case 'hev1':
             case 'hev3':
             case 'avc3':
-            case 'avc1': {
+            case 'avc1':
+            case 'encv':
+            case 'enca': {
                 const trackId = this._track?.id;
                 if (trackId == null) {
                     return {
@@ -254,7 +289,7 @@ export class CMAFReader extends Reader {
                 }
 
                 const version = reader.read16();
-                if (boxType === 'mp4a') {
+                if (boxType === 'mp4a' || boxType === 'enca') {
                     mTrack.type = Media.Type.AUDIO;
                     if (version > 1) {
                         reader.next(22); // skip revision level, vendor, "always" values and sizeOfStructOnly
@@ -485,6 +520,84 @@ export class CMAFReader extends Reader {
                 this._pendingSamples.length = 0;
                 return;
             }
+            // DRM boxes
+            case 'schi': {
+                const track = this._track;
+                if (!track) {
+                    return {
+                        type: 'ReaderError',
+                        name: 'Invalid payload',
+                        detail: 'Scheme Information Box without track before'
+                    };
+                }
+                // Parse the sub boxes, we are searching for 'tenc'
+                while (reader.available() > 4) {
+                    const error = this._parseBox(reader.read(reader.read32() - 4));
+                    if (error) {
+                        return error;
+                    }
+                }
+                return;
+            }
+            case 'tenc': {
+                const track = this._track;
+                if (!track) {
+                    return { type: 'ReaderError', name: 'Invalid payload', detail: 'Track Encryption Box without track before' };
+                }
+                const encryption = CMAFReader._parseTencPayload(reader.read());
+                if (!encryption) {
+                    return { type: 'ReaderError', name: 'Invalid payload', detail: 'Invalid tenc payload' };
+                }
+                track.encryption = encryption;
+                return;
+            }
+            case 'senc': {
+                const track = this._track;
+                if (!track) {
+                    return { type: 'ReaderError', name: 'Invalid payload', detail: 'Sample Encryption Box without track before' };
+                } else if (!track.encryption) {
+                    return { type: 'ReaderError', name: 'Invalid payload', detail: 'Sample Encryption Box without tenc before' };
+                }
+                const version = reader.read8(); // version
+                const flags = reader.read24(); // flags
+                const count = reader.read32(); // sample_count
+                if (!reader.available()) {
+                    return;
+                }
+                // The optional override field (algorithm_id + iv_size + KID) is present when flag bit 0 is set.
+                if (flags & 0x01) {
+                    reader.next(20);
+                }
+                if (this._pendingSamples.length < count) {
+                    return {
+                        type: 'ReaderError',
+                        name: 'Invalid payload',
+                        detail: `Sample Encryption Box announces ${count} samples but only ${this._pendingSamples.length} pending samples for track ${track.id}`
+                    };
+                }
+                for (let i = 0; i < count; i++) {
+                    if (version === 0 || (version === 2 && track.encryption?.isProtected)) {
+                        const sample = this._pendingSamples[i].sample;
+                        const useSubSample = version === 2 || (flags & 0x02) !== 0;
+                        const ivSize = track.encryption?.perSampleIVSize ?? 0;
+                        if (ivSize) {
+                            sample.iv = reader.read(ivSize);
+                        }
+                        const numSubSamples = useSubSample ? reader.read16() : 0;
+                        if (useSubSample) {
+                            sample.subSamples = [];
+                            for (let j = 0; j < numSubSamples; j++) {
+                                const clearBytes = reader.read16();
+                                const encryptedBytes = reader.read32();
+                                sample.subSamples.push({ clearBytes, encryptedBytes });
+                            }
+                        }
+                    } else {
+                        return { type: 'ReaderError', name: 'Unsupported format', format: `Senc version ${version}` };
+                    }
+                }
+                return;
+            }
         }
         // Sub box that we want parse
         let error;
@@ -503,6 +616,9 @@ export class CMAFReader extends Reader {
             let i: number;
             let end: number = extension.byteLength;
             const type = String.fromCharCode(...extension.subarray(0, (i = 4)));
+
+            // this.log(`Parsing codec extension ${type} of size ${extension.byteLength}`).info();
+
             switch (type) {
                 case 'btrt': {
                     const config = new BinaryReader(extension.subarray(i, end));
@@ -615,6 +731,17 @@ export class CMAFReader extends Reader {
                 }
                 case 'pasp': // PixelAspectRatioBox
                     break;
+                case 'sinf': {
+                    // Sample Encryption Information Box
+                    const sinfReader = new BinaryReader(extension.subarray(Math.min(i, end), end));
+                    while (sinfReader.available() > 4) {
+                        const error = this._parseBox(sinfReader.read(sinfReader.read32() - 4));
+                        if (error) {
+                            return error;
+                        }
+                    }
+                    break;
+                }
                 default:
                     this.log(`Ignore codec extension ${type}`).warn();
                     break;
@@ -623,5 +750,29 @@ export class CMAFReader extends Reader {
         if (mTrack.codec) {
             mTrack.codecString = AVC.writeCodecString(mTrack.codec, mTrack.config);
         }
+    }
+
+    private static _parseTencPayload(payload: Uint8Array): TrackEncryption | undefined {
+        const reader = new BinaryReader(payload);
+        if (reader.available() < 23) {
+            return undefined;
+        }
+        reader.next(6); // version + flags + reserved byte + byteBlock
+        const encryption: TrackEncryption = {
+            isProtected: reader.read8() === 1,
+            perSampleIVSize: reader.read8(),
+            kid: reader.read(16)
+        };
+        if (encryption.isProtected && encryption.perSampleIVSize === 0) {
+            if (!reader.available()) {
+                return undefined;
+            }
+            const constantIVSize = reader.read8();
+            if (reader.available() < constantIVSize) {
+                return undefined;
+            }
+            encryption.iv = reader.read(constantIVSize);
+        }
+        return encryption;
     }
 }

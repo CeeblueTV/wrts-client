@@ -12,6 +12,7 @@ import * as Media from './media/Media';
 import { Metadata } from './media/Metadata';
 import { MediaPlayback, MediaPlaybackError } from './media/MediaPlayback';
 import { HTTPAdaptiveSource } from './sources/HTTPAdaptiveSource';
+import { MediaKeysEngine, MediaKeysEngineError } from './media/keys/MediaKeysEngine';
 
 const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 150; // ms
@@ -63,7 +64,11 @@ export type PlayerError =
     /**
      * Represents a {@link MediaPlaybackError} error
      */
-    | MediaPlaybackError;
+    | MediaPlaybackError
+    /**
+     * Represents a {@link MediaKeysEngineError} error
+     */
+    | MediaKeysEngineError;
 
 /**
  * Use Player to start playing a WebRTS stream.
@@ -209,6 +214,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.adjustPlaybackRate();
         }
     }
+
+    /**
+     * Event fired when MediaKeys state changes if contentProtection is found in the metadata
+     *
+     * MediaKeys support can be disabled by setting no contentProtection in the player parameters
+     *
+     * @param mediaKeysEngine The MediaKeys engine instance when ready, undefined when released
+     * @event
+     */
+    onMediaKeys(mediaKeysEngine?: MediaKeysEngine) {}
 
     /**
      * Returns true when player is running (between a {@link Player.start} and a {@link Player.stop})
@@ -603,6 +618,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _buffering: boolean;
     private _maximumResolution?: Media.Resolution;
     private _paused: boolean;
+    private _mediaKeysEngine?: MediaKeysEngine;
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
@@ -662,6 +678,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * Starts playing the stream
      *
+     * If a MediaKeys engine is already running, it means that the previous playback has not been properly released,
+     * so the player stops and reports a {@link PlayerError} error to avoid unexpected behavior.
+     *
      * @param params Connection parameters {@link Connect.Params}
      * @param idleTimeout  idle timeout, default value is around 14s. It sets the timeout error in the absence of
      * connection activity or data fetching, you can tune it to implement your reliable and consistent fallback mechanism.
@@ -672,6 +691,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     start(params: Connect.Params, idleTimeout?: number) {
         this.stop();
+
+        if (this._mediaKeysEngine) {
+            this.stop({
+                type: 'PlayerError',
+                name: 'Playback error',
+                detail: 'MediaKeys engine must be released before starting a new playback'
+            });
+            return;
+        }
 
         // stop player on window unload, to avoid issue with iFrame refresh!
         window.addEventListener('beforeunload', () => this.stop(), this._controller);
@@ -709,9 +737,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 // closed!
                 return;
             }
-            if (this._mediaSource) {
-                this._mediaSource.onsourceopen = null; // just one time
+            if (!this._mediaSource) {
+                return;
             }
+
+            this._mediaSource.onsourceopen = null; // just one time
 
             // Connection timeout
             clearTimeout(this._timeout.id);
@@ -733,6 +763,27 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             };
             this._source.onMetadata = (metadata: Metadata) => {
                 this._metadata = metadata;
+
+                // Start the MediaKeys engine if metadata contains contentProtection and MediaKeysEngine parameters are provided
+                if (metadata.contentProtection.size > 0) {
+                    if (params.contentProtection) {
+                        if (!this._mediaKeysEngine) {
+                            this._mediaKeysEngine = new MediaKeysEngine(this._video);
+                            this._mediaKeysEngine.onMediaKeys = () => {
+                                this.onMediaKeys(this._mediaKeysEngine as MediaKeysEngine);
+                            };
+                            this._mediaKeysEngine.onError = error => {
+                                this.stop(error);
+                            };
+                            this._mediaKeysEngine.log = this.log.bind(this, 'MediaKeysEngine:') as ILog;
+                            this.log('ContentProtection found, starting the MediaKeysEngine...').info();
+                            this._mediaKeysEngine.start(params, metadata);
+                        }
+                    } else {
+                        this.log('Ignoring contentProtection because no MediaKeysEngine parameters provided').warn();
+                    }
+                }
+
                 return this.onMetadata(metadata);
             };
             this._source.onFinalizeRequest = (url: URL, headers: Headers) => {
@@ -749,33 +800,33 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             };
             this._source.onClose = (error?: SourceError) => this.stop(error);
 
+            // Create MediaPlayback to render frame
+            this._playback = new MediaPlayback(this._mediaSource, this.passthroughCMAF);
+            this._playback.log = this.log.bind(this);
+            this._playback.onAudioAppended = this.onAudioAppended.bind(this);
+            this._playback.onVideoAppended = this.onVideoAppended.bind(this);
+            this._playback.onProgress = this._onPlaybackProgress.bind(this);
+            this._playback.onBufferOverflow = () => {
+                // QuotaExceeding can happen just when live video is paused, we have to forward playing to let browser managed buffer exceed
+                const time = this._video.currentTime;
+                // Advance to 10s
+                this._video.currentTime += 10;
+                // Look if we success to advance the playback
+                if (this._video.currentTime <= time) {
+                    // exception whereas already at the end? => stop all!
+                    return this.stop({ type: 'MediaBufferError', name: 'Exceeds buffer size' });
+                }
+                if (this._video.paused) {
+                    this.log('Unpause video to release buffer space').warn();
+                    this.paused = false;
+                } else {
+                    this.log('Forward current playing time of 10 second to release buffer space').warn();
+                }
+            };
+            this._playback.onClose = error => this.stop(error);
+
             this.onStart();
         };
-
-        // Create MediaPlayback to render frame
-        this._playback = new MediaPlayback(this._mediaSource, this.passthroughCMAF);
-        this._playback.log = this.log.bind(this);
-        this._playback.onAudioAppended = this.onAudioAppended.bind(this);
-        this._playback.onVideoAppended = this.onVideoAppended.bind(this);
-        this._playback.onProgress = this._onPlaybackProgress.bind(this);
-        this._playback.onBufferOverflow = () => {
-            // QuotaExceeding can happen just when live video is paused, we have to forward playing to let browser managed buffer exceed
-            const time = this._video.currentTime;
-            // Advance to 10s
-            this._video.currentTime += 10;
-            // Look if we success to advance the playback
-            if (this._video.currentTime <= time) {
-                // exception whereas already at the end? => stop all!
-                return this.stop({ type: 'MediaBufferError', name: 'Exceeds buffer size' });
-            }
-            if (this._video.paused) {
-                this.log('Unpause video to release buffer space').warn();
-                this.paused = false;
-            } else {
-                this.log('Forward current playing time of 10 second to release buffer space').warn();
-            }
-        };
-        this._playback.onClose = error => this.stop(error);
 
         // Video events
         const onWaiting = () => {
@@ -923,6 +974,19 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             // detach video
             URL.revokeObjectURL(this._video.src);
             this._video.src = '';
+        }
+
+        if (this._mediaKeysEngine) {
+            const mediaKeysEngine = this._mediaKeysEngine;
+            mediaKeysEngine.onMediaKeys = Util.EMPTY_FUNCTION;
+            mediaKeysEngine.onError = Util.EMPTY_FUNCTION;
+            mediaKeysEngine.stop().then(() => {
+                // Reset mediaKeysEngine only when the MediaKeys have been released
+                if (this._mediaKeysEngine === mediaKeysEngine) {
+                    this._mediaKeysEngine = undefined;
+                    this.onMediaKeys();
+                }
+            });
         }
 
         // Reset values
