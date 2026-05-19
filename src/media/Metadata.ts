@@ -9,6 +9,38 @@ import * as Media from './Media';
 import * as AVC from './AVC';
 import { MediaTrack } from './MediaTrack';
 
+export enum ProtectionScheme {
+    CENC = 0x63656e63, // (AES-CTR)
+    CBC1 = 0x63626331, // (AES-CBC)
+    CENS = 0x63656e73, // (AES-CTR with subsamples)
+    CBCS = 0x63626373 // (AES-CBC with subsamples)
+}
+
+export type ContentProtection = {
+    /**
+     * Scheme
+     */
+    scheme: ProtectionScheme;
+    /**
+     * Key ID
+     */
+    kid: string;
+    /**
+     * Initialization Vector (undefined when ivMode === 'sample')
+     */
+    iv?: string;
+    /**
+     * Initialization Vector mode:
+     * - 'constant' (default): one IV reused for every sample, carried in metadata
+     * - 'sample': each sample carries its own IV in Media.Sample.iv
+     */
+    ivMode: 'constant' | 'sample';
+    /**
+     * Map of ID of the DRM system to PSSH box
+     */
+    pssh: Map<string, string>;
+};
+
 /**
  * Metadata representation
  */
@@ -51,6 +83,10 @@ export class Metadata extends Loggable {
      * Data track
      */
     dataTracks: Array<MediaTrack> = [];
+    /**
+     * Map of List of ContentProtection
+     */
+    contentProtection: Map<string, ContentProtection> = new Map<string, ContentProtection>();
 
     private _liveTimeValue: number = 0;
     private _liveTimeWhen: number = Util.time();
@@ -97,6 +133,7 @@ export class Metadata extends Loggable {
 
             mTrack.bandwidth = Number(track.bandwidth) || mTrack.bandwidth;
             mTrack.currentTime = Number(track.currentTime) || mTrack.currentTime;
+            mTrack.contentProtection = track.contentProtection;
 
             const type = (track.type || '').toLowerCase();
 
@@ -119,6 +156,46 @@ export class Metadata extends Loggable {
                     mTrack.rate = Number(track.frameRate) || mTrack.rate;
                     this.videoTracks.push(mTrack);
                 }
+            }
+        }
+        if (Array.isArray(obj.contentProtection)) {
+            for (const contentProtection of obj.contentProtection) {
+                const kid = contentProtection.kid;
+                if (!kid) {
+                    continue;
+                }
+                if (kid.length !== 32) {
+                    this.log('Invalid KID length').warn();
+                    continue;
+                }
+                const ivMode = contentProtection.ivMode === 'sample' ? 'sample' : 'constant';
+                const keySettings: ContentProtection = {
+                    scheme: ProtectionScheme.CBCS,
+                    kid,
+                    iv: ivMode === 'sample' ? undefined : contentProtection.iv || '',
+                    ivMode,
+                    pssh: new Map<string, string>()
+                };
+                if (contentProtection.scheme) {
+                    switch (contentProtection.scheme.toLowerCase()) {
+                        case 'cenc':
+                            keySettings.scheme = ProtectionScheme.CENC;
+                            break;
+                        case 'cbc1':
+                            keySettings.scheme = ProtectionScheme.CBC1;
+                            break;
+                        case 'cens':
+                            keySettings.scheme = ProtectionScheme.CENS;
+                            break;
+                    }
+                }
+                if (contentProtection.pssh) {
+                    for (const drmId in contentProtection.pssh) {
+                        const pssh = contentProtection.pssh[drmId];
+                        keySettings.pssh.set(drmId, pssh);
+                    }
+                }
+                this.contentProtection.set(kid, keySettings);
             }
         }
     }

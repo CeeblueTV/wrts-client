@@ -7,7 +7,7 @@
 import { ILog, Loggable, Util } from '@ceeblue/web-utils';
 import { CMAFWriter, CMAFWriterError } from './writer/CMAFWriter';
 import * as Media from './Media';
-import { Metadata } from './Metadata';
+import { ContentProtection, Metadata } from './Metadata';
 
 const UPDATE_TIMEOUT = 400;
 const MAX_CONSECUTIVE_BFRAME = 16;
@@ -106,6 +106,8 @@ export class MediaBuffer extends Loggable {
     private _cmafWriter: CMAFWriter;
     private _packets: Array<Uint8Array | string>;
     private _trackId?: number;
+    private _contentProtection?: ContentProtection;
+    private _codecString?: string;
     private _mimeType: string;
     private _isVideo: boolean;
     private _updateTimeout: number;
@@ -153,24 +155,32 @@ export class MediaBuffer extends Loggable {
 
     append(metadata: Metadata, trackId: number, sample: Media.Sample) {
         if (trackId !== this._trackId) {
-            // INIT
             const track = metadata.tracks.get(trackId);
+            // INIT
             if (!track) {
                 this.onError({ type: 'MediaBufferError', name: 'Track without metadata', track: trackId });
                 return;
             }
             // to call changeType, before cmafWriter.init!
-            const packet = this._mimeType + '; codecs="' + track.codecString + '"';
-            this.log(`Update track${this._trackId == null ? ' ' : ` from ${this._trackId} to `}${trackId} ${packet}`).info();
+            // PlayReady (and some other EME stacks) reject SourceBuffer.changeType() with the same codecString
+            // only push a changeType packet when the codec actually changed
+            if (this._codecString !== track.codecString) {
+                const packet = this._mimeType + '; codecs="' + track.codecString + '"';
+                this.log(`Update track${this._trackId == null ? ' ' : ` from ${this._trackId} to `}${trackId} ${packet}`).info();
+                this._packets.push(packet);
+            }
             this._trackId = trackId;
-            this._packets.push(packet);
-            const error = this._cmafWriter.init(track);
+            this._codecString = track.codecString;
+            this._contentProtection = track.contentProtection
+                ? metadata.contentProtection.get(track.contentProtection)
+                : undefined;
+            const error = this._cmafWriter.init(track, this._contentProtection);
             if (error) {
                 this.onError(error);
                 return;
             }
         }
-        this._cmafWriter.write(sample);
+        this._cmafWriter.write(sample, this._contentProtection);
         return this;
     }
 
@@ -190,7 +200,7 @@ export class MediaBuffer extends Loggable {
                     const beginHole = this._buffer.buffered.end(0);
                     const endHole = this._buffer.buffered.start(1);
                     update = true;
-                    // user a startTime marker because the buffer removing can not be supported by few old browsers
+                    // use a startTime marker because the buffer removing can not be supported by few old browsers
                     this._startTime = Math.max(this._startTime, endHole);
                     this.log(`Remove ${(endHole - beginHole).toFixed(3)}s of timeline from ${beginHole}s to ${endHole}s`)[
                         this._isVideo ? 'error' : 'warn'
