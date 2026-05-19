@@ -638,6 +638,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _maximumResolution?: Media.Resolution;
     private _paused: boolean;
     private _mediaKeysEngine?: MediaKeysEngine;
+    private _mediaKeysStopping?: Promise<unknown>;
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
@@ -711,8 +712,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     start(params: Connect.Params, idleTimeout?: number) {
         this.stop();
 
+        if (this._mediaKeysStopping) {
+            // Previous MediaKeys engine cleanup is still in flight — defer the start
+            // until it completes, otherwise the new playback would race with the
+            // pending video.setMediaKeys(null).
+            this._mediaKeysStopping.then(() => this.start(params, idleTimeout));
+            return;
+        }
+
         if (this._mediaKeysEngine) {
-            this.stop({
+            this.onStop({
                 type: 'PlayerError',
                 name: 'Playback error',
                 detail: 'MediaKeys engine must be released before starting a new playback'
@@ -999,11 +1008,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const mediaKeysEngine = this._mediaKeysEngine;
             mediaKeysEngine.onMediaKeys = Util.EMPTY_FUNCTION;
             mediaKeysEngine.onError = Util.EMPTY_FUNCTION;
-            mediaKeysEngine.stop().then(() => {
+            const stopping = mediaKeysEngine.stop();
+            this._mediaKeysStopping = stopping;
+            stopping.then(() => {
                 // Reset mediaKeysEngine only when the MediaKeys have been released
                 if (this._mediaKeysEngine === mediaKeysEngine) {
                     this._mediaKeysEngine = undefined;
                     this.onMediaKeys();
+                }
+                if (this._mediaKeysStopping === stopping) {
+                    this._mediaKeysStopping = undefined;
                 }
             });
         }
