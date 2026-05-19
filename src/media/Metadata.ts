@@ -176,16 +176,18 @@ export class Metadata extends Loggable {
                     ivMode,
                     pssh: new Map<string, string>()
                 };
-                switch (contentProtection.scheme.toLowerCase()) {
-                    case 'cenc':
-                        keySettings.scheme = ProtectionScheme.CENC;
-                        break;
-                    case 'cbc1':
-                        keySettings.scheme = ProtectionScheme.CBC1;
-                        break;
-                    case 'cens':
-                        keySettings.scheme = ProtectionScheme.CENS;
-                        break;
+                if (contentProtection.scheme) {
+                    switch (contentProtection.scheme.toLowerCase()) {
+                        case 'cenc':
+                            keySettings.scheme = ProtectionScheme.CENC;
+                            break;
+                        case 'cbc1':
+                            keySettings.scheme = ProtectionScheme.CBC1;
+                            break;
+                        case 'cens':
+                            keySettings.scheme = ProtectionScheme.CENS;
+                            break;
+                    }
                 }
                 if (contentProtection.pssh) {
                     for (const drmId in contentProtection.pssh) {

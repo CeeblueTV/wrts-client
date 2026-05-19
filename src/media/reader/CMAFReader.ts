@@ -754,7 +754,7 @@ export class CMAFReader extends Reader {
 
     private static _parseTencPayload(payload: Uint8Array): TrackEncryption | undefined {
         const reader = new BinaryReader(payload);
-        if (reader.available() < 23) {
+        if (reader.available() < 24) {
             return undefined;
         }
         reader.next(6); // version + flags + reserved byte + byteBlock

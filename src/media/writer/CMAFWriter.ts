@@ -225,7 +225,7 @@ export class CMAFWriter extends EventEmitter {
                                     // 00 00 00 00			temporal quality
                                     // 00 00 00 00			spatial quality
                                     // prettier-ignore
-                                    if (track.contentProtection) {
+                                    if (track.contentProtection && contentProtection) {
                                         writer.write32(0x656E6376); // encv
                                     } else {
                                         writer.write32(0x61766331); // avc1
@@ -283,7 +283,7 @@ export class CMAFWriter extends EventEmitter {
                                     // 00 00			 revision level
                                     // 00 00 00 00		 vendor
                                     // prettier-ignore
-                                    if (track.contentProtection) {
+                                    if (track.contentProtection && contentProtection) {
                                         writer.write32(0x656E6361); // enca
                                     } else {
                                         writer.write32(0x6d703461); // mp4a
