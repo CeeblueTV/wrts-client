@@ -872,6 +872,9 @@
                     log('onStart').info();
                     this.playState = PlayState.PLAYING;
                     this.player.reliable = !this.adaptiveFrameSkipping;
+                    if(options.combinable != null) {
+                        this.player.tracksCombinable = options.combinable ? true : false;
+                    }
                     this.player.cmcd = options.cmcd;
                     this.player.cmcdMode = options.cmcdMode;
                     this.player.cmcdSid = options.cmcdSid;
@@ -1157,6 +1160,9 @@
                         }
                         if(options.id != null) {
                             path += "&id=" + options.id;
+                        }
+                        if(options.combinable != null) {
+                            path += "&combinable=" + options.combinable;
                         }
                         if(options.latency != null) {
                             path += "&latency";

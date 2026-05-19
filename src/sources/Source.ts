@@ -401,6 +401,27 @@ export abstract class Source extends EventEmitter implements ICMCD {
         return this._skippedVideo;
     }
 
+    /**
+     * Set whether tracks can be combined in the same request,
+     * by default tracks are combinable to optimize the number of requests
+     */
+    set tracksCombinable(value: boolean) {
+        if (value && this._playing.passthroughCMAF) {
+            this.log("Tracks can't be combined when passthrough CMAF is enabled").warn();
+            value = false;
+        }
+        this._tracksCombinable = value;
+    }
+
+    /**
+     * Indicates whether tracks can be combined in the same request,
+     * by default tracks are combinable to optimize the number of requests
+     */
+    get tracksCombinable(): boolean {
+        return this._tracksCombinable;
+    }
+
+    private _tracksCombinable: boolean = true;
     private _reliable: boolean;
     private _name: string;
     private _url: URL;
@@ -464,6 +485,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         this._requestedTracks = {};
         this._playing = playing;
         this._fixLiveTime = 0;
+        this._tracksCombinable = playing.passthroughCMAF ? false : true;
         Promise.resolve().then(() => this._run());
     }
 
