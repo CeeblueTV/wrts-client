@@ -368,7 +368,7 @@ export class HTTPAdaptiveSource extends Source {
 
                 // Create promises
                 if (channels.reliable.size) {
-                    if (version < 2) {
+                    if (version < 2 || !playing.tracksCombinable) {
                         for (const track of channels.reliable) {
                             promises.push(this._downloadSequence(playing, this._reliableController, track, sequence));
                         }
@@ -385,7 +385,7 @@ export class HTTPAdaptiveSource extends Source {
                     }
                 } else {
                     if (channels.skippable.size) {
-                        if (version < 2) {
+                        if (version < 2 || !playing.tracksCombinable) {
                             for (const track of channels.skippable) {
                                 promises.push(this._downloadSequence(playing, this._skippableController, track, sequence));
                             }
@@ -396,7 +396,7 @@ export class HTTPAdaptiveSource extends Source {
                         }
                     }
                     if (channels.alterable.size) {
-                        if (version < 2) {
+                        if (version < 2 || !playing.tracksCombinable) {
                             for (const track of channels.alterable) {
                                 promises.push(this._downloadSequence(playing, this._alterableController, track, sequence));
                             }
