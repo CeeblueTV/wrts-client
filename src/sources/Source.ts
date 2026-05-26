@@ -770,6 +770,16 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
     }
 
+    protected skipAudio(duration: number) {
+        this._skippedAudio += duration;
+        this._playing.onAudioSkipping(duration);
+    }
+
+    protected skipVideo(duration: number) {
+        this._skippedVideo += duration;
+        this._playing.onVideoSkipping(duration);
+    }
+
     protected fixTimestamp(type: Media.Type, trackId: number, currentTime: number, sample: Media.Sample): number {
         // Fix current time to be continuous and always increasing
         const delta = currentTime >= 0 ? sample.time - currentTime : 0;
@@ -794,11 +804,9 @@ export abstract class Source extends EventEmitter implements ICMCD {
         // audio/video skipping AFTER timestamp fix (to get an ordered log information)
         if (delta > 0) {
             if (type === Media.Type.AUDIO) {
-                this._skippedAudio += delta;
-                this._playing.onAudioSkipping(delta);
+                this.skipAudio(delta);
             } else if (type === Media.Type.VIDEO) {
-                this._skippedVideo += delta;
-                this._playing.onVideoSkipping(delta);
+                this.skipVideo(delta);
             }
         }
 
