@@ -604,7 +604,7 @@ export class HTTPAdaptiveSource extends Source {
                                         : sample.duration;
                                     const skipped = duration - sample.duration;
                                     if (skipped > 0) {
-                                        playing.onVideoSkipping(skipped);
+                                        this.skipVideo(skipped);
                                     }
                                     // make duration extendable
                                     sample.duration = -duration;
