@@ -1,6 +1,7 @@
 <p align="center">
  <a href="#requirements">Requirements</a> •
  <a href="#usage">Usage</a> •
+ <a href="#drm">DRM</a> •
  <a href="#examples">Examples</a> •
  <a href="#building-locally">Building locally</a> •
  <a href="#logs">Logs</a> •
@@ -95,6 +96,63 @@ player.start({
 >   endPoint: <endPoint>
 >});
 >```
+
+
+## DRM
+
+WebRTS plays DRM-protected streams via [EME (Encrypted Media Extensions)](https://www.w3.org/TR/encrypted-media/). The supported key systems are:
+
+- **Widevine** (`com.widevine.alpha`) — Chrome, Firefox, Edge, Opera, Android.
+- **PlayReady** (`com.microsoft.playready`) — Edge, Xbox, Windows Store apps, many smart TVs (Samsung Tizen, LG webOS).
+- **FairPlay** (`com.apple.fps.1_0`) — Safari (macOS, iOS, iPadOS).
+
+Pass a `contentProtection` map to `player.start()` keyed by key system. The minimal form is a license URL string; FairPlay also needs a certificate URL:
+
+```javascript
+player.start({
+   endPoint: 'https://<hostname>/wrts/out+12423351-d0a2-4f0f-98a0-015b73f934f2/index.json',
+   contentProtection: {
+      'com.widevine.alpha': 'https://widevine.example.com/license',
+      'com.microsoft.playready': 'https://playready.example.com/license',
+      'com.apple.fps.1_0': {
+         license: 'https://fairplay.example.com/license',
+         certificate: 'https://fairplay.example.com/certificate'
+      }
+   }
+});
+```
+
+At runtime the player negotiates the most-preferred key system supported by the current browser.
+
+> [!TIP]
+> The [MediaKeysEngine](./src/media/keys/MediaKeysEngine.ts) can also be used standalone (outside of `Player`), for example to drive EME from another player.
+
+### PlayReady on Edge — known limitations
+
+For browser playback, prefer **Widevine** where it is available. PlayReady is fully supported but the Edge / Chromium implementation has constraints that every browser player has to work around:
+
+- **Avoid increasing `<video>.playbackRate` during playback.** The default `Player` raises the rate above 1.0 to catch up to live, which produces audio artifacts and visible video lag with PlayReady. Override the default by handling `onBufferChange` and clamping the rate to ≤ 1.0. Below is an example only slowing playback down when the buffer runs low:
+
+```javascript
+import { BufferState } from '@ceeblue/wrts-client';
+
+player.onBufferChange = () => {
+    let playbackRate = videoElement.playbackRate;
+    if (player.bufferState === BufferState.LOW) {
+        // Decrease playback rate linearly between [0.92, 0.84] as the buffer drops
+        const ratio =
+            Math.max(0, player.bufferLimitMiddle - player.bufferAmount) /
+            Math.max(1, 2 * (player.bufferLimitMiddle - player.bufferLimitLow));
+        playbackRate = Math.min(Math.round(92 + 8 * Math.min(ratio, 1)) / 100, playbackRate);
+    } else {
+        playbackRate = 1;
+    }
+    if (playbackRate !== videoElement.playbackRate) {
+        videoElement.playbackRate = playbackRate;
+    }
+};
+```
+- **Larger playback buffers work better.** PlayReady's decoder path needs more headroom; configuring buffer thresholds to roughly `min=400ms / max=2000ms` (instead of the WebRTS low-latency defaults) avoids stutter under bandwidth jitter.
 
 
 ## Examples
