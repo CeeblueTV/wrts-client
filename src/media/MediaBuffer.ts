@@ -165,7 +165,7 @@ export class MediaBuffer extends Loggable {
             // We call changeType only once because PlayReady on Edge does not support multiple call to changeType and will fail
             if (!this._codecString) {
                 const packet = this._mimeType + '; codecs="' + track.codecString + '"';
-                this.log(`Update track${this._trackId == null ? ' ' : ` from ${this._trackId} to `}${trackId} ${packet}`).info();
+                this.log(`Initiate track and codec to ${trackId} ${packet}`).info();
                 this._packets.push(packet);
             }
             this._trackId = trackId;

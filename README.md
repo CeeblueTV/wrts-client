@@ -134,22 +134,10 @@ For browser playback, prefer **Widevine** where it is available. PlayReady is fu
 - **Avoid increasing `<video>.playbackRate` during playback.** The default `Player` raises the rate above 1.0 to catch up to live, which produces audio artifacts and visible video lag with PlayReady. Override the default by handling `onBufferChange` and clamping the rate to ≤ 1.0. Below is an example only slowing playback down when the buffer runs low:
 
 ```javascript
-import { BufferState } from '@ceeblue/wrts-client';
-
 player.onBufferChange = () => {
-    let playbackRate = videoElement.playbackRate;
-    if (player.bufferState === BufferState.LOW) {
-        // Decrease playback rate linearly between [0.92, 0.84] as the buffer drops
-        const ratio =
-            Math.max(0, player.bufferLimitMiddle - player.bufferAmount) /
-            Math.max(1, 2 * (player.bufferLimitMiddle - player.bufferLimitLow));
-        playbackRate = Math.min(Math.round(92 + 8 * Math.min(ratio, 1)) / 100, playbackRate);
-    } else {
-        playbackRate = 1;
-    }
-    if (playbackRate !== videoElement.playbackRate) {
-        videoElement.playbackRate = playbackRate;
-    }
+   // Disable playback rate increase to avoid audio artifacts and video lag with PlayReady on Edge
+   // Keep the ability to decrease playback rate between [0.84, 0.92] to reduce the risk of stall when the network condition worsen
+   player.adjustPlaybackRate(84, 100);
 };
 ```
 - **Larger playback buffers work better.** PlayReady's decoder path needs more headroom; configuring buffer thresholds to roughly `min=400ms / max=2000ms` (instead of the WebRTS low-latency defaults) avoids stutter under bandwidth jitter.
