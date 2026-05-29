@@ -486,13 +486,15 @@
                         ['HW & SW', 'HW_SECURE_DECODE,SW_SECURE_DECODE'],
                         ['SW', 'SW_SECURE_DECODE'],
                         ['HW', 'HW_SECURE_DECODE'],
-                        ['All', '']
+                        ['All', 'HW_SECURE_ALL,HW_SECURE_DECODE,SW_SECURE_DECODE'],
+                        ['(empty)', '']
                     ]),
                     audioRobustnesses: new Map([
                         ['HW & SW', 'HW_SECURE_CRYPTO,SW_SECURE_CRYPTO'],
                         ['SW', 'SW_SECURE_CRYPTO'],
                         ['HW', 'HW_SECURE_CRYPTO'],
-                        ['All', '']
+                        ['All', 'HW_SECURE_ALL,HW_SECURE_CRYPTO,SW_SECURE_CRYPTO'],
+                        ['(empty)', '']
                     ]),
                     contentProtection: [
                         { id: 'widevine', label: 'Widevine', keySystem: 'com.widevine.alpha',

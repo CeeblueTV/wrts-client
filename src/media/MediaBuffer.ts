@@ -162,11 +162,10 @@ export class MediaBuffer extends Loggable {
                 return;
             }
             // to call changeType, before cmafWriter.init!
-            // PlayReady (and some other EME stacks) reject SourceBuffer.changeType() with the same codecString
-            // only push a changeType packet when the codec actually changed
-            if (this._codecString !== track.codecString) {
+            // We call changeType only once because PlayReady on Edge does not support multiple call to changeType and will fail
+            if (!this._codecString) {
                 const packet = this._mimeType + '; codecs="' + track.codecString + '"';
-                this.log(`Update track${this._trackId == null ? ' ' : ` from ${this._trackId} to `}${trackId} ${packet}`).info();
+                this.log(`Initiate track and codec to ${trackId} ${packet}`).info();
                 this._packets.push(packet);
             }
             this._trackId = trackId;
