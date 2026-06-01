@@ -1,6 +1,7 @@
 <p align="center">
  <a href="#requirements">Requirements</a> •
  <a href="#usage">Usage</a> •
+ <a href="#playback-rate-adaptation">Playback rate adaptation</a> •
  <a href="#drm">DRM</a> •
  <a href="#examples">Examples</a> •
  <a href="#building-locally">Building locally</a> •
@@ -98,6 +99,24 @@ player.start({
 >```
 
 
+## Playback rate adaptation
+
+To stay close to the live edge and protect against stalls when the network worsens, the default `Player` continuously adjusts `<video>.playbackRate` from the buffer state — speeding up slightly to catch back up to live (up to 1.16x) and slowing down when the buffer runs low (down to 0.84x). This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
+
+On **iOS / Safari**, that compromise can be audible — rate changes there sometimes produce small audio glitches. The default is still to adapt, because for most applications the latency / stall benefits outweigh the cost. If smoother audio matters more for your use case, disable adaptation on iOS / Safari (detected via `ManagedMediaSource`):
+
+```javascript
+player.onBufferChange = () => {
+   if (window.ManagedMediaSource) {
+      return; // iOS / Safari — skip playbackRate adjustments
+   }
+   player.adjustPlaybackRate();
+};
+```
+
+To narrow the range on any platform, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 84 / 116).
+
+
 ## DRM
 
 WebRTS plays DRM-protected streams via [EME (Encrypted Media Extensions)](https://www.w3.org/TR/encrypted-media/). The supported key systems are:
@@ -140,6 +159,7 @@ player.onBufferChange = () => {
    player.adjustPlaybackRate(84, 100);
 };
 ```
+
 - **Larger playback buffers work better.** PlayReady's decoder path needs more headroom; configuring buffer thresholds to roughly `min=400ms / max=2000ms` (instead of the WebRTS low-latency defaults) avoids stutter under bandwidth jitter.
 
 
