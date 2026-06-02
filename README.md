@@ -1,6 +1,8 @@
 <p align="center">
  <a href="#requirements">Requirements</a> •
  <a href="#usage">Usage</a> •
+ <a href="#playback-rate-adaptation">Playback rate adaptation</a> •
+ <a href="#drm">DRM</a> •
  <a href="#examples">Examples</a> •
  <a href="#building-locally">Building locally</a> •
  <a href="#logs">Logs</a> •
@@ -95,6 +97,70 @@ player.start({
 >   endPoint: <endPoint>
 >});
 >```
+
+
+## Playback rate adaptation
+
+To stay close to the live edge and protect against stalls when the network worsens, the default `Player` continuously adjusts `<video>.playbackRate` from the buffer state — speeding up slightly to catch back up to live (up to 1.16x) and slowing down when the buffer runs low (down to 0.84x). This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
+
+On **iOS / Safari**, that compromise can be audible — rate changes there sometimes produce small audio glitches. The default is still to adapt, because for most applications the latency / stall benefits outweigh the cost. If smoother audio matters more for your use case, disable adaptation on iOS / Safari (detected via `ManagedMediaSource`):
+
+```javascript
+player.onBufferChange = () => {
+   if (window.ManagedMediaSource) {
+      return; // iOS / Safari — skip playbackRate adjustments
+   }
+   player.adjustPlaybackRate();
+};
+```
+
+To narrow the range on any platform, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 84 / 116).
+
+
+## DRM
+
+WebRTS plays DRM-protected streams via [EME (Encrypted Media Extensions)](https://www.w3.org/TR/encrypted-media/). The supported key systems are:
+
+- **Widevine** (`com.widevine.alpha`) — Chrome, Firefox, Edge, Opera, Android.
+- **PlayReady** (`com.microsoft.playready`) — Edge, Xbox, Windows Store apps, many smart TVs (Samsung Tizen, LG webOS).
+- **FairPlay** (`com.apple.fps.1_0`) — Safari (macOS, iOS, iPadOS).
+
+Pass a `contentProtection` map to `player.start()` keyed by key system. The minimal form is a license URL string; FairPlay also needs a certificate URL:
+
+```javascript
+player.start({
+   endPoint: 'https://<hostname>/wrts/out+12423351-d0a2-4f0f-98a0-015b73f934f2/index.json',
+   contentProtection: {
+      'com.widevine.alpha': 'https://widevine.example.com/license',
+      'com.microsoft.playready': 'https://playready.example.com/license',
+      'com.apple.fps.1_0': {
+         license: 'https://fairplay.example.com/license',
+         certificate: 'https://fairplay.example.com/certificate'
+      }
+   }
+});
+```
+
+At runtime the player negotiates the most-preferred key system supported by the current browser.
+
+> [!TIP]
+> The [MediaKeysEngine](./src/media/keys/MediaKeysEngine.ts) can also be used standalone (outside of `Player`), for example to drive EME from another player.
+
+### PlayReady on Edge — known limitations
+
+For browser playback, prefer **Widevine** where it is available. PlayReady is fully supported but the Edge / Chromium implementation has constraints that every browser player has to work around:
+
+- **Avoid increasing `<video>.playbackRate` during playback.** The default `Player` raises the rate above 1.0 to catch up to live, which produces audio artifacts and visible video lag with PlayReady. Override the default by handling `onBufferChange` and clamping the rate to ≤ 1.0. Below is an example only slowing playback down when the buffer runs low:
+
+```javascript
+player.onBufferChange = () => {
+   // Disable playback rate increase to avoid audio artifacts and video lag with PlayReady on Edge
+   // Keep the ability to decrease playback rate between [0.84, 0.92] to reduce the risk of stall when the network condition worsen
+   player.adjustPlaybackRate(84, 100);
+};
+```
+
+- **Larger playback buffers work better.** PlayReady's decoder path needs more headroom; configuring buffer thresholds to roughly `min=400ms / max=2000ms` (instead of the WebRTS low-latency defaults) avoids stutter under bandwidth jitter.
 
 
 ## Examples

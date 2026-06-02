@@ -20,6 +20,12 @@ const BUFFER_LIMIT_HIGH = 550; // ms
 const TIMEOUT = 14000; // at least superior to max gop duration (10s)
 const BUFFER_CHANGE_STEP = 50; // ms
 
+const PLAYBACK_RATE_MAX = 116; // Default maxRate, 116 means max 16% increase of the playback rate when buffer is full
+const PLAYBACK_RATE_MAX_FLOOR = 108; // Minimum possible value for maxRate, 108 means min 8% increase of the playback rate when buffer is full
+
+const PLAYBACK_RATE_MIN_CEIL = 92; // Maximum possible value for minRate 92 means min 8% decrease of the playback rate when buffer is low
+const PLAYBACK_RATE_MIN = 84; // Default minRate, 84 means max 16% decrease of the playback rate when buffer is low
+
 const root = typeof window !== 'undefined' ? window : global;
 
 let _maximumResolution: Media.Resolution | undefined;
@@ -206,13 +212,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * Event fire when the buffer amount changes  by at least BUFFER_CHANGE_STEP ms
      * @event
+     *
+     * Note: on iPhone / iOS / Safari, playbackRate changes can produce audible glitches during live streaming.
+     * In that case you can override `onBufferChange` to disable playbackRate adaptation on iOS / Safari
+     * (detected via `ManagedMediaSource`).
      */
     onBufferChange(): void {
-        if (!ManagedMediaSource) {
-            // iPhone/iOS/Safari doesn't implement a smooth dynamic playbackRate change: during live it creates sound noise
-            // So by default disable it for iPhone, let the user re-enable it if needed
-            this.adjustPlaybackRate();
-        }
+        this.adjustPlaybackRate();
     }
 
     /**
@@ -1079,24 +1085,51 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Adjust playback rate according to buffer state to avoid buffer overrun or underrun
+     *
+     * The minimum increase playback rate is 108% (1.08x), you can disable increase by setting maxRate to 100 or less,
+     * and the maximum decrease playback rate is 92% (0.92x), you can disable decrease by setting minRate to 100 or more.
+     *
+     * Disabling increase can be useful with hardware decoding issues but note that this affects the ability of the player to catch up the live point after a congestion.
+     * Be careful when disabling decrease because it can increase the risk of stall when the network condition worsen.
+     *
+     * Note: Intended to be called from {@link onBufferChange}
+     *
+     * @param minRate minimum playback rate in percentage, default to 84 (0.84x), if more than 92 it will be forced to 92
+     * @param maxRate maximum playback rate in percentage, default to 116 (1.16x), if less than 108 it will be forced to 108
      */
-    private adjustPlaybackRate() {
+    adjustPlaybackRate(minRate = PLAYBACK_RATE_MIN, maxRate = PLAYBACK_RATE_MAX) {
+        // We save the playbackRate before to change it to be able to log only if there is a real change
+        // Indeed when assiging video.playbackRate sometimes the value is not really changed because the browser can decide to ignore it
         const playbackRate = this._video.playbackRate;
-        if (this.bufferState === BufferState.HIGH) {
-            // Increase playback rate linearly between [1.08,1.16], reaches the max when bufferAmount > bufferLimitHigh + (bufferLimitHigh - bufferLimitMiddle)
+        if (this.bufferState === BufferState.HIGH && maxRate > 100) {
+            if (maxRate < PLAYBACK_RATE_MAX_FLOOR) {
+                // Force maxRate to respect the minimum threshold to avoid too small increase that can cause more harm than good
+                maxRate = PLAYBACK_RATE_MAX_FLOOR;
+            }
+            // Increase playback rate linearly (by default between [1.08,1.16]),
+            // reaches the max when bufferAmount > bufferLimitHigh + (bufferLimitHigh - bufferLimitMiddle)
             const ratio =
                 Math.max(0, this.bufferAmount - this.bufferLimitHigh) /
                 Math.max(1, 2 * (this.bufferLimitHigh - this.bufferLimitMiddle));
-            this._video.playbackRate = Math.max(this._video.playbackRate, Math.round(108 + 8 * Math.min(ratio, 1)) / 100);
-        } else if (this.bufferState === BufferState.LOW) {
-            // Decrease playback rate linearly between [0.92,0.84], reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow),
-            // Note: this threshold can be negative and thus never reached
+            this._video.playbackRate = Math.max(
+                this._video.playbackRate,
+                Math.round(PLAYBACK_RATE_MAX_FLOOR + (maxRate - PLAYBACK_RATE_MAX_FLOOR) * Math.min(ratio, 1)) / 100
+            );
+        } else if (this.bufferState === BufferState.LOW && minRate < 100) {
+            if (minRate > PLAYBACK_RATE_MIN_CEIL) {
+                // Force minRate to respect the maximum threshold to avoid too small decrease that can cause more harm than good
+                minRate = PLAYBACK_RATE_MIN_CEIL;
+            }
+            // Decrease playback rate linearly (by default between [0.92,0.84]),
+            // reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow)
             const ratio =
                 Math.max(0, this.bufferLimitMiddle - this.bufferAmount) /
                 Math.max(1, 2 * (this.bufferLimitMiddle - this.bufferLimitLow));
-            this._video.playbackRate = Math.min(Math.round(92 + 8 * Math.min(ratio, 1)) / 100, this._video.playbackRate);
+            this._video.playbackRate = Math.min(
+                Math.round(PLAYBACK_RATE_MIN_CEIL - (PLAYBACK_RATE_MIN_CEIL - minRate) * Math.min(ratio, 1)) / 100,
+                this._video.playbackRate
+            );
         } else {
-            // OK or NONE
             this._video.playbackRate = 1;
         }
         if (playbackRate !== this._video.playbackRate) {
