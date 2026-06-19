@@ -762,7 +762,9 @@
 
             <header class="hdr">
                 <img alt="Ceeblue" src="./assets/ceeblue-logo.png">
-                <h1>WebRTS <em>Player</em></h1>
+                <h1>
+                    WebRTS <em>Player</em>
+                </h1>
                 <button class="theme-btn" :title="themeTooltip()" @click="cycleTheme()">
                     <i class="fas" :class="themeIcon()"></i>
                 </button>
@@ -888,8 +890,8 @@
                 </div>
 
                 <!-- Network profile + buffer min/max (single compact row).
-                     Description is grid-positioned inside the row so it sits next to the
-                     profile select on mobile (instead of floating below the buffer inputs). -->
+                    Description is grid-positioned inside the row so it sits next to the
+                    profile select on mobile (instead of floating below the buffer inputs). -->
                 <div class="net-row gap-panel">
                     <div class="net-prof">
                         <span class="lbl">Network profile</span>
@@ -975,9 +977,15 @@
                                 </button>
                                 <div class="tl-spacer"></div>
                                 <div class="tl-legend" title="Reception health: ratio of reception duration to media duration of each sequence">
-                                    <span><i class="dot" style="background:var(--ok)"></i>on time</span>
-                                    <span><i class="dot" style="background:var(--warn)"></i>slow</span>
-                                    <span><i class="dot" style="background:var(--err)"></i>congested</span>
+                                    <span>
+                                        <i class="dot" style="background:var(--ok)"></i>on time
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--warn)"></i>slow
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--err)"></i>congested
+                                    </span>
                                 </div>
                             </div>
                             <div class="tl-box" ref="timelineBox"></div>
@@ -1342,7 +1350,7 @@
 
                     // Timeline panel — the UITimeline widget owns the canvas/scrollbar/tooltip and all
                     // per-sample data; these fields only mirror its state for the toolbar controls.
-                    tlAxis: 'media',        // 'media' (DTS) | 'reception' (wall-clock)
+                    tlAxis: 'reception',    // 'media' (DTS) | 'reception' (wall-clock)
                     tlFollowing: true,      // play (pinned to live) | pause (frozen for inspection)
                     tlWindow: 10,           // visible window in seconds
                     tlWindows: [5, 10, 30, 60],
@@ -1862,10 +1870,12 @@
                 onStart() {
                     log('onStart').info();
                     this.player.reliable = !this.adaptiveFrameSkipping;
+                    if(options.combinable != null) {
+                        this.player.tracksCombinable = options.combinable ? true : false;
+                    }
                     this.player.cmcd = options.cmcd;
                     this.player.cmcdMode = options.cmcdMode;
                     this.player.cmcdSid = options.cmcdSid;
-                    this.player.tracksCombinable = !!options.combinable;
                 },
                 onStop(error) {
                     const videoElement = this.$refs.video;
