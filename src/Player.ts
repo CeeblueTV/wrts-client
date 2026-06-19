@@ -140,6 +140,18 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * Event fired when an audio {@link Media.Sample} is received from the source
+     * @event
+     */
+    onAudio(track: number, sample: Media.Sample) {}
+
+    /**
+     * Event fired when a video {@link Media.Sample} is received from the source
+     * @event
+     */
+    onVideo(track: number, sample: Media.Sample) {}
+
+    /**
      * {@inheritDoc Source.onMetadata}
      * @event {@link Source.onMetadata}
      */
@@ -825,9 +837,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             };
             this._source.onAudio = (trackId: number, sample: Media.Sample) => {
                 this._playback?.appendAudio(this._metadata, trackId, sample);
+                this.onAudio(trackId, sample);
             };
             this._source.onVideo = (trackId: number, sample: Media.Sample) => {
                 this._playback?.appendVideo(this._metadata, trackId, sample);
+                this.onVideo(trackId, sample);
             };
             this._source.onData = (trackId: number, sample: Media.Sample) => {
                 this.onData(trackId, sample.time, sample.duration, sample.data);
