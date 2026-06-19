@@ -115,7 +115,7 @@ export class UITimeline {
      */
     getMediaTime?: () => number | undefined;
 
-    /** The time axis used to position sequences. Defaults to `'media'`. */
+    /** The time axis used to position sequences. Defaults to `'reception'`. */
     get axis(): UITimelineAxis {
         return this._axis;
     }
@@ -172,7 +172,7 @@ export class UITimeline {
     private _order?: Row[];
     private _hits: Hit[] = [];
 
-    private _axis: UITimelineAxis = 'media';
+    private _axis: UITimelineAxis = 'reception';
     private _windowDuration = 10;
     private _following = true;
     private _hasData = false;
@@ -539,13 +539,13 @@ export class UITimeline {
                 // Reception health: how long the sequence took to arrive vs its media duration.
                 const ratio = (s.recvEnd - s.recvStart) / Math.max(1, s.dtsEnd - s.dtsStart);
                 const health = ratio < 1.2 ? HEALTH_OK : ratio < 2 ? HEALTH_WARN : HEALTH_ERR;
-                // Media axis shows DTS, so health is the reception overlay (left edge). Reception axis
-                // already encodes timing via X, so fill by health instead.
+                // Fill by reception health in both axes (consistent with the legend); the track color
+                // stays as a thin left edge so each row keeps its identity.
                 ctx.globalAlpha = 0.85;
-                ctx.fillStyle = media ? r.color : health;
+                ctx.fillStyle = health;
                 ctx.fillRect(xa, y, w, ROW_H);
                 ctx.globalAlpha = 1;
-                ctx.fillStyle = media ? health : r.color;
+                ctx.fillStyle = r.color;
                 ctx.fillRect(xa, y, Math.min(3, w), ROW_H);
                 ctx.strokeStyle = colGrid;
                 ctx.strokeRect(xa + 0.5, y + 0.5, w - 1, ROW_H - 1);
