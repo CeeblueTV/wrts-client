@@ -1,4 +1,6 @@
 {
+    "out": "dist/docs/api",
+    "cleanOutputDir": true,
     "validation": {
         "notExported": false
     }
