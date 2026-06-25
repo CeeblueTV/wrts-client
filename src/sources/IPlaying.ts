@@ -172,6 +172,12 @@ export interface IPlaying extends EventEmitter {
     get passthroughCMAF(): boolean | undefined;
 
     /**
+     * Indicates whether tracks can be combined in the same request,
+     * by default tracks are combinable to optimize the number of requests
+     */
+    get tracksCombinable(): boolean | undefined;
+
+    /**
      * Retrieves current player statistics.
      *
      * @returns An object containing the current player statistics as a {@link PlayerStats} object.

@@ -9,6 +9,11 @@ import * as Media from '../Media';
 import { Metadata } from '../Metadata';
 import { Reader } from './Reader';
 
+enum CustomType {
+    SUBSAMPLE_ENCRYPTED = 1,
+    SAMPLE_IV = 2
+}
+
 /**
  * RTSReader to unserialize RTS container
  *
@@ -93,17 +98,11 @@ export class RTSReader extends Reader {
                     }
                     const isKeyFrame = value & 1 ? true : false;
 
-                    this._readCustom(frame);
-                    const data = frame.read();
-
+                    const sample: Media.Sample = { time, duration, isKeyFrame, compositionOffset, data: new Uint8Array() };
+                    this._readCustom(frame, sample);
+                    sample.data = frame.read();
                     this._nextTimes.set(trackId, time + duration);
-                    this.onSample(type, trackId, {
-                        time,
-                        duration,
-                        isKeyFrame,
-                        compositionOffset,
-                        data
-                    });
+                    this.onSample(type, trackId, sample);
                 } else {
                     // DATA PACKET
                     const time = frame.read7Bit() + (this._nextTimes.get(trackId) ?? 0);
@@ -121,10 +120,36 @@ export class RTSReader extends Reader {
         return 0;
     }
 
-    private _readCustom(reader: BinaryReader) {
+    private _readCustom(reader: BinaryReader, sample?: Media.Sample) {
         let size;
         while ((size = reader.read7Bit())) {
-            reader.read(size);
+            if (reader.available() < size) {
+                this.log('Not enough data for custom type, skipping', { size, available: reader.available() }).warn();
+                return;
+            }
+            const typeReader = new BinaryReader(reader.read(size));
+            const type = typeReader.read7Bit();
+            switch (type) {
+                case CustomType.SUBSAMPLE_ENCRYPTED: {
+                    if (sample) {
+                        sample.subSamples = new Array<{ clearBytes: number; encryptedBytes: number }>(); // Encrypted list
+                        const subSampleCount = typeReader.read7Bit();
+                        for (let i = 0; i < subSampleCount; i++) {
+                            sample.subSamples.push({
+                                clearBytes: typeReader.read7Bit(),
+                                encryptedBytes: typeReader.read7Bit()
+                            });
+                        }
+                    }
+                    break;
+                }
+                case CustomType.SAMPLE_IV: {
+                    if (sample) {
+                        sample.iv = typeReader.read();
+                    }
+                    break;
+                }
+            }
         }
     }
 }

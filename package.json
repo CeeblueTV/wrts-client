@@ -1,6 +1,6 @@
 {
     "name": "@ceeblue/wrts-client",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Ceeblue WebRTS Client",
     "keywords": [
         "webrts",
@@ -84,7 +84,7 @@
         "access": "public"
     },
     "dependencies": {
-        "@ceeblue/web-utils": "^7.8.1",
+        "@ceeblue/web-utils": "^7.9.0",
         "abortcontroller-polyfill": "^1.7.8"
     }
 }

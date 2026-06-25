@@ -22,3 +22,5 @@ docs/assets
 
 # AI
 .codex
+.claude
+CLAUDE.md
