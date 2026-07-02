@@ -287,17 +287,17 @@ By default CMCD is disabled, but you can enable it by setting the `cmcd` propert
 ## Documentation
 
 You can find the latest built-in API documentation here:\
-https://ceebluetv.github.io/wrts-client/
+https://ceebluetv.github.io/wrts-client/api/
 
 To build the documentation locally, run:
 ```
 npm run build:docs
 ```
-This generates documentation files, which you can view by opening `./docs/index.html`.
+This generates documentation files, which you can view by opening `./dist/docs/api/index.html`.
 
 > [!TIP]
 > 
-> To serve the documentation locally, run a [static http-server] in the `./docs/` directory:
+> To serve the documentation locally, run a [static http-server] in the `./dist/docs/api/` directory:
 >```
 >npx http-server . -p 8081
 >```
