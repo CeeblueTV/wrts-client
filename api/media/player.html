@@ -1,0 +1,1220 @@
+<!doctype html>
+<!--
+    Copyright 2025 Ceeblue B.V.
+    This file is part of https://github.com/CeeblueTV/wrts-client which is released under GNU Affero General Public License.
+    See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
+-->
+<html lang="en">
+    <head>
+        <title>Ceeblue WebRTS Player Example</title>
+        <meta charset="utf-8">
+        <meta content="width=device-width, initial-scale=1.0" name="viewport">
+
+        <link rel="icon" href="./assets/ceeblue-logo-32x32.png" sizes="32x32">
+        <link rel="icon" href="./assets/ceeblue-logo-192x192.png" sizes="192x192">
+
+        <link href="./css/bootstrap.css" rel="stylesheet">
+        <link href="./css/solid.css" rel="stylesheet">
+        <link href="./css/fontawesome.css" rel="stylesheet">
+
+        <style>
+            body {
+                margin-top: 1em;
+                margin-bottom: 3em;
+                background-color: #EDF0F3;
+            }
+
+            /* Force every .btn to fill its column so the controls row aligns nicely;
+               use the Bootstrap `w-auto` utility on buttons that shouldn't stretch. */
+            .btn {
+                width: 100%;
+            }
+
+            video {
+                background-color: #333333;
+                max-width: 100%;
+                max-height: 60vh;
+            }
+            video::-webkit-media-controls,
+            video::-webkit-media-controls-start-playback-button {
+                display: none !important;
+            }
+
+            /* Big circular play overlay shown when the <video> is paused mid-stream. */
+            .play-btn {
+                margin: 0;
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                width: 100px;
+                transform: translate(-50%, -50%);
+            }
+            .play-btn__svg {
+                fill: #ffffff;
+                opacity: 0.9;
+                transition: 400ms;
+            }
+            .play-btn:hover .play-btn__svg {
+                fill: #00ff0d;
+            }
+
+            /* Tab panel (Graph / Messages) at the bottom of the page. */
+            .tab-panel .nav-tabs {
+                border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            }
+            .tab-panel .nav-link {
+                cursor: pointer;
+            }
+            .nav .nav-item .nav-link {
+                padding: 0.5rem 0.8rem;
+            }
+            .tab-panel-content {
+                position: relative;
+                min-height: 18rem;
+                padding-top: 0.75rem;
+            }
+            .tab-panel-pane {
+                width: 100%;
+            }
+            .tab-panel-pane.is-hidden {
+                visibility: hidden;
+                pointer-events: none;
+            }
+            .tab-panel-pane--overlay {
+                position: absolute;
+                inset: 0;
+                padding-top: 0.75rem;
+            }
+            .tab-panel-pane--overlay.is-hidden {
+                display: block;
+            }
+
+            /* Messages list inside the tab panel. */
+            .messages-panel {
+                background-color: #ffffff;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                border-radius: 0.25rem;
+                padding: 0.25rem 0;
+                height: calc(14 * 2rem);
+                overflow: auto;
+            }
+            .messages-list {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+                font-family: monospace;
+                font-size: 0.9rem;
+            }
+            .messages-list li {
+                padding: 0.35rem 0.75rem;
+                border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+                white-space: pre;
+                min-width: max-content;
+                line-height: 1.3rem;
+            }
+            .messages-empty {
+                color: #6c757d;
+                font-style: italic;
+                padding: 1rem 0.75rem;
+            }
+
+            /* Settings modal: cap body height so the footer stays visible without page scroll. */
+            .modal-body {
+                max-height: calc(100vh - 12rem);
+                overflow-y: auto;
+            }
+
+            [v-cloak] {
+                display: none;
+            }
+        </style>
+    </head>
+    <body class="container">
+        <div class="row">
+            <div class="col-md-12">
+                <img alt="CEEBLUE Media Services" class="rounded mx-auto d-block" src="./assets/ceeblue-logo.png">
+                <h3 class="text-center">Web Real Time Streaming - Player Example</h3>
+            </div>
+
+            <div class="col-md-12" id="main" v-cloak>
+
+                <div class="card text-center border-0 bg-transparent">
+                    <div class="card-body">
+                        <div class="alert alert-warning" role="alert" v-if="streamErrorMessage">
+                            {{ streamErrorMessage }}
+                        </div>
+
+                        <video autoplay id="video" ref="video" @click="fullscreen()" playsinline></video>
+                        <div ref="play-btn" class="play-btn" @click="player.paused = false" v-show="player && player.paused">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26">
+                                <polygon class="play-btn__svg" points="9.33 6.69 9.33 19.39 19.3 13.04 9.33 6.69"></polygon>
+                                <path class="play-btn__svg" d="M26,13A13,13,0,1,1,13,0,13,13,0,0,1,26,13ZM13,2.18A10.89,10.89,0,1,0,23.84,13.06,10.89,10.89,0,0,0,13,2.18Z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group col-sm">
+                        <select id="video-track-selection" class="custom-select text-center"
+                            :disabled="!player || !player.trackSelectable" v-model="videoTrackId" @change="onVideoTrackChange()">
+                            <option :value="undefined" :key="videoTrack">AUTO - {{videoTrack}}</option>
+                            <option v-for="[idx, track] of videoTracks" v-bind:value="idx">
+                                {{ track }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="form-group col-sm">
+                        <select id="audio-track-selection" class="custom-select text-center"
+                            :disabled="!player || !player.trackSelectable" v-model="audioTrackId" @change="onAudioTrackChange()">
+                            <option :value="undefined" :key="audioTrack">AUTO - {{audioTrack}}</option>
+                            <option v-for="[idx, track] of audioTracks" v-bind:value="idx">
+                                {{ track }}
+                            </option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group col-12">
+                        <input :disabled="isPlaying()" class="form-control text-center"
+                            placeholder="StreamName(?id=accessToken) or URL" type="text"
+                            v-model="stream">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group col-2">
+                        <button class="btn btn-light" title="Mute or unmute audio" type="button" v-on:click="mute">
+                            <i class="fas" v-bind:class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
+                            <span class="d-none d-md-inline">
+                                sound
+                            </span>
+                        </button>
+                    </div>
+
+                    <div class="form-group col-2">
+                        <button class="btn btn-light" title="Jump to live position" type="button" @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
+                            <i class="fa-solid fa-rocket"></i>
+                            <span class="d-none d-md-inline">
+                                live
+                            </span>
+                        </button>
+                    </div>
+
+                    <div class="form-group col-3">
+                        <button class="btn" type="button"
+                            v-bind:class="{ 'btn-danger': isPlaying(), 'btn-success': isStopped(), 'btn-secondary': isStarting() }"
+                            v-on:click="play">
+                            <span>{{ playButtonCaption() }}</span>
+                        </button>
+                    </div>
+
+                    <div class="form-group col-5 col-md-3 text-center d-flex align-items-center justify-content-center">
+                        <div class="custom-control custom-switch d-inline-block text-left">
+                            <input type="checkbox" class="custom-control-input" id="adaptive-frame-skipping"
+                                :disabled="!mutableReliability()" v-model="adaptiveFrameSkipping" @change="onReliable()">
+                            <label class="custom-control-label" for="adaptive-frame-skipping">
+                                <span class="small d-md-none">Adaptive Frame</span>
+                                <span class="d-none d-md-inline">Adaptive Frame-Skipping</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group col-12 col-md-2">
+                        <button :disabled="isPlaying()" class="btn btn-light" :class="{ 'd-none': isPlaying() && !keySystem }"
+                            title="Content protection settings" type="button" @click="showSettings = true">
+                            <i class="fas fa-shield-alt"></i>
+                            <span class="ml-1">
+                                {{ activeDrmLabel() }}
+                            </span>
+                        </button>
+                    </div>
+
+                </div>
+
+                <div class="form-row align-items-center">
+                    <div class="form-group col-2 text-right">
+                        network <br class="d-md-none">profiles
+                    </div>
+                    <div class="form-group col-3 p-0">
+                        <select class="custom-select text-center" v-model="netProfile" @change="setBuffer()">
+                            <option v-bind:value="profil" v-for="[profil, _] of netProfiles">
+                                {{ profil }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="form-group col-3 text-right">
+                        buffer min<br class="d-md-none"> max in ms 
+                    </div>
+                    <div class="form-group col-2 p-0">
+                        <input class="form-control text-center"
+                            type="number" min="0" required oninput="validity.valid||(value='');"
+                            v-model="bufferMin" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                    </div>
+                    <div class="form-group col-2 p-0">
+                        <input class="form-control text-center"
+                            type="number" min="0" required oninput="validity.valid||(value='');"
+                            v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                    </div>
+
+      
+                </div>
+
+                <p class="text-center font-weight-light font-italic" v-html="netDescription"></p>
+
+                <div class="tab-panel">
+                    <ul class="nav nav-tabs">
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: activeBottomTab === 'graph' }" @click="selectBottomTab('graph')">
+                                Graph
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{ active: activeBottomTab === 'messages' }" @click="selectBottomTab('messages')">
+                                Messages
+                                <span class="badge badge-primary ml-2" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+                            </a>
+                        </li>
+                    </ul>
+                    <div class="tab-panel-content">
+                        <div class="tab-panel-pane" :class="{ 'is-hidden': activeBottomTab !== 'graph' }">
+                            <div class="form-row">
+                                <ul class="list-group list-group-flush w-100" ref="stats">
+                                </ul>
+                            </div>
+                            <div class="form-row" v-show="hasMetrics">
+                                <div class="form-group mx-auto">
+                                    <img class="m-1" alt="Reset metrics view" title="Reset incremental metrics and rescale the chart" type="button" @click="resetMetrics()" src="./assets/reload.png" height="32">
+                                    <img class="m-1" alt="Download metrics" title="Download metrics as a CSV file" type="button" @click="downloadStats()" src="./assets/download.png" height="32">
+                                    <img class="m-1" alt="Dump media" title="Dump media as MP4 files" type="button" @click="dump()" src="./assets/dump.png" height="32" v-show="audioDump || videoDump">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="tab-panel-pane tab-panel-pane--overlay" :class="{ 'is-hidden': activeBottomTab !== 'messages' }">
+                            <div class="messages-panel" ref="messagesPanel">
+                                <div class="messages-empty" v-if="messages.length === 0">No data messages received yet.</div>
+                                <ul class="messages-list" v-else>
+                                    <li v-for="(message, idx) in messages" :key="idx">[{{ message.track }}] {{ message.receivedAt }} : {{ message.text }}</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="showSettings" class="modal-backdrop fade show"></div>
+                <div v-if="showSettings" class="modal fade show d-block" tabindex="-1" role="dialog" @click.self="closeSettings()">
+                    <div class="modal-dialog modal-lg" role="document">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Content Protection</h5>
+                                <button type="button" class="close" aria-label="Close" @click="closeSettings()">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="text-muted small">
+                                    License URLs are not pre-filled; paste your own to test against a real key server.
+                                    A DRM is included in the playback request only when it is enabled <em>and</em> its license URL is set.
+                                </p>
+                                <div v-for="drm in contentProtection" :key="drm.id" class="border-bottom mb-3 pb-3">
+                                    <div class="form-row align-items-center mb-2">
+                                        <div class="col-auto pr-2">
+                                            <input :id="'drm-' + drm.id + '-enabled'" type="checkbox"
+                                                class="form-check-input position-static m-0"
+                                                :disabled="isPlaying()" v-model="drm.enabled">
+                                        </div>
+                                        <div class="col">
+                                            <label :for="'drm-' + drm.id + '-enabled'" class="h6 mb-0">
+                                                <i class="fas fa-shield-alt"></i> {{ drm.label }}
+                                            </label>
+                                            <span class="badge badge-success ml-2" v-if="isDrmActive(drm)">Active</span>
+                                        </div>
+                                    </div>
+
+                                    <div :class="{ 'pl-4': true, 'text-muted': !drm.enabled }">
+                                        <div class="form-group mb-2">
+                                            <label class="small mb-1">License URL</label>
+                                            <input class="form-control form-control-sm" type="text"
+                                                :disabled="!drm.enabled || isPlaying()"
+                                                v-model="drm.license" placeholder="https://...">
+                                        </div>
+
+                                        <div class="form-group mb-2" v-if="drm.id === 'fairplay'">
+                                            <label class="small mb-1">Certificate URL</label>
+                                            <input class="form-control form-control-sm" type="text"
+                                                :disabled="!drm.enabled || isPlaying()"
+                                                v-model="drm.certificate" placeholder="https://...">
+                                        </div>
+
+                                        <div class="form-group mb-2">
+                                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                                <label class="small mb-0">HTTP headers</label>
+                                                <button type="button" class="btn btn-link btn-sm p-0 w-auto"
+                                                    :disabled="!drm.enabled || isPlaying()"
+                                                    @click="addHeader(drm)">
+                                                    <i class="fas fa-plus"></i> Add header
+                                                </button>
+                                            </div>
+                                            <div v-if="drm.headers.length === 0" class="small text-muted font-italic">
+                                                No headers
+                                            </div>
+                                            <div v-for="(header, idx) in drm.headers" :key="idx" class="form-row align-items-center mb-1">
+                                                <div class="col">
+                                                    <input class="form-control form-control-sm" type="text"
+                                                        :disabled="!drm.enabled || isPlaying()"
+                                                        v-model="header.name" placeholder="Header name">
+                                                </div>
+                                                <div class="col">
+                                                    <input class="form-control form-control-sm" type="text"
+                                                        :disabled="!drm.enabled || isPlaying()"
+                                                        v-model="header.value" placeholder="Header value">
+                                                </div>
+                                                <div class="col-auto">
+                                                    <button type="button" class="btn btn-light btn-sm w-auto"
+                                                        :disabled="!drm.enabled || isPlaying()"
+                                                        @click="removeHeader(drm, idx)" title="Remove header">
+                                                        <i class="fas fa-times"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-group col mb-0">
+                                                <label class="small mb-1">Audio robustness</label>
+                                                <select v-if="drm.id === 'widevine'" class="custom-select custom-select-sm"
+                                                    :disabled="!drm.enabled || isPlaying()"
+                                                    v-model="drm.audioRobustness">
+                                                    <option v-for="[label, value] in audioRobustnesses" :value="value">{{ label }}</option>
+                                                </select>
+                                                <input v-else class="form-control form-control-sm" type="text"
+                                                    :disabled="!drm.enabled || isPlaying()"
+                                                    v-model="drm.audioRobustness" placeholder="comma-separated">
+                                            </div>
+                                            <div class="form-group col mb-0">
+                                                <label class="small mb-1">Video robustness</label>
+                                                <select v-if="drm.id === 'widevine'" class="custom-select custom-select-sm"
+                                                    :disabled="!drm.enabled || isPlaying()"
+                                                    v-model="drm.videoRobustness">
+                                                    <option v-for="[label, value] in videoRobustnesses" :value="value">{{ label }}</option>
+                                                </select>
+                                                <input v-else class="form-control form-control-sm" type="text"
+                                                    :disabled="!drm.enabled || isPlaying()"
+                                                    v-model="drm.videoRobustness" placeholder="comma-separated">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-primary w-auto" @click="closeSettings()">Done</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+        </div>
+
+    </body>
+    <script type="module">
+        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, VERSION, utils } from "../dist/wrts-client.bundle.js";
+        // development version, includes helpful console warnings
+        // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
+        // production version, optimized for size and speed
+        import { createApp, nextTick } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
+        const { EpochTime, Util, NetAddress, Connect, LogLevel, log, UIMetrics, BinaryWriter } = utils;
+
+        // displays logs ERROR, WARN & INFO logs,
+        // can be even more detailed with LogLevel.DEBUG
+        log.level = LogLevel.INFO;
+        log('wrts-client version:', VERSION).info();
+        log('web-utils version:', utils.VERSION).info();
+
+        const options = Util.options();
+
+        const PlayState = {
+            PLAYING: 'PLAYING',
+            STARTING: 'STARTING',
+            STOPPED: 'STOPPED'
+        };
+
+        // URL-safe base64 round-trip for UTF-8 strings: `+` and `/` are remapped to `-` and `_`
+        // and padding is stripped, so the encoded value can sit directly in a query parameter
+        // without further percent-encoding.
+        function utf8ToBase64Url(str) {
+            const bytes = new TextEncoder().encode(str);
+            let binary = '';
+            for (const byte of bytes) {
+                binary += String.fromCharCode(byte);
+            }
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        function base64UrlToUtf8(str) {
+            const padded = str.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice(0, (4 - str.length % 4) % 4);
+            const binary = atob(padded);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return new TextDecoder().decode(bytes);
+        }
+
+        createApp({
+            data() {
+                return {
+                    PlayState: PlayState,
+                    playState: PlayState.STOPPED,
+
+                    stream: '',
+                    muted: false,
+                    host: null,
+                    bufferMin: 0,
+                    bufferMax: 0,
+
+                    audioDump: options.dump ? new BinaryWriter() : undefined,
+                    videoDump: options.dump ? new BinaryWriter() : undefined,
+
+                    keySystem: null,
+                    showSettings: false,
+                    // Widevine-only robustness presets. Keyed by display label, the value is the
+                    // comma-joined robustness string stored on `contentProtection[*].*Robustness`.
+                    videoRobustnesses: new Map([
+                        ['HW & SW', 'HW_SECURE_DECODE,SW_SECURE_DECODE'],
+                        ['SW', 'SW_SECURE_DECODE'],
+                        ['HW', 'HW_SECURE_DECODE'],
+                        ['All', 'HW_SECURE_ALL,HW_SECURE_DECODE,SW_SECURE_DECODE'],
+                        ['(empty)', '']
+                    ]),
+                    audioRobustnesses: new Map([
+                        ['HW & SW', 'HW_SECURE_CRYPTO,SW_SECURE_CRYPTO'],
+                        ['SW', 'SW_SECURE_CRYPTO'],
+                        ['HW', 'HW_SECURE_CRYPTO'],
+                        ['All', 'HW_SECURE_ALL,HW_SECURE_CRYPTO,SW_SECURE_CRYPTO'],
+                        ['(empty)', '']
+                    ]),
+                    contentProtection: [
+                        { id: 'widevine', label: 'Widevine', keySystem: 'com.widevine.alpha',
+                            enabled: true, license: '', headers: [],
+                            audioRobustness: 'HW_SECURE_CRYPTO,SW_SECURE_CRYPTO',
+                            videoRobustness: 'HW_SECURE_DECODE,SW_SECURE_DECODE' },
+                        { id: 'playready', label: 'PlayReady', keySystem: 'com.microsoft.playready',
+                            enabled: true, license: '', headers: [], audioRobustness: '', videoRobustness: '' },
+                        { id: 'fairplay', label: 'FairPlay', keySystem: 'com.apple.fps.1_0',
+                            enabled: true, license: '', certificate: '', headers: [], audioRobustness: '', videoRobustness: '' }
+                    ],
+
+                    canvas: document.createElement('canvas'),
+
+                    startTime: 0,
+                    adaptiveFrameSkipping: true,
+                    streamMetadata: null,
+                    netDescription: "",
+                    videoTracks: new Map(),
+                    videoTrack: 'Video',
+                    videoTrackId: undefined,
+                    activeBottomTab: 'graph',
+                    messages: [],
+                    unreadMessages: 0,
+                    sourceType: undefined,
+                    audioTracks: new Map(),
+                    audioTrack: 'Audio',
+                    audioTrackId: undefined,
+                    streamErrorMessage: null,
+                    stats: new Map(),
+                    times: new Array(),
+                    hasMetrics:false,
+                    deltaStats: {},
+                    uiStats: null,
+                    player: null,
+                    latencies: [],
+                    netProfiles: new Map([
+                        ['-manual-', [
+                            "Manually configure a buffer window large enough to compensate for variations caused by network fluctuations.",
+                        ]],
+                        ['ideal', [
+                            "Ideal network conditions for low latency: streamer and player are geographically close with minimal intermediary hops.",
+                            200, 500 // 350 ms
+                        ]],
+                        ['normal', [
+                            "A stable and reliable network between streamer and player, making their geographical distance negligible.",
+                            400, 800 // 600ms
+                        ]],
+                        ['distant', [
+                            "Streamer and player are significantly distant and/or the connection involves multiple intermediaries (e.g., VPNs, CDN providers).",
+                            1000, 2000 // 1.5 seconds
+                        ]], 
+                        ['unstable', [
+                            "A resilient configuration designed for maximum stability even on challenging networks, prioritizing robustness over low latency.",
+                            2000, 4000 // 3 seconds
+                        ]],
+                    ]),
+                    netProfile: 'normal'
+                }
+            },
+            mounted() {
+                this.controls = false;    
+
+                // init values
+                this.loadContentProtectionFromOptions();
+                this.adaptiveFrameSkipping = options.reliable ? false : true;
+                const host = options.host;
+                this.host = new NetAddress(host || location.host, 443);
+                this.stream = options.stream || '';
+                this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
+                this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
+
+                const drawContext = this.canvas.getContext('2d');
+
+                // Stats to be displayed in the UI
+                const bandwidths = []; this.stats.set("Bandwidth", bandwidths);
+                const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
+                const latencies = this.latencies; this.stats.set("Latency", latencies);
+                const e2eLatencies = []; this.stats.set("Latency e2e", e2eLatencies);
+                const playbackRates = []; this.stats.set("Playback rate", playbackRates);
+                const playbackSpeeds = []; this.stats.set("Playback speed", playbackSpeeds);
+                const fps = []; this.stats.set("Video FPS", fps);
+                const trackAudio = []; this.stats.set("Track audio", trackAudio);
+                const trackVideo = []; this.stats.set("Track video", trackVideo);
+                const skippedAudio = []; this.stats.set("Skipped audio", skippedAudio);
+                const skippedVideo = []; this.stats.set("Skipped video", skippedVideo);
+                const stalls = []; this.stats.set("Stalls", stalls);
+                
+                this.uiStats = new UIMetrics(this.$refs.stats);
+
+                // Debug purpose : click right = dump & pause
+                this.$refs.video.addEventListener('contextmenu', (event) => {
+                    event.preventDefault();
+                    this.dump();
+                    this.player.paused = true;
+                });
+                
+         
+                setInterval(() => {
+                    const player = this.player;
+                    if(player) {
+                        this.hasMetrics = true;
+                        const stats = player.computeStats();
+                       // For bandwidth calculation, using player.recvByteRate is faster than
+                       // summing stats.audioByteRate + stats.videoByteRate + stats.dataByteRate.
+                        if(bandwidths.length || player.recvByteRate) {
+                            bandwidths.push(Math.round(player.recvByteRate *8/1000)+"kbps");
+                        }
+                        if(bufferAmounts.length || stats.bufferAmount) {
+                            bufferAmounts.push((stats.bufferAmount || 0)+"ms");
+                        }
+                        if(latencies.length || (options.latency && stats.latency)) {
+                            latencies.push((stats.latency || 0) +"ms");
+                        }
+                      
+                        playbackRates.push((stats.playbackRate || 0).toFixed(2));
+                        playbackSpeeds.push((stats.playbackSpeed || 0).toFixed(2));
+                        fps.push((stats.videoPerSecond || 0).toFixed(2));
+                        trackAudio.push(((stats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
+                        trackVideo.push(((stats.videoTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
+
+                        skippedAudio.push((((stats.skippedAudio || 0) - (this.deltaStats.skippedAudio || 0)) /1000).toFixed(1)+"s");
+                        skippedVideo.push((((stats.skippedVideo || 0) - (this.deltaStats.skippedVideo || 0)) /1000).toFixed(1)+"s");
+
+                        stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
+
+                        const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
+                        if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
+                            // displaid only if activated!
+                            e2eLatencies.push(e2eLatency+"ms");
+                        }
+                        this.times.push({
+                            time: new Date().toISOString(),
+                            mediaTime: player.currentTime
+                        });
+                    }
+                    this.uiStats.display(this.stats);
+                }, 700);
+            },
+            watch: {
+                // Bootstrap JS is not loaded here, so toggle `modal-open` on <body> manually so the
+                // page behind the dialog stops scrolling while the settings modal is visible.
+                showSettings(value) {
+                    document.body.classList.toggle('modal-open', value);
+                }
+            },
+            methods: {
+                buildStream() {
+                    if(!this.stream) {
+                        this.stream  = 'out+de1e6f7c-e5db-450b-9603-c3644274779b';
+                        log(`Set default Bunny stream ${this.stream}`).warn();
+                    }
+                    return this.stream;
+                },
+
+                buildConnectParams() {
+                    let streamName = this.buildStream();
+                    let accessToken = options.token || options.id;
+                    let endPoint = this.host;
+                    let mediaExt;
+                    if(this.sourceType === HTTPSource) {
+                        mediaExt = '.mp4'; // force CMAF for HTTP Streaming
+                    }
+                    try {
+                        endPoint = new URL(streamName);
+                        streamName = endPoint.pathname;
+                    } catch(_) {
+                        // StreamName(?id=accessTolen)
+                        const found = streamName.indexOf("?");
+                        if(found>=0) {
+                            accessToken = new URLSearchParams(streamName.substring(found+1)).get("id") || accessToken;
+                            streamName = streamName.substring(0, found); // remove params
+                        }
+                        /// remove possible extension in stream name
+                        mediaExt = Util.getExtension(streamName);
+                        streamName = streamName.substring(0, streamName.length - mediaExt.length);
+                    }
+
+                    const contentProtection = this.buildContentProtection();
+
+                    return {
+                        endPoint:endPoint.toString(),
+                        streamName,
+                        accessToken,
+                        mediaExt,
+                        contentProtection
+                    };
+                },
+
+                buildContentProtection() {
+                    const contentProtection = {};
+                    for (const drm of this.contentProtection) {
+                        const license = drm.license.trim();
+                        if (!drm.enabled || !license) {
+                            continue;
+                        }
+
+                        // Collapse the row pairs into a {name: value} headers object, dropping empty names.
+                        const headers = {};
+                        for (const header of drm.headers) {
+                            const name = header.name.trim();
+                            if (name) {
+                                headers[name] = header.value;
+                            }
+                        }
+                        const hasHeaders = Object.keys(headers).length > 0;
+
+                        const audioRobustness = this.parseRobustness(drm.audioRobustness);
+                        const videoRobustness = this.parseRobustness(drm.videoRobustness);
+                        const hasRobustness = audioRobustness.length || videoRobustness.length;
+
+                        const config = {
+                            license: hasHeaders ? { url: license, headers } : license
+                        };
+                        if (drm.id === 'fairplay') {
+                            const cert = drm.certificate.trim();
+                            if (cert) {
+                                config.certificate = cert;
+                            }
+                        }
+                        if (hasRobustness) {
+                            config.configurations = Connect.createMediaKeySystemConfigurations({
+                                audioRobustness: audioRobustness.length ? audioRobustness : undefined,
+                                videoRobustness: videoRobustness.length ? videoRobustness : undefined
+                            });
+                            log(`Generated MediaKeySystemConfiguration for ${drm.label}`, config.configurations).info();
+                        }
+                        contentProtection[drm.keySystem] = config;
+                    }
+                    return Object.keys(contentProtection).length ? contentProtection : undefined;
+                },
+
+                parseRobustness(value) {
+                    return value.split(',').map(s => s.trim()).filter(Boolean);
+                },
+
+                addHeader(drm) {
+                    drm.headers.push({ name: '', value: '' });
+                },
+
+                removeHeader(drm, idx) {
+                    drm.headers.splice(idx, 1);
+                },
+
+                isDrmActive(drm) {
+                    if (!this.keySystem) {
+                        return false;
+                    }
+                    if (drm.id === 'fairplay') {
+                        return this.keySystem.startsWith('com.apple.fps');
+                    }
+                    return this.keySystem === drm.keySystem;
+                },
+
+                closeSettings() {
+                    this.showSettings = false;
+                    this.updateURL();
+                },
+
+                serializeContentProtection() {
+                    // A DRM with no license can't be exercised at playback time, so its other
+                    // settings (enabled flag, headers, robustness) are dead weight in the URL.
+                    const compact = [];
+                    for (const drm of this.contentProtection) {
+                        if (!drm.license) { continue; }
+                        const entry = { id: drm.id, license: drm.license };
+                        if (!drm.enabled) { entry.enabled = false; }
+                        if (drm.id === 'fairplay' && drm.certificate) { entry.certificate = drm.certificate; }
+                        const headers = drm.headers.filter(h => h.name);
+                        if (headers.length) { entry.headers = headers; }
+                        if (drm.audioRobustness) { entry.audioRobustness = drm.audioRobustness; }
+                        if (drm.videoRobustness) { entry.videoRobustness = drm.videoRobustness; }
+                        compact.push(entry);
+                    }
+                    return compact.length ? JSON.stringify(compact) : null;
+                },
+
+                loadContentProtectionFromOptions() {
+                    if (!options.contentProtection) {
+                        return;
+                    }
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(base64UrlToUtf8(options.contentProtection));
+                    } catch (err) {
+                        log('Failed to parse contentProtection query parameter', err).warn();
+                        return;
+                    }
+                    if (!Array.isArray(parsed)) {
+                        return;
+                    }
+                    for (const entry of parsed) {
+                        const drm = this.contentProtection.find(d => d.id === entry.id);
+                        if (!drm) { continue; }
+                        if (entry.enabled === false) { drm.enabled = false; }
+                        if (typeof entry.license === 'string') { drm.license = entry.license; }
+                        if (drm.id === 'fairplay' && typeof entry.certificate === 'string') { drm.certificate = entry.certificate; }
+                        if (Array.isArray(entry.headers)) {
+                            drm.headers = entry.headers
+                                .filter(h => h && typeof h.name === 'string')
+                                .map(h => ({ name: h.name, value: typeof h.value === 'string' ? h.value : '' }));
+                        }
+                        if (typeof entry.audioRobustness === 'string') { drm.audioRobustness = entry.audioRobustness; }
+                        if (typeof entry.videoRobustness === 'string') { drm.videoRobustness = entry.videoRobustness; }
+                    }
+                },
+
+                
+                play() {
+                    this.startTime = Util.time();
+                    log('Play stream', this.stream, 'with options', options).info();
+                    if (this.player) {
+                        this.player.stop();
+                        return;
+                    }
+                    // reset error
+                    this.streamErrorMessage = null; 
+                    // reset stats!
+                    this.resetMetrics(true);
+                    this.resetMessages();
+                    // reset dump if activated
+                    if(this.audioDump) {
+                        this.audioDump.clear();
+                    }
+                    if(this.videoDump) {
+                        this.videoDump.clear();
+                    }
+
+                    // build params
+                    const params = this.buildConnectParams();
+                    if(!params.streamName) {
+                        this.streamErrorMessage = "Enter a non-empty stream name or URL to play";
+                        return;
+                    }
+
+                    this.playState = PlayState.STARTING;
+
+                    const videoElement = this.$refs.video;
+                    videoElement.muted = this.muted;
+                    videoElement.autoplay = true;
+                    videoElement.onloadeddata = () => {
+                        log('TTFF :', Util.time()-this.startTime).info();
+                    };
+                    videoElement.onerror = () => {
+                        const mediaError = videoElement.error;
+                        if (mediaError) {
+                            log('Media error code:', mediaError.code, 'Details:', mediaError.message).error();
+                        }
+                    };
+
+                    // Now we can start the player
+                    this.player = new Player(videoElement, this.sourceType);
+                    this.player.onStart = this.onStart.bind(this);
+                    this.player.onStop = this.onStop.bind(this);
+                    this.player.onTrackChange = this.onTrackChange.bind(this);
+                    this.player.onMetadata = this.onMetadata.bind(this);
+                   
+                    this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
+                    this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
+                    this.player.onData = (track, time, duration, data) => {
+                        this.pushMessage(track, time, data);
+                        const codec = this.player.metadata.tracks.get(track)?.codecString;
+                        log(
+                            `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
+                        ).info();
+                    };
+                    this.player.onMediaKeys = (mediaKeysEngine) => {
+                        log('MediaKeysEngine', mediaKeysEngine? 'started' : 'stopped').info();
+                        // Update enabled DRM based on the active key system
+                        this.keySystem = mediaKeysEngine? mediaKeysEngine.keySystem : null;
+                    }
+              
+                    this.setBuffer(); // to set buffer size!
+                    this.player.start(params, options.timeout);
+                },
+                onStart() {
+                    log('onStart').info();
+                    this.playState = PlayState.PLAYING;
+                    this.player.reliable = !this.adaptiveFrameSkipping;
+                    if(options.combinable != null) {
+                        this.player.tracksCombinable = options.combinable ? true : false;
+                    }
+                    this.player.cmcd = options.cmcd;
+                    this.player.cmcdMode = options.cmcdMode;
+                    this.player.cmcdSid = options.cmcdSid;
+                },
+                onStop(error) {
+                    if(error) {
+                        log('onStop', error).error();
+                        this.streamErrorMessage = error.name;
+                    } else {
+                        log('onStop').info();
+                    }
+                    const videoElement = this.$refs.video;
+                    videoElement.muted = this.muted;
+                    videoElement.autoplay = true;
+                    videoElement.onloadeddata = null;
+                    videoElement.onerror = null;
+
+                    this.audioTracks = new Map();
+                    this.audioTrack = 'Audio';
+                    this.audioTrackId = undefined;
+                    this.videoTracks = new Map();
+                    this.videoTrack = 'Video';
+                    this.videoTrackId = undefined;
+                    this.streamMetadata = null;
+
+                    this.player = null;
+                    this.playState = PlayState.STOPPED;
+                    this.keySystem = null;
+                },
+                onTrackChange(audioTrack, videoTrack, dataTrack) {
+                    log(`onTrackChange ${Util.stringify({audioTrack, videoTrack, dataTrack})}`).info();
+                    if(this.videoTrackId != null) {
+                        this.videoTrackId = videoTrack;
+                    }
+                    this.videoTrack = this.videoTracks.get(videoTrack);
+                    if(this.audioTrackId != null) {
+                        this.audioTrackId = audioTrack;
+                    }
+                    this.audioTrack = this.audioTracks.get(audioTrack);
+                },
+                onMetadata(metadata) {
+                    log(`onMetadata ${Util.stringify(metadata)}`).info();
+                    this.streamMetadata = metadata;
+
+                    this.audioTracks = new Map();
+                    this.videoTracks = new Map();
+
+                    for (const [id, track] of metadata.tracks) {
+                
+                        if (track.type === Media.Type.VIDEO) {
+                            this.videoTracks.set(id, track.toString());
+                        } else if (track.type === Media.Type.AUDIO) {
+                            this.audioTracks.set(id,track.toString());
+                        }
+                    }
+                },
+                selectBottomTab(tab) {
+                    this.activeBottomTab = tab;
+                    if(tab === 'messages') {
+                        this.unreadMessages = 0;
+                        this.scrollMessagesToBottom();
+                    }
+                },
+                resetMessages() {
+                    this.messages = [];
+                    this.unreadMessages = 0;
+                    this.activeBottomTab = 'graph';
+                },
+                formatReceptionTime(date = new Date()) {
+                    return date.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                },
+                scrollMessagesToBottom() {
+                    nextTick(() => {
+                        const panel = this.$refs.messagesPanel;
+                        if(panel) {
+                            panel.scrollTop = panel.scrollHeight;
+                        }
+                    });
+                },
+                pushMessage(track, time, data) {
+                    const message = Util.stringify(data);
+                    this.messages.push({
+                        track,
+                        receivedAt: this.formatReceptionTime(),
+                        text: message.replace(/[\r\n]+/g, ' ')
+                    });
+                    if(this.messages.length > 200) {
+                        this.messages.splice(0, this.messages.length - 200);
+                    }
+                    if(this.activeBottomTab !== 'messages') {
+                        this.unreadMessages += 1;
+                    }
+                    this.scrollMessagesToBottom();
+                },
+                mute() {
+                    this.muted = !this.muted;
+                    this.$refs.video.muted = this.muted;
+                    log(this.muted ? 'MutePlayback' : 'UnmutePlayback').info();
+                },
+                pause() {
+                    clearTimeout(this.pauseVideo);
+                    this.pauseVideo = null;
+                    this.dump();
+                    if(this.player) {
+                        this.player.paused = !this.player.paused;
+                    }
+                },
+                leaveGoLive(event) {
+                    if ((event.buttons & 1) && this.player) {
+                        // trick to activate latency
+                        this.latencies.push(this.player.latency+"ms");
+                    }
+                },
+                goLive() {
+                    if(this.player) {
+                        this.player.goLive();
+                    }
+                },
+                resetMetrics(all=false) {
+                    this.uiStats.reset();
+                    // reset incremental metrics counters
+                    if (this.player) {
+                        let playerStats = this.player.computeStats();
+                        const {skippedAudio, skippedVideo, stallCount} = playerStats;
+                        this.deltaStats = { skippedAudio, skippedVideo, stallCount} ;
+                    }
+                    const displayableCount = all ? 0 : this.uiStats.displayableCount;
+                    for(let [_, values] of this.stats) {
+                        values.splice(0, Math.max(0, values.length - displayableCount));
+                    }
+                    this.times.splice(0, Math.max(0, this.times.length - displayableCount));
+                    if (all){
+                        this.hasMetrics = false;
+                        this.deltaStats = {};
+                    }
+                },
+                download(name, data, type) {
+                    const url = URL.createObjectURL(new Blob([data], {type}));
+                    const link = document.createElement("a");
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", name);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                },
+                downloadStats() {
+                    // Write headers and compute max values
+                    let csv = "";
+                    let max = this.times.length;
+                    let headers = ["localTime" , "mediaTime"];
+                    for (const [header, values] of this.stats) {
+                        headers.push(header);
+                        max = Math.max(max, values.length);
+                    }
+                    csv = headers.join(';');
+                    
+                    // Write CSV
+                    for (let i = 0; i < max; ++i) {
+                        csv += '\n';
+                        const {time, mediaTime} = this.times[i];
+                        csv += (time || '') + ';' + (mediaTime || '') + ';';
+                        for(let [name, stats] of this.stats) {
+                            csv += (stats[i] == null ? '' : parseFloat(stats[i])) + ';';
+                        }
+                    }
+
+                    // Download the csv !
+                    this.download("stats.csv", csv, 'text/csv;charset=utf-8;');
+                },
+
+                dump() {
+                    // Just here to debug binary generation when need
+                    if(this.audioDump && this.audioDump.size()) {
+                        this.download("audio.mp4", this.audioDump.data(), 'video/mp4');
+                    }
+                    if(this.videoDump && this.videoDump.size()) {
+                        this.download("video.mp4", this.videoDump.data(), 'video/mp4');
+                    }
+                },
+                fullscreen() {
+                    const video = this.$refs.video;
+
+                    if (document.fullscreenElement) {
+                        if(document.exitFullscreen) {
+                            document.exitFullscreen();
+                        } else if(video && video.webkitExitFullscreen) {
+                            video.webkitExitFullscreen();
+                        }
+                        return;
+                    } 
+
+                    if(!video) {
+                        return;
+                    }
+
+                    if(video.requestFullscreen) {
+                         video.requestFullscreen();
+                    } else if(video.webkitEnterFullscreen) {
+                        video.webkitEnterFullscreen();
+                    } else if(video.enterFullscreen) {
+                        video.enterFullscreen();
+                    }
+                },
+                playButtonCaption() {
+                    if (this.isStopped())
+                        return 'Play';
+                    if (this.isStarting())
+                        return 'Starting...';
+                    if (this.isPlaying())
+                        return 'Stop';
+                },
+                activeDrmLabel() {
+                    if (!this.keySystem) {
+                        return 'protection';
+                    }
+                    const drm = this.contentProtection.find(d => this.isDrmActive(d));
+                    return drm ? drm.label : 'protection';
+                },
+                isPlaying() {
+                    return this.playState === PlayState.PLAYING;
+                },
+                isStarting() {
+                    return this.playState === PlayState.STARTING;
+                },
+                isStopped() {
+                    return this.playState === PlayState.STOPPED;
+                },
+                onVideoTrackChange() {
+                    if (this.player) {
+                        this.player.videoTrack = this.videoTrackId;
+                    }
+                },
+                onAudioTrackChange() {
+                    if (this.player) {
+                        this.player.audioTrack = this.audioTrackId;
+                    }
+                },
+                setBuffer(min, max) {
+                    let profile;
+                    if(!isNaN(min) || !isNaN(max)) {
+                        // manual mode
+                        profile = this.netProfiles.entries().next().value;
+                        this.netProfile = profile[0];
+                        profile = profile[1];
+
+                        this.bufferMin = Math.min(min || max, max || min);
+                        this.bufferMax = Math.max(min || max, max || min);
+                    } else {
+                        // auto mode
+                        profile = this.netProfiles.get(this.netProfile);
+                        if(profile[1]) {
+                            this.bufferMin = profile[1];
+                        }
+                        if(profile[2]) {
+                            this.bufferMax = profile[2];
+                        }
+                    }
+
+                    
+                    if (this.player) {
+                        // fix possible player correction!
+                        this.bufferMin = (this.player.bufferLimitLow = this.bufferMin);
+                        this.bufferMax = (this.player.bufferLimitHigh = this.bufferMax);
+                    }
+                    
+                    // Display user description
+                    this.netDescription = profile[0];
+                    this.netDescription += "<br>Expected buffering ≈" + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + "ms";
+
+                    this.updateURL();
+                    
+                },
+                updateURL() {
+                    if (history.pushState) {
+                        let path = location.origin + location.pathname + '?stream=' + encodeURIComponent(this.buildStream()) + '&bufferMin=' + this.bufferMin + '&bufferMax=' + this.bufferMax;
+                        if(options.token != null) {
+                            path += "&token=" + options.token;
+                        }
+                        if(options.id != null) {
+                            path += "&id=" + options.id;
+                        }
+                        if(options.combinable != null) {
+                            path += "&combinable=" + options.combinable;
+                        }
+                        if(options.latency != null) {
+                            path += "&latency";
+                        }
+                        if(options.timeout != null) {
+                            path += "&timeout=" + options.timeout;
+                        }
+                        if (options.cmcd != null) {
+                            path += "&cmcd=" + options.cmcd;
+                        }
+                        if (options.cmcdMode != null) {
+                            path += "&cmcdMode=" + options.cmcdMode;
+                        }
+                        if (options.cmcdSid != null) {
+                            path += "&cmcdSid=" + options.cmcdSid;
+                        }
+                        if(!this.adaptiveFrameSkipping) {
+                            path += "&reliable";
+                        }
+                        if(options.dump) {
+                            path += "&dump";
+                        }
+                        if(options.host != null) {
+                            path += "&host=" + options.host;
+                        }
+                        const contentProtection = this.serializeContentProtection();
+                        if (contentProtection) {
+                            path += "&contentProtection=" + utf8ToBase64Url(contentProtection);
+                        }
+                        history.pushState({path},'',path);
+                    }
+                },
+                mutableReliability() {
+                    if(this.sourceType === HTTPSource) {
+                        // HTTP has no mutable reliability
+                        return this.player ? false : true;
+                    }
+                    return true;
+                },
+                onReliable() {
+                    if (this.player) {
+                        this.player.reliable = !this.adaptiveFrameSkipping;
+                    }
+                    this.updateURL();
+                },
+                toggleAdaptive() {
+                    this.adaptiveFrameSkipping = !this.adaptiveFrameSkipping;
+                    this.onReliable();
+                }
+            },
+        }).mount('#main');
+    </script>
+</html>
