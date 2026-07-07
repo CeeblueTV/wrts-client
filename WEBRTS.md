@@ -25,9 +25,10 @@ This logic is primarily handled within the `Player` class (`src/Player.ts`) and 
     -   In the `LOW` state, it chooses a lower-quality track.
     -   If the buffer level rises above the `MIDDLE` threshold, it can switch to a higher-quality track—provided the estimated bandwidth permits it .
 
-3.  **Dynamic Playback Rate**: To gently manage the buffer without noticeable skips, the player slightly adjusts the video's `playbackRate`:
-    -   In `LOW` state, `playbackRate` is reduced (e.g., to `0.92x`) to slow down consumption and allow the buffer to refill.
-    -   In `HIGH` state, `playbackRate` is increased (e.g., to `1.08x`) to drain the buffer faster and move closer to the live edge.
+3.  **Dynamic Playback Rate**: To gently manage the buffer without noticeable skips, the player nudges the video's `playbackRate`. It holds a single rate per buffer state (it does **not** ramp per tick) because some decoders stutter on every rate *change*:
+    -   In `LOW` state, `playbackRate` is reduced (down to `0.84x`) to slow consumption and let the buffer refill.
+    -   In `HIGH` state, `playbackRate` is increased (up to `1.16x`) to drain the buffer and move toward the live edge; it returns to `1x` once the buffer falls back to the middle.
+    -   An **experimental, opt-in** layer detects *silent* decoder freezes (Safari/PlayReady choking on `playbackRate > 1`) and tunes the buffer target at runtime to the lowest stable latency per device. See **[DYNAMIC_BUFFER.md](DYNAMIC_BUFFER.md)**.
 
 4.  **Partial Reliability & Frame Skipping**: This is the most critical part of the low-latency strategy. When the player is configured for partial reliability and the network deteriorates while the buffer is under the `LOW` state, it doesn’t wait for every video frame—risking a stall—instead it can **proactively skip individual frames** to preserve audio continuity, or if a stall has already occurred **skip several video segments** to rejoin the live edge.
 

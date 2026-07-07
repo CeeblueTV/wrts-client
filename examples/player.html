@@ -358,6 +358,8 @@
             .inp::placeholder { color: var(--txt-m); }
             .inp:disabled, .sel:disabled { opacity: .5; cursor: not-allowed; background: var(--bg-e); }
             .inp[type="number"] { text-align: center; padding-left: 6px; padding-right: 6px; }
+            /* bufferMax auto-tuned by DynamicBuffer (differs from the configured value) */
+            .inp-changed, .inp-changed:focus { border-color: #e53935; color: #e53935; box-shadow: 0 0 0 3px rgba(229,57,53,.18); }
 
             .sel {
                 cursor: pointer;
@@ -550,8 +552,6 @@
                 transition: opacity var(--t);
             }
             .stats-actions img:hover { opacity: .9; }
-            /* In dark mode, invert the PNG icons so they read on a dark background */
-            html[data-theme="dark"] .stats-actions img { filter: invert(1) brightness(1.05); }
 
             /* ── Messages ── */
             .msg-box {
@@ -880,6 +880,26 @@
                         <span>Frame Skip</span>
                     </label>
 
+                    <label title="Dynamically tune the buffer target (bufferLimitHigh) at runtime" class="tog" :class="{ on: dynamicBuffer }">
+                        <input type="checkbox" v-model="dynamicBuffer" @change="onDynamicBuffer()">
+                        <span class="tog-track"></span>
+                        <span>Dynamic Buffer</span>
+                    </label>
+
+                    <select v-if="showRateOverride" class="sel"
+                        title="Force a fixed playback rate in real time for testing (disable Dynamic Buffer to avoid conflicts)"
+                        v-model="rateOverride" @change="onRateOverride()" :disabled="dynamicBuffer">
+                        <option value="auto">Rate: auto</option>
+                        <option value="x1">Rate: 1.00×</option>
+                        <option value="x1.02">Rate: 1.02×</option>
+                        <option value="x1.04">Rate: 1.04×</option>
+                        <option value="x1.06">Rate: 1.06×</option>
+                        <option value="x1.08">Rate: 1.08×</option>
+                        <option value="x1.10">Rate: 1.10×</option>
+                        <option value="x1.12">Rate: 1.12×</option>
+                        <option value="x1.16">Rate: 1.16×</option>
+                    </select>
+
                     <button class="btn" :class="{ 'btn-cyan': keySystem }"
                         :style="{ display: isPlaying() && !keySystem ? 'none' : '' }"
                         :disabled="isPlaying()"
@@ -906,10 +926,12 @@
                             v-model="bufferMin" @change="setBuffer(this.bufferMin, this.bufferMax)">
                     </div>
                     <div class="buf-max">
-                        <span class="lbl">Buffer max (ms)</span>
-                        <input class="inp" type="number" min="0"
+                        <span class="lbl">Buffer max (ms){{ dynamicBuffer ? ' · mid ' + bufferMiddle : '' }}</span>
+                        <input class="inp" :class="{ 'inp-changed': isBufferDynamic() }" type="number" min="0"
                             required oninput="validity.valid||(value='');"
-                            v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                            v-model="bufferMax"
+                            @focus="editingBufferMax = true" @blur="editingBufferMax = false"
+                            @change="setBuffer(this.bufferMin, this.bufferMax)">
                     </div>
                     <p class="net-desc" v-html="netDescription"></p>
                 </div>
@@ -1294,6 +1316,8 @@
                     host: null,
                     bufferMin: 0,
                     bufferMax: 0,
+                    bufferMiddle: 0,
+                    editingBufferMax: false,
                     bufferAmount: 0,
 
                     audioDump: options.dump ? new BinaryWriter() : undefined,
@@ -1338,7 +1362,11 @@
 
                     startTime: 0,
                     adaptiveFrameSkipping: true,
-                    fixedPlaybackRate: options.fixedRate ? true : false,
+                    // Manual playback-rate override for testing (see onRateOverride). Value is 'auto' or 'x<rate>'
+                    // (e.g. 'x1.06'). The selector is only shown when ?playbackRate=... is in the URL.
+                    rateOverride: (typeof options.playbackRate === 'string' && options.playbackRate) || 'auto',
+                    showRateOverride: options.playbackRate != null,
+                    dynamicBuffer: options.dynamicBuffer ? true : false,
                     streamMetadata: null,
                     netDescription: "",
                     videoTracks: new Map(),
@@ -1367,7 +1395,7 @@
                     player: null,
                     latencies: [],
                     netProfiles: new Map([
-                        ['-manual-', [
+                        ['custom', [
                             "Manually configure a buffer window large enough to compensate for variations caused by network fluctuations.",
                         ]],
                         ['ideal', [
@@ -1417,6 +1445,24 @@
                 this.$refs.video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
                 this.$refs.video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
 
+                // Debug: log raw <video> media events to diagnose freezes (append ?events to the URL).
+                // 'timeupdate' is intentionally excluded (too noisy).
+                if (options.events) {
+                    const video = this.$refs.video;
+                    // 'durationchange'/'progress' excluded: on Safari they fire on every fragment append (flood).
+                    const MEDIA_EVENTS = ['play', 'playing', 'pause', 'waiting', 'stalled', 'suspend', 'emptied',
+                        'ended', 'seeking', 'seeked', 'ratechange', 'canplay', 'canplaythrough', 'loadeddata',
+                        'loadedmetadata'];
+                    for (const name of MEDIA_EVENTS) {
+                        video.addEventListener(name, () => log('[event]', name,
+                            't=' + video.currentTime.toFixed(3),
+                            'paused=' + video.paused,
+                            'readyState=' + video.readyState,
+                            'rate=' + video.playbackRate,
+                            this.player ? 'speed=' + (this.player.playbackSpeed || 0).toFixed(2) : '').info());
+                    }
+                }
+
                 const drawContext = this.canvas.getContext('2d');
 
                 // Stats to be displayed in the UI
@@ -1455,6 +1501,17 @@
                             bufferAmounts.push((stats.bufferAmount || 0)+"ms");
                         }
                         this.bufferAmount = stats.bufferAmount || 0;
+                        // Reflect the live buffer target in the UI: middle is display-only, max overwrites
+                        // the input only while Dynamic Buffer is on (so manual editing isn't clobbered otherwise).
+                        this.bufferMiddle = player.bufferLimitMiddle;
+                        // reflect the live max unless the user is editing the field (don't clobber typing)
+                        if (this.dynamicBuffer && !this.editingBufferMax) {
+                            this.bufferMax = player.bufferLimitHigh;
+                            if (this.bufferMax != this._userBufferMax) {
+                                // values no longer match the selected profile → show the manual/custom entry
+                                this.netProfile = this.netProfiles.keys().next().value;
+                            }
+                        }
                         if(latencies.length || (options.latency && stats.latency)) {
                             latencies.push((stats.latency || 0) +"ms");
                         }
@@ -1462,6 +1519,7 @@
                         playbackRates.push((stats.playbackRate || 0).toFixed(2));
                         playbackSpeeds.push((stats.playbackSpeed || 0).toFixed(2));
                         fps.push((stats.videoPerSecond || 0).toFixed(2));
+
                         trackAudio.push(((stats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
                         trackVideo.push(((stats.videoTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
 
@@ -1855,16 +1913,23 @@
                         this.keySystem = mediaKeysEngine? mediaKeysEngine.keySystem : null;
                     }
                     this.player.onBufferChange = () => {
-                        if (this.fixedPlaybackRate) {
-                            if (videoElement.playbackRate !== 1) {
-                                videoElement.playbackRate = 1;
+                        if (this.rateOverride !== 'auto') {
+                            // Manual test override: hold a fixed rate (see the Rate selector; value is 'x<rate>').
+                            const rate = Number(this.rateOverride.slice(1));
+                            if (videoElement.playbackRate !== rate) {
+                                videoElement.playbackRate = rate;
                             }
                         } else {
+                            // Freeze recovery (don't accelerate while a stall recovers) is handled inside the
+                            // Player now — see Player.stallRecovery, enabled by DynamicBuffer.
                             this.player.adjustPlaybackRate();
                         }
                     };
 
                     this.setBuffer(); // to set buffer size!
+                    // Optional runtime buffer-target tuning (off by default, toggled via the UI). The Player owns
+                    // it; enabling after setBuffer() lets its baseline capture the configured bufferLimitHigh.
+                    this.player.dynamicBuffer = this.dynamicBuffer;
                     this.player.start(params, options.timeout);
                 },
                 onStart() {
@@ -1927,6 +1992,9 @@
                     this.videoTrackId = undefined;
                     this.streamMetadata = null;
 
+                    if (this.player) {
+                        this.player.dynamicBuffer = false; // disable the owned tuner (stops its timer) before dropping
+                    }
                     this.player = null;
                     this.playState = PlayState.STOPPED;
                     this.keySystem = null;
@@ -2182,6 +2250,12 @@
                         this.bufferMin = (this.player.bufferLimitLow = this.bufferMin);
                         this.bufferMax = (this.player.bufferLimitHigh = this.bufferMax);
                     }
+                    // Remember the configured max (reference for the "changed" highlight) and re-baseline
+                    // DynamicBuffer to it, so a manual profile/value change is not fought or undone.
+                    this._userBufferMax = this.bufferMax;
+                    if (this.player) {
+                        this.player.resetDynamicBuffer();
+                    }
 
                     // Display user description
                     this.netDescription = profile[0];
@@ -2224,11 +2298,17 @@
                         if(options.dump) {
                             path += "&dump";
                         }
-                        if(options.fixedRate) {
-                            path += "&fixedRate";
+                        if(this.showRateOverride) {
+                            path += "&playbackRate=" + this.rateOverride;
+                        }
+                        if(this.dynamicBuffer) {
+                            path += "&dynamicBuffer";
                         }
                         if(options.debugoverlay) {
                             path += "&debugoverlay";
+                        }
+                        if(options.events) {
+                            path += "&events";
                         }
                         if(options.host != null) {
                             path += "&host=" + options.host;
@@ -2262,6 +2342,32 @@
                 toggleAdaptive() {
                     this.adaptiveFrameSkipping = !this.adaptiveFrameSkipping;
                     this.onReliable();
+                },
+                onDynamicBuffer() {
+                    if (this.player) {
+                        if (this.dynamicBuffer) {
+                            this.rateOverride = 'auto'; // avoid the manual override fighting DynamicBuffer
+                            this.player.dynamicBuffer = true;
+                        } else {
+                            this.player.dynamicBuffer = false;
+                            // disabling restored bufferLimitHigh; reflect it so the input isn't left stale
+                            this.bufferMax = this.player.bufferLimitHigh;
+                        }
+                    }
+                    this.updateURL();
+                },
+                // Apply the manual playback-rate override immediately (real-time testing). 'auto' hands control
+                // back to the Player's adjustPlaybackRate on the next buffer change.
+                onRateOverride() {
+                    const video = this.$refs.video;
+                    if (video && this.rateOverride !== 'auto') {
+                        video.playbackRate = Number(this.rateOverride.slice(1));
+                    }
+                    this.updateURL();
+                },
+                // True when DynamicBuffer has moved bufferMax away from the user-configured value.
+                isBufferDynamic() {
+                    return !!(this.player && this.dynamicBuffer && !this.editingBufferMax && this._userBufferMax != null && this.bufferMax != this._userBufferMax);
                 }
             },
         }).mount('#main');

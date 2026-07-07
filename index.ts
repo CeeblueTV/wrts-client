@@ -35,6 +35,8 @@ export { BufferState, IPlaying } from './src/sources/IPlaying';
 
 export { Player, PlayerError } from './src/Player';
 
+export { DynamicBuffer } from './src/DynamicBuffer';
+
 // UI helpers
 export { UITimeline, UITimelineAxis, UITimelineTrackType } from './src/UITimeline';
 

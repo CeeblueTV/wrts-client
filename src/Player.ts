@@ -13,6 +13,7 @@ import { Metadata } from './media/Metadata';
 import { MediaPlayback, MediaPlaybackError } from './media/MediaPlayback';
 import { HTTPAdaptiveSource } from './sources/HTTPAdaptiveSource';
 import { MediaKeysEngine, MediaKeysEngineError } from './media/keys/MediaKeysEngine';
+import { DynamicBuffer } from './DynamicBuffer';
 
 const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 150; // ms
@@ -21,10 +22,16 @@ const TIMEOUT = 14000; // at least superior to max gop duration (10s)
 const BUFFER_CHANGE_STEP = 50; // ms
 
 const PLAYBACK_RATE_MAX = 116; // Default maxRate, 116 means max 16% increase of the playback rate when buffer is full
-const PLAYBACK_RATE_MAX_FLOOR = 108; // Minimum possible value for maxRate, 108 means min 8% increase of the playback rate when buffer is full
 
-const PLAYBACK_RATE_MIN_CEIL = 92; // Maximum possible value for minRate 92 means min 8% decrease of the playback rate when buffer is low
 const PLAYBACK_RATE_MIN = 84; // Default minRate, 84 means max 16% decrease of the playback rate when buffer is low
+
+const STALL_CHECK_MS = 250; // period of the silent-freeze detector (see stallRecovery)
+const STALL_FROZEN_RATIO = 0.1; // a check is "frozen" if the playhead advanced < this × real-time (near-stopped)
+const STALL_FREEZE_TICKS = 4; // consecutive frozen checks (≈1s) before treating it as a real silent freeze
+const STALL_RECOVERED_SPEED = 0.9; // playbackSpeed (× real-time) treated as "recovered" after a freeze
+const STALL_CATCHUP_SPEED = 1.2; // above this, playbackSpeed is a goLive catch-up spike, not steady recovery
+const STALL_STABLE_TICKS = 2; // consecutive normal-speed checks required to leave recovery (ignore catch-up spikes)
+const RATE_SETTLE_TICKS = 6; // after a playbackRate change, skip freeze detection for ≈1.5s — decoders slow transiently on a rate change
 
 const root = typeof window !== 'undefined' ? window : global;
 
@@ -192,6 +199,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * Event fired when a silent freeze is detected (currentTime stops advancing while playing, with no
+     * `waiting`/`pause` and no stall counted — e.g. Safari/PlayReady choking on playbackRate > 1). Only
+     * emitted while {@link stallRecovery} is enabled.
+     * @param bufferMs the buffered-ahead amount just before the freeze — a buffer controller can learn from it
+     * @event
+     */
+    onFreeze(bufferMs: number) {
+        this.log(`Playback freeze at ${bufferMs}ms`).warn();
+    }
+
+    /**
      * @override
      * {@inheritDoc IPlaying.onAudioSkipping}
      * @event
@@ -248,6 +266,58 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     get running(): boolean {
         return this._timeout ? true : false;
+    }
+
+    /**
+     * Enable detection and recovery of *silent* freezes: playback where `currentTime` stops advancing while
+     * playing, with no `waiting`/`pause` event and nothing counted as a stall (typically Safari or PlayReady
+     * choking on `playbackRate > 1`). While enabled, a timer watches `currentTime`; on a freeze it drops the
+     * rate to 1x and holds it (no acceleration) until {@link playbackSpeed} recovers, and fires {@link onFreeze}.
+     * Off by default. Usually enabled indirectly through {@link dynamicBuffer}.
+     */
+    get stallRecovery(): boolean {
+        return this._stallRecovery;
+    }
+    set stallRecovery(value: boolean) {
+        if (this._stallRecovery === value) {
+            return;
+        }
+        this._stallRecovery = value;
+        clearInterval(this._stallTimer);
+        this._stallTimer = undefined;
+        this._recovering = false;
+        this._recoverHealthy = 0;
+        this._settleTicks = 0;
+        this._wallBuffer = Infinity;
+        this._frozenTicks = 0;
+        this._recoverPrevTime = undefined;
+        this._played = false;
+        if (value) {
+            this._stallTimer = setInterval(() => this._checkStall(), STALL_CHECK_MS);
+        }
+    }
+
+    /**
+     * Enable the experimental {@link DynamicBuffer}: it tunes {@link bufferLimitHigh} at runtime to converge on
+     * the lowest stable latency for this device/network (and turns {@link stallRecovery} on). Off by default.
+     */
+    get dynamicBuffer(): boolean {
+        return this._dynamicBuffer?.enabled ?? false;
+    }
+    set dynamicBuffer(value: boolean) {
+        if (value) {
+            (this._dynamicBuffer ??= new DynamicBuffer(this)).enable();
+        } else {
+            this._dynamicBuffer?.disable();
+        }
+    }
+
+    /**
+     * Re-baseline the {@link dynamicBuffer} to the current {@link bufferLimitHigh} and clear its learned state.
+     * Call after changing the buffer limits so it doesn't fight or undo that change.
+     */
+    resetDynamicBuffer() {
+        this._dynamicBuffer?.reset();
     }
 
     /**
@@ -662,6 +732,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _passthroughCMAF?: boolean;
     private _previousBufferAmount: number;
     private _stallCount: number = 0;
+    private _stallRecovery = false; // opt-in silent-freeze detection + recovery (see stallRecovery)
+    private _stallTimer?: ReturnType<typeof setInterval>;
+    private _dynamicBuffer?: DynamicBuffer; // opt-in runtime buffer-target tuning (see dynamicBuffer)
+    private _recovering = false; // in a freeze recovery: hold rate at 1x, don't accelerate until speed is back
+    private _recoverHealthy = 0; // consecutive normal-speed ticks during recovery (leave recovery at STALL_STABLE_TICKS)
+    private _settleTicks = 0; // freeze-detection grace ticks after a playbackRate change (decoders slow transiently)
+    private _wallBuffer = Infinity; // running-min buffered-ahead while draining under acceleration — the wall
+    private _recoverPrevTime?: number; // currentTime at the previous stall-timer tick
+    private _frozenTicks = 0; // consecutive frozen stall-timer ticks
+    private _played = false; // has playback reached ~normal speed at least once? (arms stall detection past the ramp)
 
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
@@ -954,6 +1034,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         );
 
         this._video.src = window.URL.createObjectURL(this._mediaSource);
+
+        // Re-arm the stall detector if it was left enabled across a restart.
+        if (this._stallRecovery && !this._stallTimer) {
+            this._stallTimer = setInterval(() => this._checkStall(), STALL_CHECK_MS);
+        }
     }
 
     /**
@@ -967,6 +1052,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
         clearTimeout(this._timeout.id);
         this._timeout = undefined;
+        // stop the stall detector (keep _stallRecovery so a restart re-arms it)
+        clearInterval(this._stallTimer);
+        this._stallTimer = undefined;
+        this._recovering = false;
+        this._recoverHealthy = 0;
+        this._settleTicks = 0;
+        this._wallBuffer = Infinity;
+        this._frozenTicks = 0;
+        this._recoverPrevTime = undefined;
+        this._played = false;
 
         // abort events!
         this._controller.abort();
@@ -1100,8 +1195,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * Adjust playback rate according to buffer state to avoid buffer overrun or underrun
      *
-     * The minimum increase playback rate is 108% (1.08x), you can disable increase by setting maxRate to 100 or less,
-     * and the maximum decrease playback rate is 92% (0.92x), you can disable decrease by setting minRate to 100 or more.
+     * Acceleration ramps proportionally from 1x at bufferLimitMiddle to maxRate at bufferLimitHigh, so it tends the
+     * buffer toward the middle target (not merely above high); set maxRate to 100 or less to disable increase.
+     * The maximum decrease playback rate is 92% (0.92x), you can disable decrease by setting minRate to 100 or more.
      *
      * Disabling increase can be useful with hardware decoding issues but note that this affects the ability of the player to catch up the live point after a congestion.
      * Be careful when disabling decrease because it can increase the risk of stall when the network condition worsen.
@@ -1109,46 +1205,35 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Note: Intended to be called from {@link onBufferChange}
      *
      * @param minRate minimum playback rate in percentage, default to 84 (0.84x), if more than 92 it will be forced to 92
-     * @param maxRate maximum playback rate in percentage, default to 116 (1.16x), if less than 108 it will be forced to 108
+     * @param maxRate maximum playback rate in percentage, default to 116 (1.16x); set to 100 or less to disable acceleration
      */
     adjustPlaybackRate(minRate = PLAYBACK_RATE_MIN, maxRate = PLAYBACK_RATE_MAX) {
-        // We save the playbackRate before to change it to be able to log only if there is a real change
-        // Indeed when assiging video.playbackRate sometimes the value is not really changed because the browser can decide to ignore it
-        const playbackRate = this._video.playbackRate;
-        if (this.bufferState === BufferState.HIGH && maxRate > 100) {
-            if (maxRate < PLAYBACK_RATE_MAX_FLOOR) {
-                // Force maxRate to respect the minimum threshold to avoid too small increase that can cause more harm than good
-                maxRate = PLAYBACK_RATE_MAX_FLOOR;
-            }
-            // Increase playback rate linearly (by default between [1.08,1.16]),
-            // reaches the max when bufferAmount > bufferLimitHigh + (bufferLimitHigh - bufferLimitMiddle)
-            const ratio =
-                Math.max(0, this.bufferAmount - this.bufferLimitHigh) /
-                Math.max(1, 2 * (this.bufferLimitHigh - this.bufferLimitMiddle));
-            this._video.playbackRate = Math.max(
-                this._video.playbackRate,
-                Math.round(PLAYBACK_RATE_MAX_FLOOR + (maxRate - PLAYBACK_RATE_MAX_FLOOR) * Math.min(ratio, 1)) / 100
-            );
+        // Coarse, held rate: pick one of three levels from the buffer state and change it as rarely as possible.
+        // Some decoders (Safari, PlayReady) briefly stall on EVERY playbackRate change, so a multi-step ramp
+        // stutters constantly — a single step held across the whole HIGH (or LOW) episode does not. The buffer
+        // state has hysteresis (HIGH persists down to middle, LOW up to middle), so the rate flips rarely.
+        let rate = 1;
+        if (this.bufferState === BufferState.HIGH && maxRate > 100 && !this._recovering) {
+            rate = maxRate / 100; // accelerate to catch up while the buffer is above bufferLimitHigh
         } else if (this.bufferState === BufferState.LOW && minRate < 100) {
-            if (minRate > PLAYBACK_RATE_MIN_CEIL) {
-                // Force minRate to respect the maximum threshold to avoid too small decrease that can cause more harm than good
-                minRate = PLAYBACK_RATE_MIN_CEIL;
-            }
-            // Decrease playback rate linearly (by default between [0.92,0.84]),
-            // reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow)
-            const ratio =
-                Math.max(0, this.bufferLimitMiddle - this.bufferAmount) /
-                Math.max(1, 2 * (this.bufferLimitMiddle - this.bufferLimitLow));
-            this._video.playbackRate = Math.min(
-                Math.round(PLAYBACK_RATE_MIN_CEIL - (PLAYBACK_RATE_MIN_CEIL - minRate) * Math.min(ratio, 1)) / 100,
-                this._video.playbackRate
-            );
-        } else {
-            this._video.playbackRate = 1;
+            rate = minRate / 100; // decelerate to build buffer while it is below bufferLimitLow
         }
-        if (playbackRate !== this._video.playbackRate) {
-            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
+        this._setRate(rate);
+    }
+
+    /**
+     * Set the playback rate (logged only on a real change) and open a settle window during which freeze
+     * detection is paused — decoders slow down transiently right after a rate change, and that dip must not
+     * be mistaken for a freeze.
+     */
+    private _setRate(rate: number) {
+        rate = Math.round(rate * 100) / 100;
+        if (Math.abs(this._video.playbackRate - rate) < 0.001) {
+            return;
         }
+        this._video.playbackRate = rate;
+        this._settleTicks = RATE_SETTLE_TICKS;
+        this.log(`Adapt playback rate to ${rate}`).info();
     }
 
     private _setBufferState(state: BufferState) {
@@ -1234,6 +1319,64 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._onTimeUpdate();
     }
 
+    private _checkStall() {
+        if (!this.running || this._paused || this._buffering) {
+            this._recoverPrevTime = undefined;
+            this._frozenTicks = 0;
+            return;
+        }
+        if (this._settleTicks > 0) {
+            // A playback-rate change just happened; skip detection so the transient decoder slowdown that
+            // follows a rate change isn't mistaken for a freeze.
+            this._settleTicks--;
+            this._recoverPrevTime = this._video.currentTime;
+            this._frozenTicks = 0;
+            return;
+        }
+        const t = this._video.currentTime;
+        const prev = this._recoverPrevTime;
+        this._recoverPrevTime = t;
+        if (prev == null) {
+            return; // need two samples to measure progress
+        }
+        const progress = t - prev;
+        const expected = STALL_CHECK_MS / 1000;
+        // Arm the detector only once playback has reached ~normal speed at least once. The startup ramp (and
+        // the ramp right after a seek) plays slow before hitting 1x and must not be mistaken for a wall.
+        if (progress >= expected * STALL_RECOVERED_SPEED) {
+            this._played = true;
+        }
+        // Frozen = playhead barely advanced (near-stopped) this tick. Only a REAL silent freeze — sustained
+        // for STALL_FREEZE_TICKS (≈1s) — triggers recovery; a brief dip (e.g. the sawtooth as the buffer runs
+        // low) is left to the normal stall machinery so we don't over-react to it.
+        const frozen = this._played && progress < expected * STALL_FROZEN_RATIO;
+        if (frozen) {
+            if (++this._frozenTicks === STALL_FREEZE_TICKS) {
+                // Sustained silent freeze. Drop to 1x and hold until stable — NO seek (a goLive just re-triggers
+                // it and thrashes) — and report it so the buffer target can grow above it.
+                this._recovering = true;
+                this._recoverHealthy = 0;
+                this._setRate(1);
+                this.log('Silent freeze: hold 1x until stable').warn();
+                this.onFreeze(Math.round(Number.isFinite(this._wallBuffer) ? this._wallBuffer : this.bufferAmount));
+            }
+        } else {
+            this._frozenTicks = 0;
+            // Leave recovery only after playback holds ~normal speed for a couple of ticks, so we don't resume
+            // accelerating straight into another freeze.
+            if (this._recovering) {
+                const speed = this.playbackSpeed;
+                if (speed >= STALL_RECOVERED_SPEED && speed <= STALL_CATCHUP_SPEED) {
+                    if (++this._recoverHealthy >= STALL_STABLE_TICKS) {
+                        this._recovering = false;
+                    }
+                } else {
+                    this._recoverHealthy = 0;
+                }
+            }
+        }
+    }
+
     private _onTimeUpdate() {
         if (!this._playback || !this._source) {
             // 'timeupdate' event can happen BEFORE source ready, wait a real information coming from source
@@ -1245,6 +1388,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._playbackSpeed.addBytes((currentTime - this._playbackPrevTime) * 100);
         }
         this._playbackPrevTime = currentTime;
+
+        // Track the wall = the low-water the buffer drains to under acceleration, measured PER acceleration
+        // episode: reset at rate 1, take the running minimum while accelerating. So each freeze reports how low
+        // THIS drain actually got — not an all-time minimum that sticks low forever, nor a freeze-inflated value.
+        if (this._recovering) {
+            // freeze in progress: the buffer is inflated, keep the pre-freeze low-water to report
+        } else if (this._video.playbackRate > 1.001) {
+            this._wallBuffer = Math.min(this._wallBuffer, this.bufferAmount);
+        } else {
+            this._wallBuffer = Infinity;
+        }
 
         if (this._bufferState === BufferState.NONE && this._buffering) {
             // Wait end of the first buffering before to update buffer state!
