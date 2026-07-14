@@ -38,7 +38,7 @@ export { Player, PlayerError } from './src/Player';
 export { DynamicBuffer } from './src/DynamicBuffer';
 
 // UI helpers
-export { UITimeline, UITimelineAxis, UITimelineTrackType } from './src/UITimeline';
+export { UITimeline, UITimelineAxis } from './src/UITimeline';
 
 const __lib__version__ = '?'; // will be replaced on building by project version
 

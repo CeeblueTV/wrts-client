@@ -30,9 +30,6 @@ const NAV_LINGER = 1400;
 const OV_H = 16;
 const OV_GAP = 6;
 
-/** Media kind of a timeline row. */
-export type UITimelineTrackType = 'video' | 'audio' | 'data';
-
 /** Time axis used to position sequences. */
 export type UITimelineAxis = 'media' | 'reception';
 
@@ -63,7 +60,7 @@ type Sequence = {
 
 type Row = {
     id: number;
-    type: UITimelineTrackType;
+    type: Media.Type;
     color: string;
     seqs: Sequence[];
     cur?: Sequence;
@@ -245,17 +242,17 @@ export class UITimeline {
 
     /** Ingest a received video sample (a new sequence starts at every keyframe). */
     pushVideo(track: number, sample: Media.Sample) {
-        this._push('video', track, sample);
+        this._push(Media.Type.VIDEO, track, sample);
     }
 
     /** Ingest a received audio sample (grouped under the current video sequence). */
     pushAudio(track: number, sample: Media.Sample) {
-        this._push('audio', track, sample);
+        this._push(Media.Type.AUDIO, track, sample);
     }
 
     /** Ingest a received data sample (grouped under the current video sequence). */
     pushData(track: number, sample: Media.Sample) {
-        this._push('data', track, sample);
+        this._push(Media.Type.DATA, track, sample);
     }
 
     /** Clear all accumulated sequences and reset the view to live. */
@@ -319,7 +316,7 @@ export class UITimeline {
         this._tip.remove();
     }
 
-    private _push(type: UITimelineTrackType, track: number, sample: Media.Sample) {
+    private _push(type: Media.Type, track: number, sample: Media.Sample) {
         if (!sample || sample.time == null) {
             return;
         }
@@ -345,7 +342,7 @@ export class UITimeline {
         const dur = sample.duration || 0;
         let n: number;
         let boundary: boolean;
-        if (type === 'video') {
+        if (type === Media.Type.VIDEO) {
             this._hasVideo = true;
             if (sample.isKeyFrame) {
                 ++this._videoSeq; // advance the shared sequence number on each GOP
@@ -416,8 +413,7 @@ export class UITimeline {
         const cssW = this._container.clientWidth || 600;
 
         if (!this._order) {
-            const rank = { video: 0, audio: 1, data: 2 };
-            this._order = [...this._rows.values()].sort((a, b) => rank[a.type] - rank[b.type] || a.id - b.id);
+            this._order = [...this._rows.values()].sort((a, b) => b.type - a.type || a.id - b.id);
         }
         const rows = this._order;
 
@@ -521,7 +517,7 @@ export class UITimeline {
             ctx.fillStyle = colTxt;
             ctx.textAlign = 'left';
             ctx.font = '600 11px sans-serif';
-            ctx.fillText(r.type.toUpperCase(), 11, y + 11);
+            ctx.fillText(Media.typeToString(r.type).toUpperCase(), 11, y + 11);
             ctx.globalAlpha = 0.6;
             ctx.font = '10px ui-monospace,monospace';
             ctx.fillText('#' + r.id, 11, y + 24);
