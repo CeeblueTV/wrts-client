@@ -1,6 +1,6 @@
 {
     "name": "@ceeblue/wrts-client",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "description": "Ceeblue WebRTS Client",
     "keywords": [
         "webrts",
@@ -27,7 +27,7 @@
         "build": "rollup -c",
         "build:cjs": "rollup -c --format cjs",
         "build:iife": "rollup -c --format iife",
-        "build:docs": "typedoc --tsconfig tsconfig.json index.ts",
+        "build:docs": "typedoc --options typedoc.json --tsconfig tsconfig.json index.ts",
         "watch": "rollup -c -w",
         "watch:cjs": "rollup -c -w --format cjs",
         "watch:iife": "rollup -c -w --format iife",
