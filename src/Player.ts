@@ -1193,25 +1193,25 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Adjust playback rate according to buffer state to avoid buffer overrun or underrun
+     * Adjust the playback rate from the buffer state to avoid buffer overrun or underrun.
      *
-     * Acceleration ramps proportionally from 1x at bufferLimitMiddle to maxRate at bufferLimitHigh, so it tends the
-     * buffer toward the middle target (not merely above high); set maxRate to 100 or less to disable increase.
-     * The maximum decrease playback rate is 92% (0.92x), you can disable decrease by setting minRate to 100 or more.
+     * The rate is not a continuous ramp: it is held at one of three fixed levels picked from the buffer state —
+     * `maxRate` while HIGH (accelerate to catch up), `minRate` while LOW (decelerate to build buffer), otherwise
+     * 1x. Because the buffer state has hysteresis, the rate flips only on a state transition, so it changes as
+     * rarely as possible — some decoders (Safari, PlayReady) briefly stall on every playbackRate change, and a
+     * multi-step ramp stutters constantly while a single held step does not.
      *
-     * Disabling increase can be useful with hardware decoding issues but note that this affects the ability of the player to catch up the live point after a congestion.
-     * Be careful when disabling decrease because it can increase the risk of stall when the network condition worsen.
+     * Disabling acceleration can help with hardware-decoding issues but hurts the ability to catch up the live
+     * point after a congestion. Be careful disabling deceleration: it raises the stall risk when the network worsens.
      *
      * Note: Intended to be called from {@link onBufferChange}
      *
-     * @param minRate minimum playback rate in percentage, default to 84 (0.84x), if more than 92 it will be forced to 92
-     * @param maxRate maximum playback rate in percentage, default to 116 (1.16x); set to 100 or less to disable acceleration
+     * @param minRate minimum playback rate in percent, default 84 (0.84x); set to 100 or more to disable deceleration
+     * @param maxRate maximum playback rate in percent, default 116 (1.16x); set to 100 or less to disable acceleration
      */
     adjustPlaybackRate(minRate = PLAYBACK_RATE_MIN, maxRate = PLAYBACK_RATE_MAX) {
-        // Coarse, held rate: pick one of three levels from the buffer state and change it as rarely as possible.
-        // Some decoders (Safari, PlayReady) briefly stall on EVERY playbackRate change, so a multi-step ramp
-        // stutters constantly — a single step held across the whole HIGH (or LOW) episode does not. The buffer
-        // state has hysteresis (HIGH persists down to middle, LOW up to middle), so the rate flips rarely.
+        // One of three fixed levels, held; the buffer-state hysteresis (HIGH persists down to middle, LOW up to
+        // middle) is what keeps the flips rare. See the doc-comment for why a ramp would stutter Safari/PlayReady.
         let rate = 1;
         if (this.bufferState === BufferState.HIGH && maxRate > 100 && !this._recovering) {
             rate = maxRate / 100; // accelerate to catch up while the buffer is above bufferLimitHigh

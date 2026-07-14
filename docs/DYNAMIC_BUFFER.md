@@ -1,9 +1,28 @@
 # Adaptive Playback Rate, Silent-Freeze Recovery & DynamicBuffer
 
-> **Status:** experimental, opt-in, currently uncommitted working-tree work on `feat/player-improvements`.
-> Off by default; turned on with `player.dynamicBuffer = true` (the `examples/player.html` "Dynamic Buffer"
-> toggle / `&dynamicBuffer` URL flag). This document is the design of record — read it before touching the
-> playback-rate, freeze-detection or buffer-tuning code in `src/Player.ts` / `src/DynamicBuffer.ts`.
+> **Status:** experimental, opt-in, off by default. Enable with `player.dynamicBuffer = true` (the
+> `examples/player.html` "Dynamic Buffer" toggle / `&dynamicBuffer` URL flag). Lives on
+> `feat/player-improvements` (PR targets `dev`). This document is the design of record — read it before
+> touching the playback-rate, freeze-detection or buffer-tuning code in `src/Player.ts` / `src/DynamicBuffer.ts`.
+
+## The algorithm in three rules
+
+What it concretely does, and the reasoning each rule encodes:
+
+1. **Shrink for latency only when stable at the top rendition.** The buffer target is probed *down* (SHRINK,
+   reclaiming latency) **only** while playback is at the highest rendition, the buffer is not `LOW`, playback is
+   keeping up, and it has stayed calm for `COMFORT_AFTER` ticks; any dip cancels the probe. At the top rendition
+   there is no higher quality to climb to, so spending headroom on latency is safe — below it, that headroom is
+   what MBR needs to switch up. (`DynamicBuffer._tick` → `_shrink`.)
+2. **Detect freezes via `playbackRate` vs `playbackSpeed`, and GROW.** A silent freeze (playhead near-stopped
+   while nominal `playbackRate > 1`) or the decoder failing to sustain the acceleration (`playbackSpeed <
+   playbackRate · KEEP_UP`) grows the target — as does a `LOW`/stall/MBR-down right after a shrink. Every grow
+   locks a floor a later shrink can't cross. Growth is self-limiting: a wider band oscillates slower, so the
+   dips stop and growth stops. (`Player._checkStall` → `onFreeze`; `DynamicBuffer._growHigh`.)
+3. **Change `playbackRate` as rarely as possible.** The rate is *held* at one of three fixed levels —
+   accelerate in `HIGH`, decelerate in `LOW`, otherwise `1×` — flipped only on a buffer-state transition, never a per-tick ramp.
+   Safari and PlayReady hiccup on *every* rate change, so each change avoided is a stutter avoided.
+   (`Player.adjustPlaybackRate` → `_setRate`.)
 
 ## 1. The problem
 
@@ -40,7 +59,7 @@ Two responsibilities, both gated by the opt-in `Player.stallRecovery` flag (whic
 
 ### Player (`src/Player.ts`) — playback rate & freeze detection
 
-- **Coarse, held rate** (`adjustPlaybackRate` → `_setRate`): three discrete levels chosen from the buffer
+- **Held, three-level rate** (`adjustPlaybackRate` → `_setRate`): three fixed levels chosen from the buffer
   state — `maxRate` in `HIGH`, `minRate` in `LOW`, else `1×`. Because the buffer state has hysteresis (`HIGH`
   persists down to `middle`, `LOW` up to `middle`), the rate flips **only on state transitions**, never a
   per-tick ramp. This is the core fix: change the rate as rarely as possible.
@@ -111,7 +130,7 @@ If Safari grows too far (latency too high) or not enough (still stutters), the d
 ## 6. Dead-ends we already tried (do not repeat)
 
 - **Tend-to-middle** (accelerate whenever `buffer > middle`, proportional ramp): constant rate changes → constant
-  hiccups on Safari/PlayReady → runaway. Reverted to coarse accelerate-in-HIGH.
+  hiccups on Safari/PlayReady → runaway. Reverted to a single held accelerate-in-`HIGH` level.
 - **GROW on every freeze from the instantaneous buffer**: freeze-inflated buffer read as an ever-higher "wall" →
   ratchet to the 5 s cap. Fixed by the strict detector + not treating inflation as a wall.
 - **`goLive('reclaim')` / `goLive('recover stall')`**: produced a goLive-every-2 s sawtooth with `speed 0.01`
@@ -135,4 +154,4 @@ If Safari grows too far (latency too high) or not enough (still stutters), the d
 - **Audit the MSE `Force onUpdate` flush** (`MediaBuffer`/`CMAFWriter`): the frequent flush-on-event may compound
   decoder hiccups. Do it on this stable baseline, one change at a time.
 - Optionally make the rate **probe back up** after a sustained calm (currently a freeze-capped decoder just holds).
-- Commit the feature once validated (conventional-commit; PR targets `dev`).
+- Open the PR (conventional-commit; PR targets `dev`) once validated across engines.

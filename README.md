@@ -17,7 +17,7 @@
 <h1 align="center">
   Ceeblue WebRTS Client
 </h1>
-<h4 align="center"><a href="./WEBRTS.md">Web Real-Time Streaming</a> (WebRTS) is a transport-agnostic framework designed to enable live streaming over the web with minimal latency.</h4>
+<h4 align="center"><a href="./docs/WEBRTS.md">Web Real-Time Streaming</a> (WebRTS) is a transport-agnostic framework designed to enable live streaming over the web with minimal latency.</h4>
 <p align="center">
   <a href="https://npmjs.org/package/@ceeblue/wrts-client"><img src="https://img.shields.io/npm/v/@ceeblue/wrts-client.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@ceeblue/wrts-client"><img src="https://img.shields.io/npm/dm/@ceeblue/wrts-client.svg" alt="npm downloads"></a>
