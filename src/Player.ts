@@ -273,7 +273,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * playing, with no `waiting`/`pause` event and nothing counted as a stall (typically Safari or PlayReady
      * choking on `playbackRate > 1`). While enabled, a timer watches `currentTime`; on a freeze it drops the
      * rate to 1x and holds it (no acceleration) until {@link playbackSpeed} recovers, and fires {@link onFreeze}.
-     * Off by default. Usually enabled indirectly through {@link dynamicBuffer}.
+     * Off by default. Usually enabled indirectly by handing {@link bufferLimitHigh} to auto-tuning (setting
+     * it to `undefined`).
      */
     get stallRecovery(): boolean {
         return this._stallRecovery;
@@ -295,29 +296,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (value) {
             this._stallTimer = setInterval(() => this._checkStall(), STALL_CHECK_MS);
         }
-    }
-
-    /**
-     * Enable the experimental {@link DynamicBuffer}: it tunes {@link bufferLimitHigh} at runtime to converge on
-     * the lowest stable latency for this device/network (and turns {@link stallRecovery} on). Off by default.
-     */
-    get dynamicBuffer(): boolean {
-        return this._dynamicBuffer?.enabled ?? false;
-    }
-    set dynamicBuffer(value: boolean) {
-        if (value) {
-            (this._dynamicBuffer ??= new DynamicBuffer(this)).enable();
-        } else {
-            this._dynamicBuffer?.disable();
-        }
-    }
-
-    /**
-     * Re-baseline the {@link dynamicBuffer} to the current {@link bufferLimitHigh} and clear its learned state.
-     * Call after changing the buffer limits so it doesn't fight or undo that change.
-     */
-    resetDynamicBuffer() {
-        this._dynamicBuffer?.reset();
     }
 
     /**
@@ -419,8 +397,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     set bufferLimitLow(value: number) {
         this._bufferLimitLow = value;
-        // to fix bufferLimitHigh and update _bufferLimitMiddle
-        this.bufferLimitHigh = Math.max(value, this._bufferLimitHigh);
+        // re-fix the high threshold and slide the middle, without toggling auto-tuning
+        this._applyBufferLimitHigh(Math.max(value, this._bufferLimitHigh));
     }
 
     /**
@@ -440,9 +418,34 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Set the high-buffer threshold for {@link BufferState.HIGH} in milliseconds
+     * Set the high-buffer threshold for {@link BufferState.HIGH}, in milliseconds — or `undefined` to let the
+     * experimental {@link DynamicBuffer} auto-tune it at runtime toward the lowest stable latency this
+     * device/network allows (this also turns {@link stallRecovery} on). A concrete value pins the threshold and
+     * stops auto-tuning; `undefined` (re)starts it, re-baselining if it is already running — mirroring how
+     * setting {@link videoTrack}/{@link audioTrack} disables MBR and `undefined` re-enables it. The getter
+     * always returns the current effective value.
      */
-    set bufferLimitHigh(value: number) {
+    set bufferLimitHigh(value: number | undefined) {
+        if (value == null) {
+            // Hand the target to DynamicBuffer (auto-tune); re-baseline it if it is already running.
+            const dynamicBuffer = (this._dynamicBuffer ??= new DynamicBuffer(this, ms => this._applyBufferLimitHigh(ms)));
+            if (dynamicBuffer.enabled) {
+                dynamicBuffer.reset();
+            } else {
+                dynamicBuffer.enable();
+            }
+            return;
+        }
+        // A concrete value pins the threshold and stops auto-tuning (mirrors videoTrack/MBR).
+        this._dynamicBuffer?.disable();
+        this._applyBufferLimitHigh(value);
+    }
+
+    /**
+     * Apply a concrete high threshold and slide the low/middle thresholds, without touching auto-tuning.
+     * Shared by the {@link bufferLimitHigh} value path, {@link bufferLimitLow} and {@link DynamicBuffer}.
+     */
+    private _applyBufferLimitHigh(value: number) {
         this._bufferLimitHigh = value;
         this._bufferLimitLow = Math.min(value, this._bufferLimitLow);
         this._bufferLimitMiddle = Math.max(0, this._bufferLimitLow + Math.round((value - this._bufferLimitLow) / 2));
@@ -771,7 +774,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._playbackSpeed = new ByteRate();
         this._bufferLimitMiddle = 0;
         this._bufferLimitLow = BUFFER_LIMIT_LOW;
-        this.bufferLimitHigh = this._bufferLimitHigh = BUFFER_LIMIT_HIGH; // update _bufferLimitMiddle, see bufferLimitHigh setter
+        this._bufferLimitHigh = BUFFER_LIMIT_HIGH;
+        this._applyBufferLimitHigh(this._bufferLimitHigh); // slide _bufferLimitMiddle to match the thresholds
         // Set buffer as OK at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();

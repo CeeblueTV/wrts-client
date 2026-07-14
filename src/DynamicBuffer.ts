@@ -31,8 +31,9 @@ const MAX_HIGH_MS = 5000; // hard ceiling for bufferLimitHigh
  * WALL_MARGIN}); and — the subtle one — when playback stops *keeping up* with the acceleration (the decoder
  * slows on each rate toggle, so a too-tight band sawtooths with a poor experience even though nothing counts
  * as a stall), grown more gently (×{@link GROW_STEP}) until the oscillation is slow enough to run smooth.
- * Decoders that keep up (e.g. Chrome) never hit that path and just shrink to low latency. Enabled via
- * {@link Player.stallRecovery}. {@link Player.bufferLimitLow} is left untouched — it is the MBR down-trigger.
+ * Decoders that keep up (e.g. Chrome) never hit that path and just shrink to low latency. Turned on by
+ * setting {@link Player.bufferLimitHigh} to `undefined` (which also enables {@link Player.stallRecovery});
+ * {@link Player.bufferLimitLow} is left untouched — it is the MBR down-trigger.
  *
  * Disabled until {@link enable} is called; every change is logged.
  */
@@ -48,7 +49,11 @@ export class DynamicBuffer extends Loggable {
     private _shrunk = false; // did we shrink since the last failure? gates whether a failure means "too low"
     private readonly _shrinkRetry = new AdaptiveRetry({ learningTryStep: 10000, maximumTryDelay: 60000 });
 
-    constructor(private _player: Player) {
+    constructor(
+        private _player: Player,
+        // Writes the tuned high threshold and slides low/middle, without toggling auto-mode.
+        private _writeHigh: (highMs: number) => void
+    ) {
         super();
         // Common "DynamicBuffer:" prefix on every log (including the shrink retry) so they are easy to filter.
         this.log = this.log.bind(this, 'DynamicBuffer:') as ILog;
@@ -95,9 +100,8 @@ export class DynamicBuffer extends Loggable {
         this._controller?.abort();
         this._controller = undefined;
         this._player.stallRecovery = false;
-        // Restore the configured value on the way out so a toggle-off leaves no residue.
-        this._player.bufferLimitHigh = this._baseHigh;
-        this.log(`disabled (restored bufferLimitHigh=${this._baseHigh}ms)`).info();
+        // Leave bufferLimitHigh where it is: disabling always follows a concrete value the caller is applying.
+        this.log('disabled').info();
     }
 
     /**
@@ -161,7 +165,7 @@ export class DynamicBuffer extends Loggable {
         if (targetHigh <= p.bufferLimitHigh) {
             return; // already at the ceiling
         }
-        p.bufferLimitHigh = targetHigh;
+        this._writeHigh(targetHigh);
         this._floorHigh = Math.max(this._floorHigh, p.bufferLimitHigh);
         this.log(`${reason} → GROW bufferLimitHigh=${p.bufferLimitHigh}ms (middle=${p.bufferLimitMiddle}ms)`).warn();
     }
@@ -177,7 +181,7 @@ export class DynamicBuffer extends Loggable {
             return; // already at the floor
         }
         this._shrunk = true; // a later failure now means "we probed too low"
-        p.bufferLimitHigh = next;
+        this._writeHigh(next);
         this.log(
             `SHRINK bufferLimitHigh=${next}ms (middle=${p.bufferLimitMiddle}ms, floor=${floor}ms), sustained all-clear`
         ).info();

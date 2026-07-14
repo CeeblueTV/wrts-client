@@ -1,9 +1,11 @@
 # Adaptive Playback Rate, Silent-Freeze Recovery & DynamicBuffer
 
-> **Status:** experimental, opt-in, off by default. Enable with `player.dynamicBuffer = true` (the
-> `examples/player.html` "Dynamic Buffer" toggle / `&dynamicBuffer` URL flag). Lives on
-> `feat/player-improvements` (PR targets `dev`). This document is the design of record — read it before
-> touching the playback-rate, freeze-detection or buffer-tuning code in `src/Player.ts` / `src/DynamicBuffer.ts`.
+> **Status:** experimental, opt-in, off by default. Enable by setting `player.bufferLimitHigh = undefined`
+> (the `examples/player.html` "Dynamic Buffer" toggle / `&dynamicBuffer` URL flag); a concrete
+> `player.bufferLimitHigh = <ms>` turns it back off — mirroring how `videoTrack`/`audioTrack` toggle MBR.
+> Lives on `feat/player-improvements` (PR targets `dev`). This document is the design of record — read it
+> before touching the playback-rate, freeze-detection or buffer-tuning code in `src/Player.ts` /
+> `src/DynamicBuffer.ts`.
 
 ## The algorithm in three rules
 
@@ -55,7 +57,7 @@ The decode itself is fine at `1.16×` above a healthy buffer — the pain is the
 
 ## 3. Architecture
 
-Two responsibilities, both gated by the opt-in `Player.stallRecovery` flag (which `dynamicBuffer` turns on).
+Two responsibilities, both gated by the opt-in `Player.stallRecovery` flag (auto-tuning enables it when `bufferLimitHigh` is set to `undefined`).
 
 ### Player (`src/Player.ts`) — playback rate & freeze detection
 
@@ -71,7 +73,8 @@ Two responsibilities, both gated by the opt-in `Player.stallRecovery` flag (whic
   drops to `1×`, holds `_recovering` until `playbackSpeed` is back in `[STALL_RECOVERED_SPEED, STALL_CATCHUP_SPEED]`
   for `STALL_STABLE_TICKS`, and fires **`onFreeze`**. **No `goLive`** in this path (a seek just re-triggers it
   and thrashes). A brief sawtooth dip is left to the normal stall machinery.
-- **Owns DynamicBuffer**: `player.dynamicBuffer = true/false` (lazily creates it), `player.resetDynamicBuffer()`.
+- **Owns DynamicBuffer**: `player.bufferLimitHigh = undefined` lazily creates and enables it (re-baselines if
+  already running); a concrete `player.bufferLimitHigh = <ms>` pins the target and turns it off.
 
 ### DynamicBuffer (`src/DynamicBuffer.ts`) — buffer-target tuning (AIMD)
 

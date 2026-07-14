@@ -1926,10 +1926,9 @@
                         }
                     };
 
-                    this.setBuffer(); // to set buffer size!
-                    // Optional runtime buffer-target tuning (off by default, toggled via the UI). The Player owns
-                    // it; enabling after setBuffer() lets its baseline capture the configured bufferLimitHigh.
-                    this.player.dynamicBuffer = this.dynamicBuffer;
+                    // setBuffer() applies the configured min/max and, if the Dynamic Buffer toggle is on, hands
+                    // bufferLimitHigh to auto-tuning (baselined at the configured value).
+                    this.setBuffer();
                     this.player.start(params, options.timeout);
                 },
                 onStart() {
@@ -1993,7 +1992,9 @@
                     this.streamMetadata = null;
 
                     if (this.player) {
-                        this.player.dynamicBuffer = false; // disable the owned tuner (stops its timer) before dropping
+                        // Pin the current target to a concrete value: this turns the owned auto-tuner off
+                        // (clearing its timer) before we drop the player.
+                        this.player.bufferLimitHigh = this.bufferMax;
                     }
                     this.player = null;
                     this.playState = PlayState.STOPPED;
@@ -2250,11 +2251,12 @@
                         this.bufferMin = (this.player.bufferLimitLow = this.bufferMin);
                         this.bufferMax = (this.player.bufferLimitHigh = this.bufferMax);
                     }
-                    // Remember the configured max (reference for the "changed" highlight) and re-baseline
-                    // DynamicBuffer to it, so a manual profile/value change is not fought or undone.
+                    // Remember the configured max (reference for the "changed" highlight).
                     this._userBufferMax = this.bufferMax;
-                    if (this.player) {
-                        this.player.resetDynamicBuffer();
+                    if (this.player && this.dynamicBuffer) {
+                        // Hand the target back to auto-tuning, baselined at the value just configured
+                        // (bufferLimitHigh = undefined enables/re-baselines DynamicBuffer).
+                        this.player.bufferLimitHigh = undefined;
                     }
 
                     // Display user description
@@ -2346,12 +2348,12 @@
                 onDynamicBuffer() {
                     if (this.player) {
                         if (this.dynamicBuffer) {
-                            this.rateOverride = 'auto'; // avoid the manual override fighting DynamicBuffer
-                            this.player.dynamicBuffer = true;
+                            this.rateOverride = 'auto'; // avoid the manual override fighting auto-tuning
+                            this.player.bufferLimitHigh = undefined; // hand the target to auto-tuning
                         } else {
-                            this.player.dynamicBuffer = false;
-                            // disabling restored bufferLimitHigh; reflect it so the input isn't left stale
-                            this.bufferMax = this.player.bufferLimitHigh;
+                            // A concrete value pins the target and turns auto-tuning off.
+                            this.player.bufferLimitHigh = this.bufferMax;
+                            this.bufferMax = this.player.bufferLimitHigh; // reflect the pinned value
                         }
                     }
                     this.updateURL();
