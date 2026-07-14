@@ -146,9 +146,10 @@ If Safari grows too far (latency too high) or not enough (still stutters), the d
 
 - Serve the repo (`npx http-server . -p 8081`) and open `examples/player.html` (append `?events` to log raw
   `<video>` media events). Add `&dynamicBuffer` to start with it on.
-- **Rate selector**: add `&playbackRate=auto` (or `&playbackRate=x1.06`, etc.) to the URL to reveal a selector
+- **Rate selector**: add `&playbackRate=auto` (or `&playbackRate=x1.08`, etc.) to the URL to reveal a selector
   (next to the Dynamic Buffer toggle, disabled while Dynamic Buffer is on) that forces a fixed `playbackRate` in
-  real time — for probing a decoder's tolerance by hand. Hidden unless that query param is present.
+  real time, stepping `0.84×`–`1.16×` in `0.04` increments — for probing a decoder's tolerance by hand (e.g.
+  the PlayReady hiccup on each change). Hidden unless that query param is present.
 - Watch the logs: `Adapt playback rate to …` (should be infrequent), `… → GROW …`, `SHRINK …`,
   `Silent freeze: hold 1x until stable` (should be rare), and the metrics overlay's buffer / speed / stalls.
 

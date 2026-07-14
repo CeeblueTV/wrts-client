@@ -890,12 +890,13 @@
                         title="Force a fixed playback rate in real time for testing (disable Dynamic Buffer to avoid conflicts)"
                         v-model="rateOverride" @change="onRateOverride()" :disabled="dynamicBuffer">
                         <option value="auto">Rate: auto</option>
+                        <option value="x0.84">Rate: 0.84×</option>
+                        <option value="x0.88">Rate: 0.88×</option>
+                        <option value="x0.92">Rate: 0.92×</option>
+                        <option value="x0.96">Rate: 0.96×</option>
                         <option value="x1">Rate: 1.00×</option>
-                        <option value="x1.02">Rate: 1.02×</option>
                         <option value="x1.04">Rate: 1.04×</option>
-                        <option value="x1.06">Rate: 1.06×</option>
                         <option value="x1.08">Rate: 1.08×</option>
-                        <option value="x1.10">Rate: 1.10×</option>
                         <option value="x1.12">Rate: 1.12×</option>
                         <option value="x1.16">Rate: 1.16×</option>
                     </select>
