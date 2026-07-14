@@ -523,6 +523,41 @@
 
             .tab-body { padding-top: 10px; }
 
+            /* ── Side-by-side layout: dock the graph/messages/timeline panel to the right of the video
+               on large screens (toggle in the tab bar). Bottom-docked by default. ── */
+            .layout-btn {
+                display: none;               /* only offered on wide screens */
+                margin-left: auto;           /* push to the right end of the tab bar */
+                align-self: center;
+                background: none; border: none;
+                color: var(--txt-m);
+                font-size: 14px;
+                padding: 4px 8px;
+                cursor: pointer;
+                transition: color var(--t);
+            }
+            .layout-btn:hover { color: var(--txt-2); }
+            .layout-btn.on { color: var(--accent); }
+
+            @media (min-width: 1200px) {
+                .layout-btn { display: inline-flex; align-items: center; }
+                html.layout-side .shell { max-width: 1600px; }
+                html.layout-side .stage {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                    column-gap: 18px;
+                    align-items: start;
+                }
+                /* video + controls stack in the left column; the panel fills the right one */
+                html.layout-side .stage > * { grid-column: 1; }
+                html.layout-side .stage > .stage-panel {
+                    grid-column: 2;
+                    grid-row: 1 / span 20;
+                    align-self: stretch;
+                    min-width: 0;
+                }
+            }
+
             /* ── Stats ── */
             .stats-list {
                 background: transparent;
@@ -770,7 +805,7 @@
                 </button>
             </header>
 
-            <div>
+            <div class="stage">
 
                 <!-- Video -->
                 <div class="player" ref="player"
@@ -937,8 +972,8 @@
                     <p class="net-desc" v-html="netDescription"></p>
                 </div>
 
-                <!-- Tabs -->
-                <div>
+                <!-- Panel: graph / messages / timeline (docks bottom by default, or right on wide screens) -->
+                <div class="stage-panel">
                     <div class="tab-bar">
                         <button class="tab-btn" :class="{ on: activeBottomTab === 'graph' }"
                             @click="selectBottomTab('graph')">Graph</button>
@@ -949,6 +984,11 @@
                         </button>
                         <button class="tab-btn" :class="{ on: activeBottomTab === 'timeline' }"
                             @click="selectBottomTab('timeline')">Timeline</button>
+                        <button class="layout-btn" :class="{ on: sidePanel }"
+                            :title="sidePanel ? 'Dock the panel to the bottom' : 'Dock the panel to the right (side-by-side)'"
+                            @click="toggleSidePanel()">
+                            <i class="fas fa-table-columns"></i>
+                        </button>
                     </div>
 
                     <div class="tab-body">
@@ -1368,6 +1408,7 @@
                     rateOverride: (typeof options.playbackRate === 'string' && options.playbackRate) || 'auto',
                     showRateOverride: options.playbackRate != null,
                     dynamicBuffer: options.dynamicBuffer ? true : false,
+                    sidePanel: options.sidePanel ? true : false, // dock the metrics panel to the right (large screens)
                     streamMetadata: null,
                     netDescription: "",
                     videoTracks: new Map(),
@@ -1431,6 +1472,8 @@
                 this.stream = options.stream || '';
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
                 this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
+                // Apply the initial side-by-side layout (from &sidePanel); the CSS only splits on wide screens.
+                document.documentElement.classList.toggle('layout-side', this.sidePanel);
 
                 // React to system theme changes
                 this._mql = matchMedia('(prefers-color-scheme: dark)');
@@ -1559,6 +1602,10 @@
                 // page behind the dialog stops scrolling while the settings modal is visible.
                 showSettings(value) {
                     document.body.classList.toggle('modal-open', value);
+                },
+                // Dock the metrics panel to the right (large screens) by flagging <html>; the CSS handles the split.
+                sidePanel(value) {
+                    document.documentElement.classList.toggle('layout-side', value);
                 }
             },
             methods: {
@@ -2045,6 +2092,10 @@
                         this.scrollMessagesToBottom();
                     }
                 },
+                toggleSidePanel() {
+                    this.sidePanel = !this.sidePanel; // the sidePanel watcher flags <html> for the CSS split
+                    this.updateURL();
+                },
                 resetMessages() {
                     this.messages = [];
                     this.unreadMessages = 0;
@@ -2314,6 +2365,9 @@
                         }
                         if(this.dynamicBuffer) {
                             path += "&dynamicBuffer";
+                        }
+                        if(this.sidePanel) {
+                            path += "&sidePanel";
                         }
                         if(options.debugoverlay) {
                             path += "&debugoverlay";
