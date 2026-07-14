@@ -25,7 +25,7 @@ const PLAYBACK_RATE_MAX = 116; // Default maxRate, 116 means max 16% increase of
 
 const PLAYBACK_RATE_MIN = 84; // Default minRate, 84 means max 16% decrease of the playback rate when buffer is low
 
-const STALL_CHECK_MS = 250; // period of the silent-freeze detector (see stallRecovery)
+const STALL_CHECK_MS = 250; // period of the always-on silent-freeze detector
 const STALL_FROZEN_RATIO = 0.1; // a check is "frozen" if the playhead advanced < this × real-time (near-stopped)
 const STALL_FREEZE_TICKS = 4; // consecutive frozen checks (≈1s) before treating it as a real silent freeze
 const STALL_RECOVERED_SPEED = 0.9; // playbackSpeed (× real-time) treated as "recovered" after a freeze
@@ -200,8 +200,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Event fired when a silent freeze is detected (currentTime stops advancing while playing, with no
-     * `waiting`/`pause` and no stall counted — e.g. Safari/PlayReady choking on playbackRate > 1). Only
-     * emitted while {@link stallRecovery} is enabled.
+     * `waiting`/`pause` and no stall counted — e.g. Safari/PlayReady choking on playbackRate > 1). Detection
+     * runs whenever playing, so this fires regardless of {@link stallRecovery} (which only gates the recovery).
      * @param bufferMs the buffered-ahead amount just before the freeze — a buffer controller can learn from it
      * @event
      */
@@ -269,12 +269,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Enable detection and recovery of *silent* freezes: playback where `currentTime` stops advancing while
-     * playing, with no `waiting`/`pause` event and nothing counted as a stall (typically Safari or PlayReady
-     * choking on `playbackRate > 1`). While enabled, a timer watches `currentTime`; on a freeze it drops the
-     * rate to 1x and holds it (no acceleration) until {@link playbackSpeed} recovers, and fires {@link onFreeze}.
-     * Off by default. Usually enabled indirectly by handing {@link bufferLimitHigh} to auto-tuning (setting
-     * it to `undefined`).
+     * Recover from *silent* freezes: playback where `currentTime` stops advancing while playing, with no
+     * `waiting`/`pause` event and nothing counted as a stall (typically Safari or PlayReady choking on
+     * `playbackRate > 1`). Detection runs unconditionally while playing and always fires {@link onFreeze}; this
+     * flag only controls the *recovery*: when enabled, a detected freeze also drops the rate to 1x and holds it
+     * (no acceleration) until {@link playbackSpeed} recovers. Off by default (detection still runs). Usually
+     * enabled indirectly by handing {@link bufferLimitHigh} to auto-tuning (setting it to `undefined`).
      */
     get stallRecovery(): boolean {
         return this._stallRecovery;
@@ -284,17 +284,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             return;
         }
         this._stallRecovery = value;
-        clearInterval(this._stallTimer);
-        this._stallTimer = undefined;
-        this._recovering = false;
-        this._recoverHealthy = 0;
-        this._settleTicks = 0;
-        this._wallBuffer = Infinity;
-        this._frozenTicks = 0;
-        this._recoverPrevTime = undefined;
-        this._played = false;
-        if (value) {
-            this._stallTimer = setInterval(() => this._checkStall(), STALL_CHECK_MS);
+        // Detection runs regardless; this only gates recovery. If disabled mid-recovery, stop holding 1x so
+        // acceleration can resume.
+        if (!value) {
+            this._recovering = false;
+            this._recoverHealthy = 0;
         }
     }
 
@@ -735,7 +729,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _passthroughCMAF?: boolean;
     private _previousBufferAmount: number;
     private _stallCount: number = 0;
-    private _stallRecovery = false; // opt-in silent-freeze detection + recovery (see stallRecovery)
+    private _stallRecovery = false; // opt-in recovery on a detected freeze; detection itself is always on
     private _stallTimer?: ReturnType<typeof setInterval>;
     private _dynamicBuffer?: DynamicBuffer; // opt-in runtime buffer-target tuning (see dynamicBuffer)
     private _recovering = false; // in a freeze recovery: hold rate at 1x, don't accelerate until speed is back
@@ -1039,8 +1033,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
         this._video.src = window.URL.createObjectURL(this._mediaSource);
 
-        // Re-arm the stall detector if it was left enabled across a restart.
-        if (this._stallRecovery && !this._stallTimer) {
+        // Freeze detection runs whenever playing (recovery is gated separately by stallRecovery).
+        if (!this._stallTimer) {
             this._stallTimer = setInterval(() => this._checkStall(), STALL_CHECK_MS);
         }
     }
@@ -1056,7 +1050,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
         clearTimeout(this._timeout.id);
         this._timeout = undefined;
-        // stop the stall detector (keep _stallRecovery so a restart re-arms it)
+        // stop the freeze detector and reset its state for the next start (keep _stallRecovery)
         clearInterval(this._stallTimer);
         this._stallTimer = undefined;
         this._recovering = false;
@@ -1356,12 +1350,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         const frozen = this._played && progress < expected * STALL_FROZEN_RATIO;
         if (frozen) {
             if (++this._frozenTicks === STALL_FREEZE_TICKS) {
-                // Sustained silent freeze. Drop to 1x and hold until stable — NO seek (a goLive just re-triggers
-                // it and thrashes) — and report it so the buffer target can grow above it.
-                this._recovering = true;
-                this._recoverHealthy = 0;
-                this._setRate(1);
-                this.log('Silent freeze: hold 1x until stable').warn();
+                // Sustained silent freeze: always report it (drives onFreeze listeners and the freeze count).
+                // Recover only when enabled — drop to 1x and hold until stable, NO seek (a goLive just
+                // re-triggers it and thrashes). With recovery off (e.g. manual rate testing) leave the rate
+                // alone so the freeze can be observed.
+                if (this._stallRecovery) {
+                    this._recovering = true;
+                    this._recoverHealthy = 0;
+                    this._setRate(1);
+                    this.log('Silent freeze: hold 1x until stable').warn();
+                }
                 this.onFreeze(Math.round(Number.isFinite(this._wallBuffer) ? this._wallBuffer : this.bufferAmount));
             }
         } else {

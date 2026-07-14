@@ -57,7 +57,11 @@ The decode itself is fine at `1.16×` above a healthy buffer — the pain is the
 
 ## 3. Architecture
 
-Two responsibilities, both gated by the opt-in `Player.stallRecovery` flag (auto-tuning enables it when `bufferLimitHigh` is set to `undefined`).
+Freeze **detection** runs unconditionally while playing and always fires `onFreeze`; the opt-in
+`Player.stallRecovery` flag (auto-tuning enables it when `bufferLimitHigh` is set to `undefined`) gates only the
+**recovery** (drop-to-`1×`) and the buffer-tuning response. So a freeze is always reported — e.g. the example's
+freeze counter works even during manual rate testing — but the rate is only forced back to `1×` when recovery is
+on.
 
 ### Player (`src/Player.ts`) — playback rate & freeze detection
 
@@ -68,11 +72,12 @@ Two responsibilities, both gated by the opt-in `Player.stallRecovery` flag (auto
 - **Settle window** (`_settleTicks = RATE_SETTLE_TICKS`): after *any* `_setRate` change, freeze detection is
   paused for ~1.5 s, because the decoder slows transiently right after a rate change and that dip must not be
   read as a freeze.
-- **Strict silent-freeze detector** (`_checkStall`, a 250 ms timer): only a genuinely near-stopped playhead
-  (`< STALL_FROZEN_RATIO` of real-time) sustained for `STALL_FREEZE_TICKS` (~1 s) counts. On a real freeze it
-  drops to `1×`, holds `_recovering` until `playbackSpeed` is back in `[STALL_RECOVERED_SPEED, STALL_CATCHUP_SPEED]`
-  for `STALL_STABLE_TICKS`, and fires **`onFreeze`**. **No `goLive`** in this path (a seek just re-triggers it
-  and thrashes). A brief sawtooth dip is left to the normal stall machinery.
+- **Strict silent-freeze detector** (`_checkStall`, an always-on 250 ms timer): only a genuinely near-stopped
+  playhead (`< STALL_FROZEN_RATIO` of real-time) sustained for `STALL_FREEZE_TICKS` (~1 s) counts. On a real
+  freeze it always fires **`onFreeze`**; then, **only if `stallRecovery` is on**, it drops to `1×` and holds
+  `_recovering` until `playbackSpeed` is back in `[STALL_RECOVERED_SPEED, STALL_CATCHUP_SPEED]` for
+  `STALL_STABLE_TICKS`. **No `goLive`** in this path (a seek just re-triggers it and thrashes). A brief sawtooth
+  dip is left to the normal stall machinery.
 - **Owns DynamicBuffer**: `player.bufferLimitHigh = undefined` lazily creates and enables it (re-baselines if
   already running); a concrete `player.bufferLimitHigh = <ms>` pins the target and turns it off.
 

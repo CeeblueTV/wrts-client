@@ -1392,6 +1392,7 @@
                     times: new Array(),
                     hasMetrics:false,
                     deltaStats: {},
+                    freezeCount: 0,
                     uiStats: null,
                     player: null,
                     latencies: [],
@@ -1479,6 +1480,7 @@
                 const skippedAudio = []; this.stats.set("Skipped audio", skippedAudio);
                 const skippedVideo = []; this.stats.set("Skipped video", skippedVideo);
                 const stalls = []; this.stats.set("Stalls", stalls);
+                const freezes = []; this.stats.set("Freezes", freezes);
 
                 this.uiStats = new UIMetrics(this.$refs.stats);
 
@@ -1528,6 +1530,7 @@
                         skippedVideo.push((((stats.skippedVideo || 0) - (this.deltaStats.skippedVideo || 0)) /1000).toFixed(1)+"s");
 
                         stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
+                        freezes.push((this.freezeCount || 0) - (this.deltaStats.freezeCount || 0));
 
                         const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
                         if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
@@ -1894,6 +1897,11 @@
                     this.player.onStop = this.onStop.bind(this);
                     this.player.onTrackChange = this.onTrackChange.bind(this);
                     this.player.onMetadata = this.onMetadata.bind(this);
+                    // Count silent freezes. Detection is always on in the Player (recovery/drop-to-1x is gated by
+                    // Dynamic Buffer), so this counts freezes in manual rate testing too. Subscribe additively so
+                    // the Player's own freeze log still runs.
+                    this.freezeCount = 0;
+                    this.player.on('Freeze', () => { ++this.freezeCount; });
 
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
@@ -2119,7 +2127,7 @@
                     if (this.player) {
                         let playerStats = this.player.computeStats();
                         const {skippedAudio, skippedVideo, stallCount} = playerStats;
-                        this.deltaStats = { skippedAudio, skippedVideo, stallCount} ;
+                        this.deltaStats = { skippedAudio, skippedVideo, stallCount, freezeCount: this.freezeCount };
                     }
                     const displayableCount = all ? 0 : this.uiStats.displayableCount;
                     for(let [_, values] of this.stats) {
