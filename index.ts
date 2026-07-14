@@ -35,6 +35,11 @@ export { BufferState, IPlaying } from './src/sources/IPlaying';
 
 export { Player, PlayerError } from './src/Player';
 
+export { DynamicBuffer } from './src/DynamicBuffer';
+
+// UI helpers
+export { UITimeline, UITimelineAxis } from './src/UITimeline';
+
 const __lib__version__ = '?'; // will be replaced on building by project version
 
 export const VERSION: string = __lib__version__;

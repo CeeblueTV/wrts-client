@@ -6,401 +6,1157 @@
 -->
 <html lang="en">
     <head>
-        <title>Ceeblue WebRTS Player Example</title>
+        <title>Ceeblue WebRTS Player</title>
         <meta charset="utf-8">
-        <meta content="width=device-width, initial-scale=1.0" name="viewport">
+        <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport">
+        <meta name="color-scheme" content="light dark">
 
         <link rel="icon" href="./assets/ceeblue-logo-32x32.png" sizes="32x32">
         <link rel="icon" href="./assets/ceeblue-logo-192x192.png" sizes="192x192">
 
-        <link href="./css/bootstrap.css" rel="stylesheet">
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
         <link href="./css/solid.css" rel="stylesheet">
         <link href="./css/fontawesome.css" rel="stylesheet">
 
+        <script>
+            // Apply theme synchronously to avoid FOUC. Stored value is 'light' | 'dark'.
+            (function() {
+                console.log("localStorage theme:", localStorage.getItem('wrts-theme'));
+                console.log("prefers-color-scheme:", matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+
+                var stored = localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
+            })();
+        </script>
+
         <style>
+            /* ── Design tokens ── */
+            :root {
+                --accent:   #78b5bf;
+                --accent-b: #5e97a1;
+                --accent-d: rgba(120,181,191,.18);
+
+                --ok:   #28a745;
+                --warn: #e6a817;
+                --err:  #c0392b;
+
+                --r-sm:   6px;
+                --r-md:   12px;
+                --r-lg:   16px;
+                --r-pill: 999px;
+
+                --f-body: 'Poppins', system-ui, sans-serif;
+                --f-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+                --t: 160ms ease;
+            }
+
+            html[data-theme="light"] {
+                --bg:       #ffffff;
+                --bg-s:     #f4f7fb;
+                --bg-e:     #ebeff5;
+                --bg-h:     #dde4ee;
+                --border:   rgba(103,114,148,.18);
+                --border-s: rgba(103,114,148,.38);
+                --txt:      #3d4459;
+                --txt-2:    #677294;
+                --txt-m:    #9ba4bc;
+                --navy:     #051441;
+                --shadow:   0 4px 24px rgba(61,68,89,.10);
+                --shadow-modal: 0 24px 64px rgba(5,20,65,.18);
+                --modal-back: rgba(5,20,65,.35);
+            }
+
+            html[data-theme="dark"] {
+                --bg:       #0f1622;
+                --bg-s:     #161e2d;
+                --bg-e:     #1d2638;
+                --bg-h:     #283248;
+                --border:   rgba(255,255,255,.08);
+                --border-s: rgba(255,255,255,.18);
+                --txt:      #e7ecf3;
+                --txt-2:    #aab4c8;
+                --txt-m:    #6c7894;
+                --navy:     #ffffff;
+                --shadow:   0 4px 24px rgba(0,0,0,.45);
+                --shadow-modal: 0 24px 64px rgba(0,0,0,.6);
+                --modal-back: rgba(0,0,0,.55);
+            }
+
+            *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
             body {
-                margin-top: 1em;
-                margin-bottom: 3em;
-                background-color: #EDF0F3;
+                background: var(--bg);
+                color: var(--txt);
+                font-family: var(--f-body);
+                font-size: 13.5px;
+                line-height: 1.5;
+                min-height: 100vh;
+                -webkit-font-smoothing: antialiased;
             }
 
-            /* Force every .btn to fill its column so the controls row aligns nicely;
-               use the Bootstrap `w-auto` utility on buttons that shouldn't stretch. */
-            .btn {
-                width: 100%;
+            /* ── Shell ── */
+            .shell {
+                max-width: 960px;
+                margin: 0 auto;
+                padding: 14px 14px 48px;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
             }
 
-            video {
-                background-color: #333333;
-                max-width: 100%;
-                max-height: 60vh;
+            /* ── Header ── */
+            .hdr {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding-bottom: 12px;
+                border-bottom: 1px solid var(--border);
             }
-            video::-webkit-media-controls,
-            video::-webkit-media-controls-start-playback-button {
-                display: none !important;
+            .hdr img { height: 28px; }
+            .hdr h1 {
+                font-size: 15px;
+                font-weight: 600;
+                letter-spacing: .02em;
+                color: var(--navy);
+                flex: 1;
             }
+            .hdr h1 em { color: var(--accent); font-style: normal; }
 
-            /* Big circular play overlay shown when the <video> is paused mid-stream. */
-            .play-btn {
-                margin: 0;
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                width: 100px;
-                transform: translate(-50%, -50%);
-            }
-            .play-btn__svg {
-                fill: #ffffff;
-                opacity: 0.9;
-                transition: 400ms;
-            }
-            .play-btn:hover .play-btn__svg {
-                fill: #00ff0d;
-            }
-
-            /* Tab panel (Graph / Messages) at the bottom of the page. */
-            .tab-panel .nav-tabs {
-                border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-            }
-            .tab-panel .nav-link {
+            .theme-btn {
+                width: 32px; height: 32px;
+                border-radius: 50%;
+                border: 1px solid var(--border);
+                background: var(--bg-s);
+                color: var(--txt-2);
                 cursor: pointer;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 13px;
+                transition: all var(--t);
             }
-            .nav .nav-item .nav-link {
-                padding: 0.5rem 0.8rem;
-            }
-            .tab-panel-content {
+            .theme-btn:hover { color: var(--accent); border-color: var(--border-s); }
+
+            /* ── Video player ── */
+            .player {
                 position: relative;
-                min-height: 18rem;
-                padding-top: 0.75rem;
-            }
-            .tab-panel-pane {
+                background: #000;
+                aspect-ratio: 16/9;
+                /* Cap both height AND width so the box stays 16:9 even in short viewports,
+                   then center horizontally. Otherwise short viewports stretched the box
+                   wider than 16:9 and the video appeared offset inside the letterboxing. */
+                max-height: 60vh;
+                max-width: calc(60vh * 16 / 9);
                 width: 100%;
+                margin: 0 auto;
+                overflow: hidden;
+                display: flex; align-items: center; justify-content: center;
+                border: 1px solid var(--border);
+                box-shadow: var(--shadow);
             }
-            .tab-panel-pane.is-hidden {
-                visibility: hidden;
+            /* When fullscreened, drop the size caps. (WebKit/standard split — combining
+               them with a comma would invalidate the rule on older browsers.) */
+            .player:fullscreen { max-height: none; max-width: none; aspect-ratio: auto; }
+            .player:-webkit-full-screen { max-height: none; max-width: none; aspect-ratio: auto; }
+            .player video {
+                width: 100%; height: 100%;
+                object-fit: contain;
+                display: block;
+                background: #000;
+            }
+            .player video::-webkit-media-controls,
+            .player video::-webkit-media-controls-start-playback-button { display: none !important; }
+
+            /* Error banner (bottom of video) */
+            .player-alert {
+                position: absolute; bottom: 10px; left: 10px; right: 10px;
+                z-index: 12;
+                background: rgba(192,57,43,.94);
+                border-radius: var(--r-sm);
+                padding: 9px 10px 9px 12px;
+                font-size: 12.5px;
+                color: #fff;
+                display: flex; align-items: flex-start; gap: 10px;
+                box-shadow: 0 4px 14px rgba(0,0,0,.3);
+                max-height: 55%;
+                overflow-y: auto;
+                scrollbar-width: thin;
+                scrollbar-color: rgba(255,255,255,.35) transparent;
+            }
+            .player-alert > i.fa-exclamation-triangle {
+                flex-shrink: 0;
+                font-size: 14px;
+                margin-top: 2px;
+            }
+            .player-alert-body { flex: 1; min-width: 0; }
+            .player-alert-title {
+                display: flex; align-items: center; gap: 6px;
+                flex-wrap: wrap;
+                line-height: 1.35;
+            }
+            .player-alert-type {
+                font-family: var(--f-mono);
+                font-size: 9.5px; font-weight: 700;
+                text-transform: uppercase; letter-spacing: .08em;
+                padding: 1px 7px;
+                border-radius: var(--r-pill);
+                background: rgba(255,255,255,.22);
+                color: #fff;
+                white-space: nowrap;
+            }
+            .player-alert-name { font-weight: 600; }
+            .player-alert-detail {
+                margin-top: 3px;
+                color: rgba(255,255,255,.94);
+                word-break: break-word;
+                line-height: 1.45;
+            }
+            .player-alert-fields {
+                margin-top: 5px;
+                display: flex; flex-wrap: wrap;
+                gap: 3px 6px;
+                font-family: var(--f-mono); font-size: 11px;
+            }
+            .player-alert-field {
+                background: rgba(0,0,0,.22);
+                padding: 1px 7px;
+                border-radius: var(--r-pill);
+                color: rgba(255,255,255,.92);
+                word-break: break-all;
+            }
+            .player-alert-field strong {
+                font-weight: 600;
+                color: rgba(255,255,255,.65);
+                margin-right: 4px;
+            }
+            .player-alert-x {
+                flex-shrink: 0;
+                background: none; border: none;
+                color: rgba(255,255,255,.7);
+                cursor: pointer;
+                padding: 0 4px;
+                font-size: 13px;
+                line-height: 1;
+                transition: color var(--t);
+            }
+            .player-alert-x:hover { color: #fff; }
+
+            /* Centred big circular action — used for play / spinner / pause-resume */
+            .player-action {
+                position: absolute;
+                top: 50%; left: 50%;
+                transform: translate(-50%, -50%);
+                width: 84px; height: 84px;
+                border-radius: 50%;
+                display: flex; align-items: center; justify-content: center;
+                background: var(--accent);
+                color: #fff;
+                border: none;
+                cursor: pointer;
+                z-index: 8;
+                box-shadow: 0 10px 30px rgba(0,0,0,.45);
+                transition: transform 220ms ease, background var(--t);
+            }
+            .player-action:hover { background: var(--accent-b); transform: translate(-50%, -50%) scale(1.06); }
+            .player-action i { font-size: 32px; margin-left: 4px; }
+            .player-action.is-loading {
+                /* Tinted Ceeblue disc with a thick spinning rim so the state reads clearly */
+                background: rgba(120,181,191,.18);
+                backdrop-filter: blur(6px);
+                box-shadow: 0 10px 30px rgba(0,0,0,.45);
+                cursor: default;
                 pointer-events: none;
             }
-            .tab-panel-pane--overlay {
-                position: absolute;
-                inset: 0;
-                padding-top: 0.75rem;
+            .player-action.is-loading:hover { transform: translate(-50%, -50%); background: rgba(120,181,191,.18); }
+            .player-action .ring {
+                position: absolute; inset: -2px;
+                border-radius: 50%;
+                border: 5px solid rgba(255,255,255,.18);
+                border-top-color: var(--accent);
+                border-right-color: var(--accent);
+                animation: spin 900ms linear infinite;
             }
-            .tab-panel-pane--overlay.is-hidden {
+            @keyframes spin { to { transform: rotate(360deg); } }
+
+            /* Mid-stream resume — secondary style (less prominent than initial play) */
+            .player-action.is-resume {
+                width: 64px; height: 64px;
+                background: rgba(0,0,0,.55);
+                backdrop-filter: blur(6px);
+            }
+            .player-action.is-resume:hover { background: rgba(0,0,0,.7); }
+            .player-action.is-resume i { font-size: 22px; }
+
+            /* Hover/touch-revealed playback controls (fullscreen / stop), centered with a gap */
+            .player-ctrls {
+                position: absolute; inset: 0;
+                z-index: 6;
+                display: flex; align-items: center; justify-content: center;
+                gap: 32px;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 240ms ease;
+                background: linear-gradient(180deg, rgba(0,0,0,.25) 0%, transparent 35%, transparent 65%, rgba(0,0,0,.35) 100%);
+            }
+            /* Visibility is driven purely by `is-visible` (set from JS). Tempting as it was,
+               `.player:hover` here defeats the auto-hide timer on desktop and gets stuck in
+               "sticky hover" on mobile after a tap, leaving the controls permanently shown.
+               mouseenter/mousemove handlers in JS reveal them on hover instead. */
+            .player-ctrls.is-active.is-visible { opacity: 1; pointer-events: auto; }
+            .pc-btn {
+                width: 80px; height: 80px;
+                border-radius: 50%;
+                border: none;
+                background: var(--accent);
+                color: #fff;
+                cursor: pointer;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 28px;
+                transition: all 180ms ease;
+                box-shadow: 0 8px 22px rgba(0,0,0,.45);
+            }
+            .pc-btn:hover { background: var(--accent-b); transform: scale(1.08); }
+
+            @media (max-width: 580px) {
+                .player-action { width: 72px; height: 72px; }
+                .player-action i { font-size: 26px; }
+                .pc-btn { width: 64px; height: 64px; font-size: 22px; }
+                .player-ctrls { gap: 28px; }
+            }
+
+            /* ── Field label ── */
+            .lbl {
                 display: block;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: .08em;
+                text-transform: uppercase;
+                color: var(--txt-m);
+                margin-bottom: 3px;
             }
 
-            /* Messages list inside the tab panel. */
-            .messages-panel {
-                background-color: #ffffff;
-                border: 1px solid rgba(0, 0, 0, 0.08);
-                border-radius: 0.25rem;
-                padding: 0.25rem 0;
-                height: calc(14 * 2rem);
-                overflow: auto;
+            /* ── Inputs ── */
+            .inp, .sel {
+                width: 100%;
+                background: var(--bg);
+                border: 1px solid var(--border);
+                border-radius: var(--r-sm);
+                color: var(--txt);
+                font-family: var(--f-body);
+                font-size: 13px;
+                padding: 7px 11px;
+                outline: none;
+                transition: border-color var(--t), box-shadow var(--t);
+                appearance: none;
             }
-            .messages-list {
-                margin: 0;
-                padding: 0;
-                list-style: none;
-                font-family: monospace;
-                font-size: 0.9rem;
+            .inp:focus, .sel:focus {
+                border-color: var(--accent);
+                box-shadow: 0 0 0 3px var(--accent-d);
             }
-            .messages-list li {
-                padding: 0.35rem 0.75rem;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-                white-space: pre;
-                min-width: max-content;
-                line-height: 1.3rem;
+            .inp::placeholder { color: var(--txt-m); }
+            .inp:disabled, .sel:disabled { opacity: .5; cursor: not-allowed; background: var(--bg-e); }
+            .inp[type="number"] { text-align: center; padding-left: 6px; padding-right: 6px; }
+            /* bufferMax auto-tuned by DynamicBuffer (differs from the configured value) */
+            .inp-changed, .inp-changed:focus { border-color: #e53935; color: #e53935; box-shadow: 0 0 0 3px rgba(229,57,53,.18); }
+
+            .sel {
+                cursor: pointer;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239ba4bc' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 10px center;
+                padding-right: 28px;
             }
-            .messages-empty {
-                color: #6c757d;
+            select option { background: var(--bg); color: var(--txt); }
+
+            /* ── Buttons ── */
+            .btn {
+                display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+                padding: 7px 14px;
+                border: 1px solid var(--border);
+                border-radius: var(--r-sm);
+                background: var(--bg-e);
+                color: var(--txt-2);
+                font-family: var(--f-body);
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all var(--t);
+                white-space: nowrap;
+            }
+            .btn:hover:not(:disabled) { background: var(--bg-h); border-color: var(--border-s); color: var(--txt); }
+            .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+            .btn-icon { padding: 7px 9px; }
+
+            /* Teal-tinted secondary (active DRM indicator) */
+            .btn-cyan {
+                background: var(--accent-d); border-color: rgba(120,181,191,.4);
+                color: var(--accent-b);
+            }
+            .btn-cyan:hover:not(:disabled) { background: rgba(120,181,191,.25); border-color: var(--accent); }
+            .btn-cyan:disabled {
+                opacity: 1;
+                color: var(--accent-b);
+                background: rgba(120,181,191,.08);
+                border-color: rgba(120,181,191,.25);
+                cursor: not-allowed;
+            }
+
+            /* Red text/icon — Live button when behind live edge (buffer above bufferLimitMiddle) */
+            .btn-red, .btn-red:hover:not(:disabled) { color: var(--err); }
+
+            /* Modal confirm — accent pill */
+            .btn-primary {
+                background: var(--accent); border-color: var(--accent);
+                color: #fff; font-weight: 600;
+                border-radius: var(--r-pill);
+                padding: 7px 18px;
+            }
+            .btn-primary:hover:not(:disabled) { background: var(--accent-b); border-color: var(--accent-b); }
+
+            /* ── Toggle (switch + label) ── */
+            .tog {
+                display: inline-flex; align-items: center; gap: 8px;
+                padding: 7px 12px;
+                border: 1px solid var(--border);
+                border-radius: var(--r-sm);
+                background: var(--bg-e);
+                cursor: pointer;
+                transition: all var(--t);
+                white-space: nowrap;
+                user-select: none;
+            }
+            .tog:hover { border-color: var(--border-s); }
+            .tog.off { opacity: .4; pointer-events: none; }
+            .tog input { display: none; }
+            .tog-track {
+                width: 26px; height: 14px;
+                background: var(--txt-m);
+                border-radius: 7px;
+                position: relative;
+                transition: background var(--t);
+                flex-shrink: 0;
+            }
+            .tog-track::after {
+                content: '';
+                position: absolute; top: 2px; left: 2px;
+                width: 10px; height: 10px;
+                background: #fff; border-radius: 50%;
+                transition: transform var(--t);
+            }
+            .tog.on .tog-track { background: var(--accent); }
+            .tog.on .tog-track::after { transform: translateX(12px); }
+            .tog span { font-size: 12.5px; color: var(--txt-2); font-weight: 500; }
+
+            /* ── Row layouts ── */
+            .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+            .gap-panel { margin-top: 14px; }
+
+            /* Stream input takes full width; controls row holds the rest */
+            .stream-row .inp { width: 100%; }
+
+            .ctrl-row {
+                display: grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 6px;
+                align-items: stretch;
+            }
+            .ctrl-row .btn, .ctrl-row .tog { width: 100%; justify-content: center; }
+
+            /* Network profile + buffer min/max — single compact row.
+               Grid-template-areas keep description glued under profile on mobile. */
+            .net-row {
+                display: grid;
+                grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+                grid-template-areas:
+                    'profile bufmin bufmax'
+                    'desc    desc   desc';
+                gap: 8px;
+                align-items: end;
+            }
+            .net-row .net-prof { grid-area: profile; }
+            .net-row .buf-min  { grid-area: bufmin; }
+            .net-row .buf-max  { grid-area: bufmax; }
+            .net-row .net-desc { grid-area: desc; }
+            .net-row .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+            .net-desc {
+                font-size: 12px;
+                color: var(--txt-m);
+                padding-top: 6px;
+                margin-top: 2px;
+                border-top: 1px solid var(--border);
                 font-style: italic;
-                padding: 1rem 0.75rem;
+            }
+            .net-desc strong { color: var(--txt-2); font-weight: 500; font-style: normal; }
+
+            /* ── Tabs ── */
+            .tab-bar {
+                display: flex;
+                border-bottom: 1px solid var(--border);
+                gap: 0;
+            }
+            .tab-btn {
+                background: none; border: none;
+                border-bottom: 2px solid transparent;
+                color: var(--txt-m);
+                font-family: var(--f-body);
+                font-size: 12px; font-weight: 600;
+                letter-spacing: .04em; text-transform: uppercase;
+                padding: 7px 14px 6px;
+                cursor: pointer;
+                transition: all var(--t);
+                position: relative; top: 1px;
+            }
+            .tab-btn:hover { color: var(--txt-2); }
+            .tab-btn.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+            .tab-badge {
+                display: inline-flex; align-items: center; justify-content: center;
+                min-width: 17px; height: 17px; padding: 0 4px;
+                background: var(--accent); color: #fff;
+                font-size: 10px; font-weight: 700; font-family: var(--f-mono);
+                border-radius: 9px; margin-left: 5px;
             }
 
-            /* Settings modal: cap body height so the footer stays visible without page scroll. */
-            .modal-body {
-                max-height: calc(100vh - 12rem);
-                overflow-y: auto;
+            .tab-body { padding-top: 10px; }
+
+            /* ── Side-by-side layout: dock the graph/messages/timeline panel to the right of the video
+               on large screens (toggle in the tab bar). Bottom-docked by default. ── */
+            .layout-btn {
+                display: none;               /* only offered on wide screens */
+                margin-left: auto;           /* push to the right end of the tab bar */
+                align-self: center;
+                background: none; border: none;
+                color: var(--txt-m);
+                font-size: 14px;
+                padding: 4px 8px;
+                cursor: pointer;
+                transition: color var(--t);
+            }
+            .layout-btn:hover { color: var(--txt-2); }
+            .layout-btn.on { color: var(--accent); }
+
+            @media (min-width: 1200px) {
+                .layout-btn { display: inline-flex; align-items: center; }
+                html.layout-side .shell { max-width: 1600px; }
+                html.layout-side .stage {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                    column-gap: 18px;
+                    align-items: start;
+                }
+                /* video + controls stack in the left column; the panel fills the right one */
+                html.layout-side .stage > * { grid-column: 1; }
+                html.layout-side .stage > .stage-panel {
+                    grid-column: 2;
+                    grid-row: 1 / span 20;
+                    align-self: stretch;
+                    min-width: 0;
+                }
             }
 
-            [v-cloak] {
-                display: none;
+            /* ── Stats ── */
+            .stats-list {
+                background: transparent;
+                list-style: none;
+                padding: 0; margin: 0;
+                display: block;
+                width: 100%;
+            }
+            /* UIMetrics injects <svg> elements directly as children — force them full-width */
+            .stats-list > svg {
+                display: block;
+                width: 100%;
+                border-bottom: 1px solid var(--border);
+                font-family: var(--f-mono);
+                font-size: 12px;
+                fill: var(--txt);
+            }
+            .stats-list > svg:last-child { border-bottom: none; }
+
+            .stats-actions {
+                display: flex; gap: 12px; align-items: center; justify-content: center;
+                margin-top: 12px; padding-top: 10px;
+                border-top: 1px solid var(--border);
+            }
+            .stats-actions img {
+                cursor: pointer; opacity: .4; height: 26px;
+                transition: opacity var(--t);
+            }
+            .stats-actions img:hover { opacity: .9; }
+
+            /* ── Messages ── */
+            .msg-box {
+                background: var(--bg-s);
+                border: 1px solid var(--border);
+                border-radius: var(--r-sm);
+                height: 240px; overflow: auto;
+                font-family: var(--f-mono); font-size: 11.5px;
+                scrollbar-width: thin;
+                scrollbar-color: var(--border-s) transparent;
+            }
+            .msg-empty { padding: 14px 12px; color: var(--txt-m); font-style: italic; font-size: 12px; }
+            .msg-row {
+                padding: 4px 12px;
+                border-bottom: 1px solid var(--border);
+                color: var(--txt-2); white-space: pre; min-width: max-content; line-height: 1.45;
+            }
+            .msg-row:last-child { border-bottom: none; }
+            .msg-track { color: var(--accent-b); font-weight: 500; }
+            .msg-time  { color: var(--txt-m); }
+
+            /* ── Timeline ── */
+            .tl-toolbar {
+                display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                margin-bottom: 8px;
+            }
+            /* Match the .btn controls (follow, CSV) to the segmented-control size in this row. */
+            .tl-toolbar .btn { padding-top: 5px; padding-bottom: 5px; font-size: 12px; }
+            .tl-seg {
+                display: inline-flex; border: 1px solid var(--border);
+                border-radius: var(--r-sm); overflow: hidden;
+            }
+            .tl-seg button {
+                background: var(--bg-e); border: none; color: var(--txt-2);
+                font-family: var(--f-body); font-size: 12px; font-weight: 500;
+                padding: 5px 11px; cursor: pointer; transition: all var(--t);
+            }
+            .tl-seg button + button { border-left: 1px solid var(--border); }
+            .tl-seg button.on { background: var(--accent); color: #fff; }
+            .tl-seg button:hover:not(.on) { background: var(--bg-h); color: var(--txt); }
+            /* View-tracking state button — color-coded (solid teal = following the latest, amber = frozen). */
+            .tl-followbtn { min-width: 96px; justify-content: center; font-weight: 500; gap: 7px; }
+            .tl-followbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+            .tl-followbtn.on:hover:not(:disabled) { background: var(--accent-b); border-color: var(--accent-b); color: #fff; }
+            .tl-followbtn.off { background: rgba(230,168,23,.16); border-color: rgba(230,168,23,.55); color: var(--warn); }
+            .tl-followbtn.off:hover:not(:disabled) { background: rgba(230,168,23,.26); border-color: var(--warn); color: var(--warn); }
+            .tl-spacer { flex: 1; }
+            .tl-legend {
+                display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+                font-size: 11px; color: var(--txt-2);
+            }
+            .tl-legend span { display: inline-flex; align-items: center; gap: 4px; }
+            .tl-legend i.dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+            .tl-box {
+                position: relative;
+                background: var(--bg-s);
+                border: 1px solid var(--border);
+                border-radius: var(--r-sm);
+                overflow: hidden;
+                min-height: 60px;
+            }
+
+            /* ── Modal ── */
+            .modal-back {
+                position: fixed; inset: 0;
+                background: var(--modal-back);
+                backdrop-filter: blur(4px);
+                z-index: 200;
+            }
+            .modal-wrap {
+                position: fixed; inset: 0; z-index: 201;
+                display: flex; align-items: center; justify-content: center;
+                padding: 16px;
+            }
+            .modal-box {
+                background: var(--bg);
+                border: 1px solid var(--border-s);
+                border-radius: var(--r-lg);
+                width: 100%; max-width: 580px;
+                max-height: calc(100vh - 40px);
+                display: flex; flex-direction: column;
+                box-shadow: var(--shadow-modal);
+            }
+            .modal-hd {
+                display: flex; align-items: center; gap: 10px;
+                padding: 14px 18px;
+                border-bottom: 1px solid var(--border);
+                flex-shrink: 0;
+            }
+            .modal-hd i { color: var(--accent); font-size: 14px; }
+            .modal-hd h5 {
+                font-size: 15px; font-weight: 600;
+                letter-spacing: .02em; color: var(--navy);
+            }
+            .modal-x {
+                margin-left: auto; background: none; border: none;
+                color: var(--txt-m); cursor: pointer; font-size: 16px; line-height: 1;
+                transition: color var(--t);
+            }
+            .modal-x:hover { color: var(--txt); }
+
+            .modal-bd {
+                overflow-y: auto; padding: 14px 18px; flex: 1;
+                scrollbar-width: thin; scrollbar-color: var(--border-s) transparent;
+            }
+            .modal-hint {
+                font-size: 11.5px; color: var(--txt-2);
+                margin-bottom: 14px; padding: 8px 11px;
+                background: var(--bg-e); border-radius: var(--r-sm);
+                border-left: 3px solid var(--accent);
+                line-height: 1.55;
+            }
+
+            .drm-card {
+                border: 1px solid var(--border);
+                border-radius: var(--r-md);
+                margin-bottom: 10px; overflow: hidden;
+                transition: border-color var(--t);
+            }
+            .drm-card.enabled { border-color: var(--border-s); }
+            .drm-card.active  { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-d); }
+
+            .drm-hd {
+                display: flex; align-items: center; gap: 10px;
+                padding: 10px 14px;
+                background: var(--bg-e);
+            }
+            .drm-name {
+                font-size: 13px; font-weight: 600;
+                letter-spacing: .03em; text-transform: uppercase; flex: 1;
+                color: var(--navy);
+            }
+            .badge-active {
+                font-family: var(--f-mono); font-size: 10px; font-weight: 700;
+                padding: 2px 8px; border-radius: var(--r-pill);
+                background: rgba(120,181,191,.15); color: var(--accent-b);
+                border: 1px solid rgba(120,181,191,.4);
+                text-transform: uppercase; letter-spacing: .06em;
+            }
+
+            .drm-bd {
+                padding: 12px 14px;
+                display: flex; flex-direction: column; gap: 10px;
+            }
+            .drm-field { display: flex; flex-direction: column; gap: 3px; }
+            .drm-field .lbl {
+                display: flex; align-items: center; justify-content: space-between;
+                margin-bottom: 0;
+            }
+            .btn-link {
+                background: none; border: none; color: var(--accent);
+                font-size: 11.5px; cursor: pointer; padding: 0;
+                font-family: var(--f-body); transition: color var(--t);
+            }
+            .btn-link:hover:not(:disabled) { color: var(--accent-b); }
+            .btn-link:disabled { opacity: .38; cursor: not-allowed; }
+
+            .hdr-list { display: flex; flex-direction: column; gap: 5px; margin-top: 3px; }
+            .hdr-row { display: flex; gap: 5px; align-items: center; }
+            .hdr-row .inp { flex: 1; }
+            .btn-rm {
+                width: 28px; height: 28px; flex-shrink: 0;
+                background: var(--bg-e); border: 1px solid var(--border);
+                border-radius: var(--r-sm); color: var(--txt-m);
+                display: flex; align-items: center; justify-content: center;
+                cursor: pointer; font-size: 10px; transition: all var(--t);
+            }
+            .btn-rm:hover:not(:disabled) { background: rgba(192,57,43,.10); border-color: rgba(192,57,43,.35); color: var(--err); }
+            .btn-rm:disabled { opacity: .38; cursor: not-allowed; }
+
+            .rob-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+            .modal-ft {
+                padding: 12px 18px;
+                border-top: 1px solid var(--border);
+                display: flex; justify-content: flex-end;
+                flex-shrink: 0;
+            }
+
+            /* ── Scrollbars ── */
+            ::-webkit-scrollbar { width: 6px; height: 6px; }
+            ::-webkit-scrollbar-track { background: transparent; }
+            ::-webkit-scrollbar-thumb { background: var(--border-s); border-radius: 3px; }
+
+            [v-cloak] { display: none; }
+
+            /* ── Responsive ── */
+            @media (max-width: 680px) {
+                /* Stream + Play stack as: input full-width then play button full-width */
+                .ctrl-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                .row2 { grid-template-columns: 1fr 1fr; }
+            }
+            @media (max-width: 480px) {
+                .net-row {
+                    grid-template-columns: 1fr 1fr;
+                    grid-template-areas:
+                        'profile profile'
+                        'desc    desc'
+                        'bufmin  bufmax';
+                }
+                .row2 { grid-template-columns: 1fr; }
+                .rob-row { grid-template-columns: 1fr; }
             }
         </style>
     </head>
-    <body class="container">
-        <div class="row">
-            <div class="col-md-12">
-                <img alt="CEEBLUE Media Services" class="rounded mx-auto d-block" src="./assets/ceeblue-logo.png">
-                <h3 class="text-center">Web Real Time Streaming - Player Example</h3>
-            </div>
+    <body>
+        <div class="shell" id="main" v-cloak>
 
-            <div class="col-md-12" id="main" v-cloak>
+            <header class="hdr">
+                <img alt="Ceeblue" src="./assets/ceeblue-logo.png">
+                <h1>
+                    WebRTS <em>Player</em>
+                </h1>
+                <button class="theme-btn" :title="themeTooltip()" @click="cycleTheme()">
+                    <i class="fas" :class="themeIcon()"></i>
+                </button>
+            </header>
 
-                <div class="card text-center border-0 bg-transparent">
-                    <div class="card-body">
-                        <div class="alert alert-warning" role="alert" v-if="streamErrorMessage">
-                            {{ streamErrorMessage }}
+            <div class="stage">
+
+                <!-- Video -->
+                <div class="player" ref="player"
+                    @mouseenter="onPlayerActivity()"
+                    @mousemove="onPlayerActivity()"
+                    @mouseleave="onPlayerLeave()"
+                    @touchstart="onPlayerTouch($event)"
+                    @contextmenu="onPlayerContextMenu($event)">
+
+                    <video autoplay id="video" ref="video" playsinline></video>
+
+                    <!-- Hover/touch revealed controls (only while playing) -->
+                    <div class="player-ctrls"
+                        :class="{ 'is-active': isPlaying(), 'is-visible': controlsVisible }">
+                        <button class="pc-btn pc-full"
+                            :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+                            @click="fullscreen()">
+                            <i class="fas" :class="isFullscreen ? 'fa-compress' : 'fa-expand'"></i>
+                        </button>
+                        <button class="pc-btn pc-stop" title="Stop" @click="play()">
+                            <i class="fas fa-stop"></i>
+                        </button>
+                    </div>
+
+                    <!-- Stopped → big Play | Starting → spinner | Mid-stream pause → resume -->
+                    <button class="player-action" title="Play" @click="play()" v-if="isStopped()">
+                        <i class="fas fa-play"></i>
+                    </button>
+                    <div class="player-action is-loading" v-else-if="isStarting()">
+                        <div class="ring"></div>
+                    </div>
+                    <button class="player-action is-resume" title="Resume"
+                        @click="player.paused = false"
+                        v-else-if="player && player.paused">
+                        <i class="fas fa-play"></i>
+                    </button>
+
+                    <div class="player-alert" v-if="streamError">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <div class="player-alert-body">
+                            <div class="player-alert-title">
+                                <span class="player-alert-type" v-if="streamError.type">{{ streamError.type }}</span>
+                                <span class="player-alert-name">{{ streamError.name }}</span>
+                            </div>
+                            <div class="player-alert-detail" v-if="streamError.detail">{{ streamError.detail }}</div>
+                            <div class="player-alert-fields" v-if="streamError.fields.length">
+                                <span class="player-alert-field" v-for="f in streamError.fields" :key="f.label">
+                                    <strong>{{ f.label }}</strong>{{ f.value }}
+                                </span>
+                            </div>
                         </div>
-
-                        <video autoplay id="video" ref="video" @click="fullscreen()" playsinline></video>
-                        <div ref="play-btn" class="play-btn" @click="player.paused = false" v-show="player && player.paused">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26">
-                                <polygon class="play-btn__svg" points="9.33 6.69 9.33 19.39 19.3 13.04 9.33 6.69"></polygon>
-                                <path class="play-btn__svg" d="M26,13A13,13,0,1,1,13,0,13,13,0,0,1,26,13ZM13,2.18A10.89,10.89,0,1,0,23.84,13.06,10.89,10.89,0,0,0,13,2.18Z"></path>
-                            </svg>
-                        </div>
+                        <button class="player-alert-x" @click="setStreamError(null)"
+                            title="Dismiss" aria-label="Dismiss">
+                            <i class="fas fa-times"></i>
+                        </button>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group col-sm">
-                        <select id="video-track-selection" class="custom-select text-center"
-                            :disabled="!player || !player.trackSelectable" v-model="videoTrackId" @change="onVideoTrackChange()">
-                            <option :value="undefined" :key="videoTrack">AUTO - {{videoTrack}}</option>
-                            <option v-for="[idx, track] of videoTracks" v-bind:value="idx">
-                                {{ track }}
-                            </option>
+                <!-- Track selects -->
+                <div class="row2 gap-panel">
+                    <div>
+                        <span class="lbl">Video track</span>
+                        <select class="sel" id="video-track-selection"
+                            :disabled="!player || !player.trackSelectable"
+                            v-model="videoTrackId" @change="onVideoTrackChange()">
+                            <option :value="undefined" :key="videoTrack">AUTO — {{ videoTrack }}</option>
+                            <option v-for="[idx, track] of videoTracks" :value="idx">{{ track }}</option>
                         </select>
                     </div>
-
-                    <div class="form-group col-sm">
-                        <select id="audio-track-selection" class="custom-select text-center"
-                            :disabled="!player || !player.trackSelectable" v-model="audioTrackId" @change="onAudioTrackChange()">
-                            <option :value="undefined" :key="audioTrack">AUTO - {{audioTrack}}</option>
-                            <option v-for="[idx, track] of audioTracks" v-bind:value="idx">
-                                {{ track }}
-                            </option>
+                    <div>
+                        <span class="lbl">Audio track</span>
+                        <select class="sel" id="audio-track-selection"
+                            :disabled="!player || !player.trackSelectable"
+                            v-model="audioTrackId" @change="onAudioTrackChange()">
+                            <option :value="undefined" :key="audioTrack">AUTO — {{ audioTrack }}</option>
+                            <option v-for="[idx, track] of audioTracks" :value="idx">{{ track }}</option>
                         </select>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group col-12">
-                        <input :disabled="isPlaying()" class="form-control text-center"
-                            placeholder="StreamName(?id=accessToken) or URL" type="text"
-                            v-model="stream">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group col-2">
-                        <button class="btn btn-light" title="Mute or unmute audio" type="button" v-on:click="mute">
-                            <i class="fas" v-bind:class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
-                            <span class="d-none d-md-inline">
-                                sound
-                            </span>
-                        </button>
-                    </div>
-
-                    <div class="form-group col-2">
-                        <button class="btn btn-light" title="Jump to live position" type="button" @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
-                            <i class="fa-solid fa-rocket"></i>
-                            <span class="d-none d-md-inline">
-                                live
-                            </span>
-                        </button>
-                    </div>
-
-                    <div class="form-group col-3">
-                        <button class="btn" type="button"
-                            v-bind:class="{ 'btn-danger': isPlaying(), 'btn-success': isStopped(), 'btn-secondary': isStarting() }"
-                            v-on:click="play">
-                            <span>{{ playButtonCaption() }}</span>
-                        </button>
-                    </div>
-
-                    <div class="form-group col-5 col-md-3 text-center d-flex align-items-center justify-content-center">
-                        <div class="custom-control custom-switch d-inline-block text-left">
-                            <input type="checkbox" class="custom-control-input" id="adaptive-frame-skipping"
-                                :disabled="!mutableReliability()" v-model="adaptiveFrameSkipping" @change="onReliable()">
-                            <label class="custom-control-label" for="adaptive-frame-skipping">
-                                <span class="small d-md-none">Adaptive Frame</span>
-                                <span class="d-none d-md-inline">Adaptive Frame-Skipping</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="form-group col-12 col-md-2">
-                        <button :disabled="isPlaying()" class="btn btn-light" :class="{ 'd-none': isPlaying() && !keySystem }"
-                            title="Content protection settings" type="button" @click="showSettings = true">
-                            <i class="fas fa-shield-alt"></i>
-                            <span class="ml-1">
-                                {{ activeDrmLabel() }}
-                            </span>
-                        </button>
-                    </div>
-
+                <!-- Stream name (full width) -->
+                <div class="stream-row gap-panel">
+                    <input class="inp" :disabled="isPlaying()"
+                        placeholder="StreamName(?id=accessToken) or URL"
+                        type="text" v-model="stream">
                 </div>
 
-                <div class="form-row align-items-center">
-                    <div class="form-group col-2 text-right">
-                        network <br class="d-md-none">profiles
-                    </div>
-                    <div class="form-group col-3 p-0">
-                        <select class="custom-select text-center" v-model="netProfile" @change="setBuffer()">
-                            <option v-bind:value="profil" v-for="[profil, _] of netProfiles">
-                                {{ profil }}
-                            </option>
+                <!-- Controls: mute / live / frame-skip / protection -->
+                <div class="ctrl-row gap-panel">
+                    <button class="btn" title="Mute or unmute audio" v-on:click="mute">
+                        <i class="fas" :class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
+                        {{ muted ? 'Unmute' : 'Mute' }}
+                    </button>
+
+                    <button class="btn" title="Jump to live position"
+                        :class="{ 'btn-red': player && bufferAmount > player.bufferLimitMiddle }"
+                        :disabled="!player || bufferAmount <= player.bufferLimitMiddle"
+                        @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
+                        <i class="fas fa-rocket"></i>
+                        Live
+                    </button>
+
+                    <label title="Enable or disable adaptive frame skipping" class="tog" :class="{ on: adaptiveFrameSkipping, off: !mutableReliability() }">
+                        <input type="checkbox" :disabled="!mutableReliability()"
+                            v-model="adaptiveFrameSkipping" @change="onReliable()">
+                        <span class="tog-track"></span>
+                        <span>Frame Skip</span>
+                    </label>
+
+                    <label title="Dynamically tune the buffer target (bufferLimitHigh) at runtime" class="tog" :class="{ on: dynamicBuffer }">
+                        <input type="checkbox" v-model="dynamicBuffer" @change="onDynamicBuffer()">
+                        <span class="tog-track"></span>
+                        <span>Dynamic Buffer</span>
+                    </label>
+
+                    <select v-if="showRateOverride" class="sel"
+                        title="Force a fixed playback rate in real time for testing (disable Dynamic Buffer to avoid conflicts)"
+                        v-model="rateOverride" @change="onRateOverride()" :disabled="dynamicBuffer">
+                        <option value="auto">Rate: auto</option>
+                        <option value="x0.84">Rate: 0.84×</option>
+                        <option value="x0.88">Rate: 0.88×</option>
+                        <option value="x0.92">Rate: 0.92×</option>
+                        <option value="x0.96">Rate: 0.96×</option>
+                        <option value="x1">Rate: 1.00×</option>
+                        <option value="x1.04">Rate: 1.04×</option>
+                        <option value="x1.08">Rate: 1.08×</option>
+                        <option value="x1.12">Rate: 1.12×</option>
+                        <option value="x1.16">Rate: 1.16×</option>
+                    </select>
+
+                    <button class="btn" :class="{ 'btn-cyan': keySystem }"
+                        :style="{ display: isPlaying() && !keySystem ? 'none' : '' }"
+                        :disabled="isPlaying()"
+                        title="Content protection settings" @click="showSettings = true">
+                        <i class="fas fa-shield-alt"></i>
+                        {{ activeDrmLabel() }}
+                    </button>
+                </div>
+
+                <!-- Network profile + buffer min/max (single compact row).
+                    Description is grid-positioned inside the row so it sits next to the
+                    profile select on mobile (instead of floating below the buffer inputs). -->
+                <div class="net-row gap-panel">
+                    <div class="net-prof">
+                        <span class="lbl">Network profile</span>
+                        <select class="sel" v-model="netProfile" @change="setBuffer()">
+                            <option :value="profil" v-for="[profil, _] of netProfiles">{{ profil }}</option>
                         </select>
                     </div>
-
-                    <div class="form-group col-3 text-right">
-                        buffer min<br class="d-md-none"> max in ms 
-                    </div>
-                    <div class="form-group col-2 p-0">
-                        <input class="form-control text-center"
-                            type="number" min="0" required oninput="validity.valid||(value='');"
+                    <div class="buf-min">
+                        <span class="lbl">Buffer min (ms)</span>
+                        <input class="inp" type="number" min="0"
+                            required oninput="validity.valid||(value='');"
                             v-model="bufferMin" @change="setBuffer(this.bufferMin, this.bufferMax)">
                     </div>
-                    <div class="form-group col-2 p-0">
-                        <input class="form-control text-center"
-                            type="number" min="0" required oninput="validity.valid||(value='');"
-                            v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                    <div class="buf-max">
+                        <span class="lbl">Buffer max (ms){{ dynamicBuffer ? ' · mid ' + bufferMiddle : '' }}</span>
+                        <input class="inp" :class="{ 'inp-changed': isBufferDynamic() }" type="number" min="0"
+                            required oninput="validity.valid||(value='');"
+                            v-model="bufferMax"
+                            @focus="editingBufferMax = true" @blur="editingBufferMax = false"
+                            @change="setBuffer(this.bufferMin, this.bufferMax)">
                     </div>
-
-      
+                    <p class="net-desc" v-html="netDescription"></p>
                 </div>
 
-                <p class="text-center font-weight-light font-italic" v-html="netDescription"></p>
+                <!-- Panel: graph / messages / timeline (docks bottom by default, or right on wide screens) -->
+                <div class="stage-panel">
+                    <div class="tab-bar">
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'graph' }"
+                            @click="selectBottomTab('graph')">Graph</button>
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'messages' }"
+                            @click="selectBottomTab('messages')">
+                            Messages
+                            <span class="tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+                        </button>
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'timeline' }"
+                            @click="selectBottomTab('timeline')">Timeline</button>
+                        <button class="layout-btn" :class="{ on: sidePanel }"
+                            :title="sidePanel ? 'Dock the panel to the bottom' : 'Dock the panel to the right (side-by-side)'"
+                            @click="toggleSidePanel()">
+                            <i class="fas fa-table-columns"></i>
+                        </button>
+                    </div>
 
-                <div class="tab-panel">
-                    <ul class="nav nav-tabs">
-                        <li class="nav-item">
-                            <a class="nav-link" :class="{ active: activeBottomTab === 'graph' }" @click="selectBottomTab('graph')">
-                                Graph
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" :class="{ active: activeBottomTab === 'messages' }" @click="selectBottomTab('messages')">
-                                Messages
-                                <span class="badge badge-primary ml-2" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
-                            </a>
-                        </li>
-                    </ul>
-                    <div class="tab-panel-content">
-                        <div class="tab-panel-pane" :class="{ 'is-hidden': activeBottomTab !== 'graph' }">
-                            <div class="form-row">
-                                <ul class="list-group list-group-flush w-100" ref="stats">
-                                </ul>
+                    <div class="tab-body">
+                        <!-- Graph -->
+                        <div v-show="activeBottomTab === 'graph'">
+                            <ul class="stats-list" ref="stats"></ul>
+                            <div class="stats-actions" v-show="hasMetrics">
+                                <img alt="Reset" title="Reset incremental metrics and rescale the chart"
+                                    @click="resetMetrics()" src="./assets/reload.png">
+                                <img alt="Download CSV" title="Download metrics as a CSV file"
+                                    @click="downloadStats()" src="./assets/download.png">
+                                <img alt="Dump media" title="Dump media as MP4 files"
+                                    @click="dump()" src="./assets/dump.png"
+                                    v-show="audioDump || videoDump">
                             </div>
-                            <div class="form-row" v-show="hasMetrics">
-                                <div class="form-group mx-auto">
-                                    <img class="m-1" alt="Reset metrics view" title="Reset incremental metrics and rescale the chart" type="button" @click="resetMetrics()" src="./assets/reload.png" height="32">
-                                    <img class="m-1" alt="Download metrics" title="Download metrics as a CSV file" type="button" @click="downloadStats()" src="./assets/download.png" height="32">
-                                    <img class="m-1" alt="Dump media" title="Dump media as MP4 files" type="button" @click="dump()" src="./assets/dump.png" height="32" v-show="audioDump || videoDump">
+                        </div>
+
+                        <!-- Messages -->
+                        <div v-show="activeBottomTab === 'messages'">
+                            <div class="msg-box" ref="messagesPanel">
+                                <div class="msg-empty" v-if="messages.length === 0">No data messages received yet.</div>
+                                <div v-for="(message, idx) in messages" :key="idx" class="msg-row">
+                                    <span class="msg-track">[{{ message.track }}]</span>
+                                    <span class="msg-time"> {{ message.receivedAt }} </span>{{ message.text }}
                                 </div>
                             </div>
                         </div>
-                        <div class="tab-panel-pane tab-panel-pane--overlay" :class="{ 'is-hidden': activeBottomTab !== 'messages' }">
-                            <div class="messages-panel" ref="messagesPanel">
-                                <div class="messages-empty" v-if="messages.length === 0">No data messages received yet.</div>
-                                <ul class="messages-list" v-else>
-                                    <li v-for="(message, idx) in messages" :key="idx">[{{ message.track }}] {{ message.receivedAt }} : {{ message.text }}</li>
-                                </ul>
+
+                        <!-- Timeline (rendered by the UITimeline library widget into tl-box) -->
+                        <div v-show="activeBottomTab === 'timeline'">
+                            <div class="tl-toolbar">
+                                <button class="btn tl-followbtn" :class="tlFollowing ? 'on' : 'off'"
+                                    :title="tlFollowing ? 'Following the latest data — click to freeze, then drag the timeline to inspect the past' : 'Frozen — click to follow the latest data'"
+                                    @click="toggleTimelineFollow()">
+                                    <i class="fas" :class="tlFollowing ? 'fa-angles-right' : 'fa-lock'"></i>
+                                    <span>{{ tlFollowing ? 'Follow' : 'Frozen' }}</span>
+                                </button>
+                                <div class="tl-seg" title="Choose the time axis: stream timestamps (DTS) to spot desync, or wall-clock reception to spot late/slow tracks">
+                                    <button :class="{ on: tlAxis === 'media' }" @click="setTimelineAxis('media')">Media DTS</button>
+                                    <button :class="{ on: tlAxis === 'reception' }" @click="setTimelineAxis('reception')">Reception</button>
+                                </div>
+                                <div class="tl-seg" title="Visible time window">
+                                    <button v-for="w in tlWindows" :class="{ on: tlWindow === w }"
+                                        @click="setTimelineWindow(w)">{{ w }}s</button>
+                                </div>
+                                <button class="btn btn-icon" title="Download sequences as a CSV file"
+                                    @click="downloadTimeline()">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                                <div class="tl-spacer"></div>
+                                <div class="tl-legend" title="Reception health: ratio of reception duration to media duration of each sequence">
+                                    <span>
+                                        <i class="dot" style="background:var(--ok)"></i>on time
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--warn)"></i>slow
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--err)"></i>congested
+                                    </span>
+                                </div>
                             </div>
+                            <div class="tl-box" ref="timelineBox"></div>
                         </div>
                     </div>
                 </div>
 
-                <div v-if="showSettings" class="modal-backdrop fade show"></div>
-                <div v-if="showSettings" class="modal fade show d-block" tabindex="-1" role="dialog" @click.self="closeSettings()">
-                    <div class="modal-dialog modal-lg" role="document">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">Content Protection</h5>
-                                <button type="button" class="close" aria-label="Close" @click="closeSettings()">
-                                    <span aria-hidden="true">&times;</span>
+                <!-- DRM Modal -->
+                <template v-if="showSettings">
+                    <div class="modal-back" @click="closeSettings()"></div>
+                    <div class="modal-wrap">
+                        <div class="modal-box" @click.stop>
+                            <div class="modal-hd">
+                                <i class="fas fa-shield-alt"></i>
+                                <h5>Content Protection</h5>
+                                <button class="modal-x" @click="closeSettings()" aria-label="Close">
+                                    <i class="fas fa-times"></i>
                                 </button>
                             </div>
-                            <div class="modal-body">
-                                <p class="text-muted small">
-                                    License URLs are not pre-filled; paste your own to test against a real key server.
-                                    A DRM is included in the playback request only when it is enabled <em>and</em> its license URL is set.
+
+                            <div class="modal-bd">
+                                <p class="modal-hint">
+                                    License URLs are not pre-filled. A DRM is included only when enabled
+                                    <em>and</em> its license URL is set.
                                 </p>
-                                <div v-for="drm in contentProtection" :key="drm.id" class="border-bottom mb-3 pb-3">
-                                    <div class="form-row align-items-center mb-2">
-                                        <div class="col-auto pr-2">
+
+                                <div v-for="drm in contentProtection" :key="drm.id"
+                                    class="drm-card"
+                                    :class="{ enabled: drm.enabled, active: isDrmActive(drm) }">
+
+                                    <div class="drm-hd">
+                                        <label class="tog" :class="{ on: drm.enabled }"
+                                            style="border:none; background:none; padding:0;"
+                                            @click.stop>
                                             <input :id="'drm-' + drm.id + '-enabled'" type="checkbox"
-                                                class="form-check-input position-static m-0"
                                                 :disabled="isPlaying()" v-model="drm.enabled">
-                                        </div>
-                                        <div class="col">
-                                            <label :for="'drm-' + drm.id + '-enabled'" class="h6 mb-0">
-                                                <i class="fas fa-shield-alt"></i> {{ drm.label }}
-                                            </label>
-                                            <span class="badge badge-success ml-2" v-if="isDrmActive(drm)">Active</span>
-                                        </div>
+                                            <span class="tog-track"></span>
+                                        </label>
+                                        <span class="drm-name">{{ drm.label }}</span>
+                                        <span class="badge-active" v-if="isDrmActive(drm)">Active</span>
                                     </div>
 
-                                    <div :class="{ 'pl-4': true, 'text-muted': !drm.enabled }">
-                                        <div class="form-group mb-2">
-                                            <label class="small mb-1">License URL</label>
-                                            <input class="form-control form-control-sm" type="text"
+                                    <div class="drm-bd" v-if="drm.enabled">
+                                        <div class="drm-field">
+                                            <span class="lbl">License URL</span>
+                                            <input class="inp" type="text"
                                                 :disabled="!drm.enabled || isPlaying()"
                                                 v-model="drm.license" placeholder="https://...">
                                         </div>
 
-                                        <div class="form-group mb-2" v-if="drm.id === 'fairplay'">
-                                            <label class="small mb-1">Certificate URL</label>
-                                            <input class="form-control form-control-sm" type="text"
+                                        <div class="drm-field" v-if="drm.id === 'fairplay'">
+                                            <span class="lbl">Certificate URL</span>
+                                            <input class="inp" type="text"
                                                 :disabled="!drm.enabled || isPlaying()"
                                                 v-model="drm.certificate" placeholder="https://...">
                                         </div>
 
-                                        <div class="form-group mb-2">
-                                            <div class="d-flex justify-content-between align-items-center mb-1">
-                                                <label class="small mb-0">HTTP headers</label>
-                                                <button type="button" class="btn btn-link btn-sm p-0 w-auto"
+                                        <div class="drm-field">
+                                            <span class="lbl">
+                                                HTTP headers
+                                                <button class="btn-link"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     @click="addHeader(drm)">
                                                     <i class="fas fa-plus"></i> Add header
                                                 </button>
-                                            </div>
-                                            <div v-if="drm.headers.length === 0" class="small text-muted font-italic">
-                                                No headers
-                                            </div>
-                                            <div v-for="(header, idx) in drm.headers" :key="idx" class="form-row align-items-center mb-1">
-                                                <div class="col">
-                                                    <input class="form-control form-control-sm" type="text"
+                                            </span>
+                                            <div class="hdr-list">
+                                                <div v-if="drm.headers.length === 0"
+                                                    style="font-size:11.5px; color:var(--txt-m); font-style:italic;">
+                                                    No headers
+                                                </div>
+                                                <div v-for="(header, idx) in drm.headers" :key="idx" class="hdr-row">
+                                                    <input class="inp" type="text"
                                                         :disabled="!drm.enabled || isPlaying()"
                                                         v-model="header.name" placeholder="Header name">
-                                                </div>
-                                                <div class="col">
-                                                    <input class="form-control form-control-sm" type="text"
+                                                    <input class="inp" type="text"
                                                         :disabled="!drm.enabled || isPlaying()"
-                                                        v-model="header.value" placeholder="Header value">
-                                                </div>
-                                                <div class="col-auto">
-                                                    <button type="button" class="btn btn-light btn-sm w-auto"
+                                                        v-model="header.value" placeholder="Value">
+                                                    <button class="btn-rm"
                                                         :disabled="!drm.enabled || isPlaying()"
-                                                        @click="removeHeader(drm, idx)" title="Remove header">
+                                                        @click="removeHeader(drm, idx)"
+                                                        title="Remove header">
                                                         <i class="fas fa-times"></i>
                                                     </button>
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <div class="form-row">
-                                            <div class="form-group col mb-0">
-                                                <label class="small mb-1">Audio robustness</label>
-                                                <select v-if="drm.id === 'widevine'" class="custom-select custom-select-sm"
+                                        <div class="rob-row">
+                                            <div class="drm-field">
+                                                <span class="lbl">Audio robustness</span>
+                                                <select v-if="drm.id === 'widevine'" class="sel"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     v-model="drm.audioRobustness">
                                                     <option v-for="[label, value] in audioRobustnesses" :value="value">{{ label }}</option>
                                                 </select>
-                                                <input v-else class="form-control form-control-sm" type="text"
+                                                <input v-else class="inp" type="text"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     v-model="drm.audioRobustness" placeholder="comma-separated">
                                             </div>
-                                            <div class="form-group col mb-0">
-                                                <label class="small mb-1">Video robustness</label>
-                                                <select v-if="drm.id === 'widevine'" class="custom-select custom-select-sm"
+                                            <div class="drm-field">
+                                                <span class="lbl">Video robustness</span>
+                                                <select v-if="drm.id === 'widevine'" class="sel"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     v-model="drm.videoRobustness">
                                                     <option v-for="[label, value] in videoRobustnesses" :value="value">{{ label }}</option>
                                                 </select>
-                                                <input v-else class="form-control form-control-sm" type="text"
+                                                <input v-else class="inp" type="text"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     v-model="drm.videoRobustness" placeholder="comma-separated">
                                             </div>
@@ -408,20 +1164,21 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-primary w-auto" @click="closeSettings()">Done</button>
+
+                            <div class="modal-ft">
+                                <button class="btn btn-primary" @click="closeSettings()">Done</button>
                             </div>
                         </div>
                     </div>
-                </div>
+                </template>
+
             </div>
-
-
+            <!-- #main -->
         </div>
-
+        <!-- .shell -->
     </body>
     <script type="module">
-        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, VERSION, utils } from "../dist/wrts-client.bundle.js";
+        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, UITimeline, VERSION, utils } from "../dist/wrts-client.bundle.js";
         // development version, includes helpful console warnings
         // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
         // production version, optimized for size and speed
@@ -431,16 +1188,40 @@
         // displays logs ERROR, WARN & INFO logs,
         // can be even more detailed with LogLevel.DEBUG
         log.level = LogLevel.INFO;
-        log('wrts-client version:', VERSION).info();
-        log('web-utils version:', utils.VERSION).info();
 
         const options = Util.options();
+
+        // On-screen log overlay for on-device debugging (e.g. Android with no working
+        // chrome://inspect). Append `?debugoverlay` to the URL to enable.
+        if (options.debugoverlay) {
+            setupDebugOverlay();
+        }
+
+        log('wrts-client version:', VERSION).info();
+        log('web-utils version:', utils.VERSION).info();
 
         const PlayState = {
             PLAYING: 'PLAYING',
             STARTING: 'STARTING',
             STOPPED: 'STOPPED'
         };
+
+        const THEME_CYCLE = ['light', 'dark'];
+
+        // HTMLMediaElement.error.code → MediaError constant name. Surfaced in the alert when the
+        // native video element fires `onerror` (the Player usually wraps this in a richer
+        // 'Playback error' via onStop, but we render the raw code in case it doesn't).
+        const MEDIA_ERROR_NAMES = {
+            1: 'MEDIA_ERR_ABORTED',
+            2: 'MEDIA_ERR_NETWORK',
+            3: 'MEDIA_ERR_DECODE',
+            4: 'MEDIA_ERR_SRC_NOT_SUPPORTED'
+        };
+
+        // Keys handled explicitly by the alert UI (rendered as title/badge/detail). Any other
+        // own-property on the error object is shown as a key/value chip so subsystem-specific
+        // context (mimeType, track, url, reason, code, …) stays visible without per-variant code.
+        const ALERT_RESERVED_KEYS = new Set(['type', 'name', 'detail']);
 
         // URL-safe base64 round-trip for UTF-8 strings: `+` and `/` are remapped to `-` and `_`
         // and padding is stripped, so the encoded value can sit directly in a query parameter
@@ -463,6 +1244,108 @@
             return new TextDecoder().decode(bytes);
         }
 
+        // Builds a fixed, collapsible on-screen panel that mirrors every `log()` line (newest at the end,
+        // so logs can be read and copied directly on a device. Hooks the global `log.on` non-destructively
+        // (default console output still runs). Enabled via the `?debugoverlay` query parameter.
+        function setupDebugOverlay() {
+            const PANEL_VH = 40; // expanded height
+            const MAX_ROWS = 500; // cap retained log rows to avoid unbounded DOM/memory growth
+            // Container: header bar (always visible) + scrollable log box.
+            const panel = document.createElement('div');
+            panel.style.cssText =
+                'position:fixed;bottom:0;left:0;right:0;z-index:99999;' +
+                'background:rgba(0,0,0,.85);font:11px/1.35 monospace;';
+            const header = document.createElement('div');
+            header.style.cssText =
+                'display:flex;gap:8px;align-items:center;padding:3px 6px;' +
+                'background:#111;color:#ccc;border-top:1px solid #333;cursor:pointer;user-select:none';
+            const title = document.createElement('span');
+            title.textContent = '▾ debug logs';
+            title.style.flex = '1';
+            const copyBtn = document.createElement('button');
+            copyBtn.textContent = 'copy';
+            copyBtn.style.cssText = 'font:11px monospace';
+            const clearBtn = document.createElement('button');
+            clearBtn.textContent = 'clear';
+            clearBtn.style.cssText = 'font:11px monospace';
+            const box = document.createElement('div');
+            box.style.cssText =
+                'overflow:auto;color:#9f9;padding:4px 6px;white-space:pre-wrap;word-break:break-word;' +
+                'height:' + PANEL_VH + 'vh';
+            header.append(title, copyBtn, clearBtn);
+            panel.append(header, box);
+
+            let collapsed = false;
+            const apply = () => {
+                box.style.display = collapsed ? 'none' : 'block';
+                title.textContent = (collapsed ? '▸' : '▾') + ' debug logs';
+                // Reserve page space so the panel never permanently hides page content
+                // (e.g. the bottom of the metrics graph). Collapsed → just the header bar.
+                document.body.style.paddingBottom = collapsed ? '26px' : 'calc(' + PANEL_VH + 'vh + 26px)';
+            };
+            header.onclick = e => {
+                if (e.target === clearBtn || e.target === copyBtn) { return; }
+                collapsed = !collapsed;
+                apply();
+            };
+            clearBtn.onclick = () => { box.textContent = ''; };
+            copyBtn.onclick = () => {
+                // Rows are oldest-on-top (chronological), copy as-is.
+                const text = Array.from(box.children).map(r => r.textContent).join('\n');
+                const done = ok => {
+                    copyBtn.textContent = ok ? 'copied!' : 'copy failed';
+                    setTimeout(() => { copyBtn.textContent = 'copy'; }, 1500);
+                };
+                // navigator.clipboard needs a secure context (https/localhost); fall back to
+                // a temporary textarea + execCommand for plain-http LAN access from the phone.
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    let ok = false;
+                    try { ok = document.execCommand('copy'); } catch (_) {}
+                    document.body.removeChild(ta);
+                    done(ok);
+                }
+            };
+
+            const ready = () => { document.body.appendChild(panel); apply(); };
+            document.readyState === 'loading' ? addEventListener('DOMContentLoaded', ready) : ready();
+            log.on = (level, args) => {
+                const line = args
+                    .map(a => (typeof a === 'object' && a !== null ? Util.stringify(a) : String(a)))
+                    .join(' ');
+                const row = document.createElement('div');
+                row.style.color = level === 'error' ? '#f55' : level === 'warn' ? '#fd5' : '#9f9';
+                const d = new Date();
+                const ts =
+                    String(d.getHours()).padStart(2, '0') + ':' +
+                    String(d.getMinutes()).padStart(2, '0') + ':' +
+                    String(d.getSeconds()).padStart(2, '0') + '.' +
+                    String(d.getMilliseconds()).padStart(3, '0');
+                row.textContent = `${ts} [${level}] ${line}`;
+                // Stick to the end only when the user is already at the bottom and isn't
+                // selecting text inside the box (so manual scroll-up / text selection is preserved).
+                const slack = 4; // px tolerance for "at bottom"
+                const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - slack;
+                const sel = window.getSelection();
+                const selecting = sel && !sel.isCollapsed && box.contains(sel.anchorNode);
+                box.appendChild(row); // newest at the end
+                // Trim oldest rows (top) to keep DOM/memory bounded on long sessions
+                while (box.childElementCount > MAX_ROWS) {
+                    box.removeChild(box.firstChild);
+                }
+                if (wasAtBottom && !selecting) {
+                    box.scrollTop = box.scrollHeight;
+                }
+            };
+        }
+
         createApp({
             data() {
                 return {
@@ -474,12 +1357,21 @@
                     host: null,
                     bufferMin: 0,
                     bufferMax: 0,
+                    bufferMiddle: 0,
+                    editingBufferMax: false,
+                    bufferAmount: 0,
 
                     audioDump: options.dump ? new BinaryWriter() : undefined,
                     videoDump: options.dump ? new BinaryWriter() : undefined,
 
                     keySystem: null,
                     showSettings: false,
+
+                    theme: localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+                    controlsVisible: false,
+                    _controlsTimer: null,
+                    isFullscreen: false,
+
                     // Widevine-only robustness presets. Keyed by display label, the value is the
                     // comma-joined robustness string stored on `contentProtection[*].*Robustness`.
                     videoRobustnesses: new Map([
@@ -511,6 +1403,12 @@
 
                     startTime: 0,
                     adaptiveFrameSkipping: true,
+                    // Manual playback-rate override for testing (see onRateOverride). Value is 'auto' or 'x<rate>'
+                    // (e.g. 'x1.06'). The selector is only shown when ?playbackRate=... is in the URL.
+                    rateOverride: (typeof options.playbackRate === 'string' && options.playbackRate) || 'auto',
+                    showRateOverride: options.playbackRate != null,
+                    dynamicBuffer: options.dynamicBuffer ? true : false,
+                    sidePanel: options.sidePanel ? true : false, // dock the metrics panel to the right (large screens)
                     streamMetadata: null,
                     netDescription: "",
                     videoTracks: new Map(),
@@ -519,20 +1417,28 @@
                     activeBottomTab: 'graph',
                     messages: [],
                     unreadMessages: 0,
+
+                    // Timeline panel — the UITimeline widget owns the canvas/scrollbar/tooltip and all
+                    // per-sample data; these fields only mirror its state for the toolbar controls.
+                    tlAxis: 'reception',    // 'media' (DTS) | 'reception' (wall-clock)
+                    tlFollowing: true,      // play (pinned to live) | pause (frozen for inspection)
+                    tlWindow: 10,           // visible window in seconds
+                    tlWindows: [5, 10, 30, 60],
                     sourceType: undefined,
                     audioTracks: new Map(),
                     audioTrack: 'Audio',
                     audioTrackId: undefined,
-                    streamErrorMessage: null,
+                    streamError: null,
                     stats: new Map(),
                     times: new Array(),
                     hasMetrics:false,
                     deltaStats: {},
+                    freezeCount: 0,
                     uiStats: null,
                     player: null,
                     latencies: [],
                     netProfiles: new Map([
-                        ['-manual-', [
+                        ['custom', [
                             "Manually configure a buffer window large enough to compensate for variations caused by network fluctuations.",
                         ]],
                         ['ideal', [
@@ -546,7 +1452,7 @@
                         ['distant', [
                             "Streamer and player are significantly distant and/or the connection involves multiple intermediaries (e.g., VPNs, CDN providers).",
                             1000, 2000 // 1.5 seconds
-                        ]], 
+                        ]],
                         ['unstable', [
                             "A resilient configuration designed for maximum stability even on challenging networks, prioritizing robustness over low latency.",
                             2000, 4000 // 3 seconds
@@ -556,7 +1462,7 @@
                 }
             },
             mounted() {
-                this.controls = false;    
+                this.controls = false;
 
                 // init values
                 this.loadContentProtectionFromOptions();
@@ -566,6 +1472,41 @@
                 this.stream = options.stream || '';
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
                 this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
+                // Apply the initial side-by-side layout (from &sidePanel); the CSS only splits on wide screens.
+                document.documentElement.classList.toggle('layout-side', this.sidePanel);
+
+                // React to system theme changes
+                this._mql = matchMedia('(prefers-color-scheme: dark)');
+                this._mqlListener = () => { this.applyTheme(true); };
+                this._mql.addEventListener('change', this._mqlListener);
+
+                // Track fullscreen state so the overlay button can flip between expand/compress icons.
+                // iOS Safari uses native video fullscreen (webkit*fullscreen events on the video).
+                this._fsListener = () => {
+                    this.isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+                };
+                document.addEventListener('fullscreenchange', this._fsListener);
+                document.addEventListener('webkitfullscreenchange', this._fsListener);
+                this.$refs.video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
+                this.$refs.video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
+
+                // Debug: log raw <video> media events to diagnose freezes (append ?events to the URL).
+                // 'timeupdate' is intentionally excluded (too noisy).
+                if (options.events) {
+                    const video = this.$refs.video;
+                    // 'durationchange'/'progress' excluded: on Safari they fire on every fragment append (flood).
+                    const MEDIA_EVENTS = ['play', 'playing', 'pause', 'waiting', 'stalled', 'suspend', 'emptied',
+                        'ended', 'seeking', 'seeked', 'ratechange', 'canplay', 'canplaythrough', 'loadeddata',
+                        'loadedmetadata'];
+                    for (const name of MEDIA_EVENTS) {
+                        video.addEventListener(name, () => log('[event]', name,
+                            't=' + video.currentTime.toFixed(3),
+                            'paused=' + video.paused,
+                            'readyState=' + video.readyState,
+                            'rate=' + video.playbackRate,
+                            this.player ? 'speed=' + (this.player.playbackSpeed || 0).toFixed(2) : '').info());
+                    }
+                }
 
                 const drawContext = this.canvas.getContext('2d');
 
@@ -582,17 +1523,16 @@
                 const skippedAudio = []; this.stats.set("Skipped audio", skippedAudio);
                 const skippedVideo = []; this.stats.set("Skipped video", skippedVideo);
                 const stalls = []; this.stats.set("Stalls", stalls);
-                
+                const freezes = []; this.stats.set("Freezes", freezes);
+
                 this.uiStats = new UIMetrics(this.$refs.stats);
 
-                // Debug purpose : click right = dump & pause
-                this.$refs.video.addEventListener('contextmenu', (event) => {
-                    event.preventDefault();
-                    this.dump();
-                    this.player.paused = true;
-                });
-                
-         
+                // Timeline widget: owns its canvas/scrollbar/tooltip and render loop.
+                this.uiTimeline = new UITimeline(this.$refs.timelineBox);
+                this.uiTimeline.getMediaTime = () => (this.player ? this.player.currentTime * 1000 : undefined);
+                // Keep the play/pause button in sync when the user grabs the scrollbar (auto-pauses).
+                this.uiTimeline.onFollowingChange = following => { this.tlFollowing = following; };
+
                 setInterval(() => {
                     const player = this.player;
                     if(player) {
@@ -606,13 +1546,26 @@
                         if(bufferAmounts.length || stats.bufferAmount) {
                             bufferAmounts.push((stats.bufferAmount || 0)+"ms");
                         }
+                        this.bufferAmount = stats.bufferAmount || 0;
+                        // Reflect the live buffer target in the UI: middle is display-only, max overwrites
+                        // the input only while Dynamic Buffer is on (so manual editing isn't clobbered otherwise).
+                        this.bufferMiddle = player.bufferLimitMiddle;
+                        // reflect the live max unless the user is editing the field (don't clobber typing)
+                        if (this.dynamicBuffer && !this.editingBufferMax) {
+                            this.bufferMax = player.bufferLimitHigh;
+                            if (this.bufferMax != this._userBufferMax) {
+                                // values no longer match the selected profile → show the manual/custom entry
+                                this.netProfile = this.netProfiles.keys().next().value;
+                            }
+                        }
                         if(latencies.length || (options.latency && stats.latency)) {
                             latencies.push((stats.latency || 0) +"ms");
                         }
-                      
+
                         playbackRates.push((stats.playbackRate || 0).toFixed(2));
                         playbackSpeeds.push((stats.playbackSpeed || 0).toFixed(2));
                         fps.push((stats.videoPerSecond || 0).toFixed(2));
+
                         trackAudio.push(((stats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
                         trackVideo.push(((stats.videoTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
 
@@ -620,6 +1573,7 @@
                         skippedVideo.push((((stats.skippedVideo || 0) - (this.deltaStats.skippedVideo || 0)) /1000).toFixed(1)+"s");
 
                         stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
+                        freezes.push((this.freezeCount || 0) - (this.deltaStats.freezeCount || 0));
 
                         const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
                         if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
@@ -634,14 +1588,126 @@
                     this.uiStats.display(this.stats);
                 }, 700);
             },
+            beforeUnmount() {
+                if (this._mql && this._mqlListener) this._mql.removeEventListener('change', this._mqlListener);
+                if (this._fsListener) {
+                    document.removeEventListener('fullscreenchange', this._fsListener);
+                    document.removeEventListener('webkitfullscreenchange', this._fsListener);
+                }
+                if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                if (this.uiTimeline) this.uiTimeline.destroy();
+            },
             watch: {
                 // Bootstrap JS is not loaded here, so toggle `modal-open` on <body> manually so the
                 // page behind the dialog stops scrolling while the settings modal is visible.
                 showSettings(value) {
                     document.body.classList.toggle('modal-open', value);
+                },
+                // Dock the metrics panel to the right (large screens) by flagging <html>; the CSS handles the split.
+                sidePanel(value) {
+                    document.documentElement.classList.toggle('layout-side', value);
                 }
             },
             methods: {
+                // ── Error display ──
+                // Normalizes any error shape (Player onStop union, synthesized video onerror,
+                // synthesized input-validation error) into the structure the .player-alert renders:
+                //   { type, name, detail, fields: [{label, value}] }
+                // Anything not in ALERT_RESERVED_KEYS becomes a key/value chip so subsystem-specific
+                // context (mimeType, track, url, reason, code, …) is shown without per-variant UI.
+                setStreamError(error) {
+                    if (!error) { this.streamError = null; return; }
+                    const fields = [];
+                    for (const key of Object.keys(error)) {
+                        if (ALERT_RESERVED_KEYS.has(key)) { continue; }
+                        const value = error[key];
+                        if (value == null || value === '') { continue; }
+                        // Stringify primitives directly; for objects, fall back to JSON so they
+                        // don't render as "[object Object]".
+                        let display;
+                        if (typeof value === 'object') {
+                            try { display = JSON.stringify(value); } catch (_) { display = String(value); }
+                        } else {
+                            display = String(value);
+                        }
+                        fields.push({ label: key, value: display });
+                    }
+                    // Strip the redundant 'Error' suffix from union discriminants so the badge
+                    // reads 'SOURCE' rather than 'SOURCEERROR'.
+                    const type = (error.type || '').replace(/Error$/, '') || null;
+                    this.streamError = {
+                        type,
+                        name: error.name || 'Unknown error',
+                        detail: error.detail || null,
+                        fields
+                    };
+                },
+
+                // ── Theme ──
+                cycleTheme() {
+                    this.theme = THEME_CYCLE[(THEME_CYCLE.indexOf(this.theme) + 1) % THEME_CYCLE.length];
+                    localStorage.setItem('wrts-theme', this.theme);
+                    this.applyTheme();
+                },
+                applyTheme(systemChange = false) {
+                    const dark = systemChange? matchMedia('(prefers-color-scheme: dark)').matches : this.theme === 'dark';
+                    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+                },
+                themeIcon() {
+                    return { light: 'fa-sun', dark: 'fa-moon' }[this.theme];
+                },
+                themeTooltip() {
+                    return `Theme: ${this.theme} (click to cycle)`;
+                },
+
+                // ── Player overlay controls (fullscreen / stop on hover or tap) ──
+                onPlayerActivity(isTouch = false) {
+                    if (!this.isPlaying()) return;
+                    this._scheduleControls(isTouch);
+                },
+                onPlayerLeave() {
+                    if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                    this.controlsVisible = false;
+                },
+                onPlayerTouch(event) {
+                    if (!this.isPlaying()) return;
+                    // Treat the touch as button-targeted only when controls are *already* visible —
+                    // otherwise the user can't see the button, so any tap there must just mean "reveal".
+                    const onButton = this.controlsVisible && event.target.closest('.pc-btn');
+                    if (onButton) {
+                        // Let the synthetic click reach the button; just refresh the auto-hide timer.
+                        this._scheduleControls(true);
+                        return;
+                    }
+                    // Suppress the synthetic click on the player surface so a single tap can't
+                    // accidentally hit a button that wasn't visible yet (first-tap-reveals).
+                    event.preventDefault();
+                    if (this.controlsVisible) {
+                        // Tap on the video while controls are visible → dismiss immediately.
+                        if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                        this.controlsVisible = false;
+                    } else {
+                        this._scheduleControls(true);
+                    }
+                },
+                _scheduleControls(/* isTouch */) {
+                    this.controlsVisible = true;
+                    if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                    // 3s for both touch and desktop. Tap outside / mouseleave hides immediately.
+                    this._controlsTimer = setTimeout(() => {
+                        this.controlsVisible = false;
+                    }, 3000);
+                },
+                onPlayerContextMenu(event) {
+                    // Hidden debug shortcut: right-click on the player → dump current buffers and pause.
+                    // (Listener lives on the .player container so the overlay can't swallow it.)
+                    event.preventDefault();
+                    this.dump();
+                    if (this.player) {
+                        this.player.paused = true;
+                    }
+                },
+
                 buildStream() {
                     if(!this.stream) {
                         this.stream  = 'out+de1e6f7c-e5db-450b-9603-c3644274779b';
@@ -802,7 +1868,7 @@
                     }
                 },
 
-                
+
                 play() {
                     this.startTime = Util.time();
                     log('Play stream', this.stream, 'with options', options).info();
@@ -811,10 +1877,13 @@
                         return;
                     }
                     // reset error
-                    this.streamErrorMessage = null; 
+                    this._lastMediaError = null;
+                    this.setStreamError(null);
                     // reset stats!
                     this.resetMetrics(true);
                     this.resetMessages();
+                    this.uiTimeline.reset();
+                    this.tlFollowing = true;
                     // reset dump if activated
                     if(this.audioDump) {
                         this.audioDump.clear();
@@ -826,7 +1895,11 @@
                     // build params
                     const params = this.buildConnectParams();
                     if(!params.streamName) {
-                        this.streamErrorMessage = "Enter a non-empty stream name or URL to play";
+                        this.setStreamError({
+                            type: 'Input',
+                            name: 'Missing stream',
+                            detail: 'Enter a non-empty stream name or URL to play.'
+                        });
                         return;
                     }
 
@@ -837,11 +1910,31 @@
                     videoElement.autoplay = true;
                     videoElement.onloadeddata = () => {
                         log('TTFF :', Util.time()-this.startTime).info();
+                        this.playState = PlayState.PLAYING;
                     };
                     videoElement.onerror = () => {
                         const mediaError = videoElement.error;
                         if (mediaError) {
-                            log('Media error code:', mediaError.code, 'Details:', mediaError.message).error();
+                            // Capture it: the Player resets the video element before calling onStop,
+                            // which clears videoElement.error. We read this snapshot in onStop so the
+                            // real root cause survives instead of being overwritten by the symptom.
+                            this._lastMediaError = { code: mediaError.code, message: mediaError.message };
+                            log(
+                                '>>> VIDEO MediaError:',
+                                MEDIA_ERROR_NAMES[mediaError.code] || mediaError.code,
+                                '(code ' + mediaError.code + ')',
+                                'message:',
+                                mediaError.message || '(empty)'
+                            ).error();
+                            // The Player will usually emit a richer 'Playback error' via onStop right after,
+                            // which will overwrite this. But surface the native MediaError immediately in
+                            // case onStop doesn't fire (e.g. error happens before the player is wired up).
+                            this.setStreamError({
+                                type: 'Video',
+                                name: MEDIA_ERROR_NAMES[mediaError.code] || 'Media playback error',
+                                detail: mediaError.message || undefined,
+                                code: mediaError.code
+                            });
                         }
                     };
 
@@ -851,28 +1944,51 @@
                     this.player.onStop = this.onStop.bind(this);
                     this.player.onTrackChange = this.onTrackChange.bind(this);
                     this.player.onMetadata = this.onMetadata.bind(this);
-                   
+                    // Count silent freezes. Detection is always on in the Player (recovery/drop-to-1x is gated by
+                    // Dynamic Buffer), so this counts freezes in manual rate testing too. Subscribe additively so
+                    // the Player's own freeze log still runs.
+                    this.freezeCount = 0;
+                    this.player.on('Freeze', () => { ++this.freezeCount; });
+
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
                     this.player.onData = (track, time, duration, data) => {
                         this.pushMessage(track, time, data);
+                        this.uiTimeline.pushData(track, { time, duration, data });
                         const codec = this.player.metadata.tracks.get(track)?.codecString;
                         log(
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
                         ).info();
                     };
+                    // Per-sample reception feed for the Timeline widget
+                    this.player.onVideo = (track, sample) => this.uiTimeline.pushVideo(track, sample);
+                    this.player.onAudio = (track, sample) => this.uiTimeline.pushAudio(track, sample);
                     this.player.onMediaKeys = (mediaKeysEngine) => {
                         log('MediaKeysEngine', mediaKeysEngine? 'started' : 'stopped').info();
                         // Update enabled DRM based on the active key system
                         this.keySystem = mediaKeysEngine? mediaKeysEngine.keySystem : null;
                     }
-              
-                    this.setBuffer(); // to set buffer size!
+                    this.player.onBufferChange = () => {
+                        if (this.rateOverride !== 'auto') {
+                            // Manual test override: hold a fixed rate (see the Rate selector; value is 'x<rate>').
+                            const rate = Number(this.rateOverride.slice(1));
+                            if (videoElement.playbackRate !== rate) {
+                                videoElement.playbackRate = rate;
+                            }
+                        } else {
+                            // Freeze recovery (don't accelerate while a stall recovers) is handled inside the
+                            // Player now — see Player.stallRecovery, enabled by DynamicBuffer.
+                            this.player.adjustPlaybackRate();
+                        }
+                    };
+
+                    // setBuffer() applies the configured min/max and, if the Dynamic Buffer toggle is on, hands
+                    // bufferLimitHigh to auto-tuning (baselined at the configured value).
+                    this.setBuffer();
                     this.player.start(params, options.timeout);
                 },
                 onStart() {
                     log('onStart').info();
-                    this.playState = PlayState.PLAYING;
                     this.player.reliable = !this.adaptiveFrameSkipping;
                     if(options.combinable != null) {
                         this.player.tracksCombinable = options.combinable ? true : false;
@@ -882,13 +1998,42 @@
                     this.player.cmcdSid = options.cmcdSid;
                 },
                 onStop(error) {
+                    const videoElement = this.$refs.video;
                     if(error) {
                         log('onStop', error).error();
-                        this.streamErrorMessage = error.name;
+                        // Surface the native MediaError: an "Append buffer issue" with
+                        // "HTMLMediaElement.error attribute is not null" is a *secondary* symptom — the
+                        // <video> element failed first. Prefer the snapshot captured by onerror because
+                        // the Player resets the video element before this fires, clearing videoElement.error;
+                        // fall back to a live read in case onerror never ran.
+                        const mediaError = this._lastMediaError || videoElement.error;
+                        if (mediaError) {
+                            log(
+                                '>>> ROOT CAUSE VIDEO MediaError:',
+                                MEDIA_ERROR_NAMES[mediaError.code] || mediaError.code,
+                                '(code ' + mediaError.code + ')',
+                                'message:',
+                                mediaError.message || '(empty)'
+                            ).error();
+                        }
+                        // Prefer the native MediaError for the on-screen alert: when the <video>
+                        // element has failed (e.g. PIPELINE_ERROR_DECODE), the Player's onStop error
+                        // is usually a downstream symptom ("Append buffer issue"). Show the root cause
+                        // and keep the player error as an extra field for context.
+                        if (mediaError) {
+                            this.setStreamError({
+                                type: 'Video',
+                                name: MEDIA_ERROR_NAMES[mediaError.code] || 'Media playback error',
+                                detail: mediaError.message || undefined,
+                                code: mediaError.code,
+                                cause: error.name
+                            });
+                        } else {
+                            this.setStreamError(error);
+                        }
                     } else {
                         log('onStop').info();
                     }
-                    const videoElement = this.$refs.video;
                     videoElement.muted = this.muted;
                     videoElement.autoplay = true;
                     videoElement.onloadeddata = null;
@@ -902,9 +2047,16 @@
                     this.videoTrackId = undefined;
                     this.streamMetadata = null;
 
+                    if (this.player) {
+                        // Pin the current target to a concrete value: this turns the owned auto-tuner off
+                        // (clearing its timer) before we drop the player.
+                        this.player.bufferLimitHigh = this.bufferMax;
+                    }
                     this.player = null;
                     this.playState = PlayState.STOPPED;
                     this.keySystem = null;
+                    this.controlsVisible = false;
+                    if (this._controlsTimer) { clearTimeout(this._controlsTimer); this._controlsTimer = null; }
                 },
                 onTrackChange(audioTrack, videoTrack, dataTrack) {
                     log(`onTrackChange ${Util.stringify({audioTrack, videoTrack, dataTrack})}`).info();
@@ -925,7 +2077,7 @@
                     this.videoTracks = new Map();
 
                     for (const [id, track] of metadata.tracks) {
-                
+
                         if (track.type === Media.Type.VIDEO) {
                             this.videoTracks.set(id, track.toString());
                         } else if (track.type === Media.Type.AUDIO) {
@@ -939,6 +2091,10 @@
                         this.unreadMessages = 0;
                         this.scrollMessagesToBottom();
                     }
+                },
+                toggleSidePanel() {
+                    this.sidePanel = !this.sidePanel; // the sidePanel watcher flags <html> for the CSS split
+                    this.updateURL();
                 },
                 resetMessages() {
                     this.messages = [];
@@ -975,6 +2131,23 @@
                     }
                     this.scrollMessagesToBottom();
                 },
+
+                // ── Timeline (UITimeline widget controls) ──
+                toggleTimelineFollow() {
+                    this.tlFollowing = !this.tlFollowing;
+                    this.uiTimeline.following = this.tlFollowing;
+                },
+                setTimelineAxis(axis) {
+                    this.tlAxis = axis;
+                    this.uiTimeline.axis = axis;
+                },
+                setTimelineWindow(seconds) {
+                    this.tlWindow = seconds;
+                    this.uiTimeline.windowDuration = seconds;
+                },
+                downloadTimeline() {
+                    this.download('timeline.csv', this.uiTimeline.toCSV(), 'text/csv;charset=utf-8;');
+                },
                 mute() {
                     this.muted = !this.muted;
                     this.$refs.video.muted = this.muted;
@@ -1005,7 +2178,7 @@
                     if (this.player) {
                         let playerStats = this.player.computeStats();
                         const {skippedAudio, skippedVideo, stallCount} = playerStats;
-                        this.deltaStats = { skippedAudio, skippedVideo, stallCount} ;
+                        this.deltaStats = { skippedAudio, skippedVideo, stallCount, freezeCount: this.freezeCount };
                     }
                     const displayableCount = all ? 0 : this.uiStats.displayableCount;
                     for(let [_, values] of this.stats) {
@@ -1037,7 +2210,7 @@
                         max = Math.max(max, values.length);
                     }
                     csv = headers.join(';');
-                    
+
                     // Write CSV
                     for (let i = 0; i < max; ++i) {
                         csv += '\n';
@@ -1063,42 +2236,34 @@
                 },
                 fullscreen() {
                     const video = this.$refs.video;
+                    const target = this.$refs.player; // fullscreen the container so our overlay stays reachable
 
-                    if (document.fullscreenElement) {
-                        if(document.exitFullscreen) {
-                            document.exitFullscreen();
-                        } else if(video && video.webkitExitFullscreen) {
-                            video.webkitExitFullscreen();
-                        }
+                    // Already in fullscreen → exit. Prefer the standard exit path.
+                    if (document.fullscreenElement || document.webkitFullscreenElement) {
+                        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
                         return;
-                    } 
-
-                    if(!video) {
+                    }
+                    // iOS Safari can only fullscreen the <video> itself (native player UI exits via "Done").
+                    if (video && video.webkitDisplayingFullscreen) {
+                        video.webkitExitFullscreen && video.webkitExitFullscreen();
                         return;
                     }
 
-                    if(video.requestFullscreen) {
-                         video.requestFullscreen();
-                    } else if(video.webkitEnterFullscreen) {
+                    if (target && target.requestFullscreen) {
+                        target.requestFullscreen();
+                    } else if (target && target.webkitRequestFullscreen) {
+                        target.webkitRequestFullscreen();
+                    } else if (video && video.webkitEnterFullscreen) {
+                        // iOS Safari fallback: native fullscreen on the video element only.
                         video.webkitEnterFullscreen();
-                    } else if(video.enterFullscreen) {
-                        video.enterFullscreen();
                     }
-                },
-                playButtonCaption() {
-                    if (this.isStopped())
-                        return 'Play';
-                    if (this.isStarting())
-                        return 'Starting...';
-                    if (this.isPlaying())
-                        return 'Stop';
                 },
                 activeDrmLabel() {
                     if (!this.keySystem) {
-                        return 'protection';
+                        return 'Protection';
                     }
                     const drm = this.contentProtection.find(d => this.isDrmActive(d));
-                    return drm ? drm.label : 'protection';
+                    return drm ? drm.label : 'Protection';
                 },
                 isPlaying() {
                     return this.playState === PlayState.PLAYING;
@@ -1140,31 +2305,35 @@
                         }
                     }
 
-                    
+
                     if (this.player) {
                         // fix possible player correction!
                         this.bufferMin = (this.player.bufferLimitLow = this.bufferMin);
                         this.bufferMax = (this.player.bufferLimitHigh = this.bufferMax);
                     }
-                    
+                    // Remember the configured max (reference for the "changed" highlight).
+                    this._userBufferMax = this.bufferMax;
+                    if (this.player && this.dynamicBuffer) {
+                        // Hand the target back to auto-tuning, baselined at the value just configured
+                        // (bufferLimitHigh = undefined enables/re-baselines DynamicBuffer).
+                        this.player.bufferLimitHigh = undefined;
+                    }
+
                     // Display user description
                     this.netDescription = profile[0];
-                    this.netDescription += "<br>Expected buffering ≈" + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + "ms";
+                    this.netDescription += '<br><strong>Expected buffering ≈ ' + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + 'ms</strong>';
 
                     this.updateURL();
-                    
+
                 },
                 updateURL() {
-                    if (history.pushState) {
+                    if (history.replaceState) {
                         let path = location.origin + location.pathname + '?stream=' + encodeURIComponent(this.buildStream()) + '&bufferMin=' + this.bufferMin + '&bufferMax=' + this.bufferMax;
                         if(options.token != null) {
                             path += "&token=" + options.token;
                         }
                         if(options.id != null) {
                             path += "&id=" + options.id;
-                        }
-                        if(options.combinable != null) {
-                            path += "&combinable=" + options.combinable;
                         }
                         if(options.latency != null) {
                             path += "&latency";
@@ -1184,8 +2353,27 @@
                         if(!this.adaptiveFrameSkipping) {
                             path += "&reliable";
                         }
+                        if (options.combinable != null && !options.combinable) {
+                            console.log("combinable : ", options.combinable);
+                            path += "&combinable=false";
+                        }
                         if(options.dump) {
                             path += "&dump";
+                        }
+                        if(this.showRateOverride) {
+                            path += "&playbackRate=" + this.rateOverride;
+                        }
+                        if(this.dynamicBuffer) {
+                            path += "&dynamicBuffer";
+                        }
+                        if(this.sidePanel) {
+                            path += "&sidePanel";
+                        }
+                        if(options.debugoverlay) {
+                            path += "&debugoverlay";
+                        }
+                        if(options.events) {
+                            path += "&events";
                         }
                         if(options.host != null) {
                             path += "&host=" + options.host;
@@ -1194,7 +2382,13 @@
                         if (contentProtection) {
                             path += "&contentProtection=" + utf8ToBase64Url(contentProtection);
                         }
-                        history.pushState({path},'',path);
+                        // Skip if nothing changed, and use replaceState (not pushState) so settings
+                        // tweaks update the address bar in place instead of stacking history entries
+                        // the user then has to click back through.
+                        if (path === location.href) {
+                            return;
+                        }
+                        history.replaceState({path}, '', path);
                     }
                 },
                 mutableReliability() {
@@ -1213,6 +2407,32 @@
                 toggleAdaptive() {
                     this.adaptiveFrameSkipping = !this.adaptiveFrameSkipping;
                     this.onReliable();
+                },
+                onDynamicBuffer() {
+                    if (this.player) {
+                        if (this.dynamicBuffer) {
+                            this.rateOverride = 'auto'; // avoid the manual override fighting auto-tuning
+                            this.player.bufferLimitHigh = undefined; // hand the target to auto-tuning
+                        } else {
+                            // A concrete value pins the target and turns auto-tuning off.
+                            this.player.bufferLimitHigh = this.bufferMax;
+                            this.bufferMax = this.player.bufferLimitHigh; // reflect the pinned value
+                        }
+                    }
+                    this.updateURL();
+                },
+                // Apply the manual playback-rate override immediately (real-time testing). 'auto' hands control
+                // back to the Player's adjustPlaybackRate on the next buffer change.
+                onRateOverride() {
+                    const video = this.$refs.video;
+                    if (video && this.rateOverride !== 'auto') {
+                        video.playbackRate = Number(this.rateOverride.slice(1));
+                    }
+                    this.updateURL();
+                },
+                // True when DynamicBuffer has moved bufferMax away from the user-configured value.
+                isBufferDynamic() {
+                    return !!(this.player && this.dynamicBuffer && !this.editingBufferMax && this._userBufferMax != null && this.bufferMax != this._userBufferMax);
                 }
             },
         }).mount('#main');
