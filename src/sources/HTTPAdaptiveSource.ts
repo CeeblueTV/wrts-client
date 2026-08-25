@@ -44,6 +44,9 @@ export class HTTPAdaptiveSource extends Source {
     private _reliableController: AbortController;
     private _sequencePattern: string;
     private _maxSequenceDuration?: number;
+    // Duration of the last sequence received, only sent by the origin for a complete sequence:
+    // undefined means we are receiving the current real-time sequence, so nothing exists ahead of it
+    private _sequenceDuration?: number;
     private _cmcd?: CMCD;
     private _trackSeparator: string = '';
 
@@ -178,10 +181,15 @@ export class HTTPAdaptiveSource extends Source {
             async () => {
                 // STALL
                 stall = true;
+                this._upController?.abort();
+                if (this._sequenceDuration == null) {
+                    // The sequence in reception is the current real-time one, there is no sequence
+                    // ahead to skip to => keep receiving it rather than losing its end for nothing
+                    return;
+                }
                 // Cancel immediately media reception to try to skip sequences!
                 this._alterableController.abort();
                 this._skippableController.abort();
-                this._upController?.abort();
             },
             playing // for AbortSignal
         );
@@ -246,7 +254,15 @@ export class HTTPAdaptiveSource extends Source {
             // Compute Skip Sequences
             if (!this.reliable && playing.bufferState === BufferState.LOW && playing.buffering) {
                 // We can skip some frames while buffering because means a stall has occurred
-                if (this._maxSequenceDuration != null) {
+                if (this._sequenceDuration == null) {
+                    // No 'sequence-duration' header received => we are already on the current real-time
+                    // sequence, which is not complete yet: nothing to skip, the origin has nothing ahead
+                    this.log(
+                        `No sequence to skip, ${sequence} is the current real-time sequence ${Util.stringify({
+                            delay: metadata.liveTime - this.currentTime
+                        })}`
+                    ).warn();
+                } else if (this._maxSequenceDuration != null) {
                     let newSequence = Infinity;
                     let fixLiveTime = 0;
 
@@ -554,6 +570,12 @@ export class HTTPAdaptiveSource extends Source {
                 const maxSequenceDuration = parseInt(response.headers.get('max-sequence-duration') || '');
                 if (!isNaN(maxSequenceDuration)) {
                     this._maxSequenceDuration = maxSequenceDuration;
+                }
+                if (controller !== this._upController) {
+                    // 'sequence-duration' is only sent for a complete sequence, its absence tells that
+                    // we are on the current real-time sequence (bandwidth emulation reads a past sequence => ignore it)
+                    const sequenceDuration = parseInt(response.headers.get('sequence-duration') || '');
+                    this._sequenceDuration = isNaN(sequenceDuration) ? undefined : sequenceDuration;
                 }
 
                 if (response.error) {

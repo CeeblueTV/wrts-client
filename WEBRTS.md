@@ -37,13 +37,15 @@ The `HTTPAdaptiveSource` is a pull-based protocol, fetching media in sequences (
 
 1.  **Stall/Low Buffer Detection**: The `Player` notifies the `HTTPAdaptiveSource` when the buffer state becomes `LOW` or when a playback `stall` is detected.
 
-2.  **Abort Current Downloads**: If the `reliable` property is `false`, the source immediately aborts any ongoing video segment downloads. This frees up the network connection instantly.
+2.  **Abort Current Downloads**: If the `reliable` property is `false` and a newer sequence is already available on the origin (see step 4), the source immediately aborts any ongoing video segment downloads. This frees up the network connection instantly.
 
 3.  **Calculate the Delay**: The source calculates the time difference between the current playback time and the live edge (`delay = metadata.liveTime - player.currentTime`).
 
 4.  **Skip Sequences**: If the calculated `delay` is larger than the duration of a sequence, the client will not download the next expected media sequence. Instead, it increments the sequence number and effectively "skips" that segment of video. It repeats this until the `delay` is smaller than a sequence duration.
 
     *Example*: If the player is 2.5 seconds behind the live edge and each sequence is 1 second long, it will skip sequences `n` and `n+1` and will try to download sequence `n+2`.
+
+    Skipping only makes sense when the client is genuinely *behind*, so it is conditioned on the `Sequence-Duration` response header: the origin sends it only for a sequence it has already completed. Its absence means the client is receiving the current real-time sequence, which is still open — no sequence exists ahead of it. In that case the client keeps receiving it instead of aborting and requesting a sequence the origin cannot serve yet (which the origin answers with a `404`, ending the playback). This matters when the publisher itself is late: the delay grows while the client is already at the live edge, and only the publisher can resolve it.
 
 5.  **Prioritize Audio**: In severe congestion scenarios, the client can be configured to download only the audio and the first frame of the video sequence. This ensures that the audio remains continuous (which is less jarring to the user than broken audio) while providing a visual update, even if it's just a single frame, before resuming smooth video playback once the connection improves.
 
