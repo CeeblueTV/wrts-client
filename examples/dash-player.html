@@ -831,6 +831,14 @@
                         <i class="fas" :class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
                         {{ muted ? 'Unmute' : 'Mute' }}
                     </button>
+
+                    <button class="btn" title="Jump to live position"
+                        :class="{ 'btn-red': latency > latencyLimit }"
+                        :disabled="latency <= latencyLimit"
+                        @click="goLive()">
+                        <i class="fas fa-rocket"></i>
+                        Live
+                    </button>
                 </div>
 
             </div>
@@ -864,6 +872,8 @@
                     muted: false,
                     host: null,
                     dash: null,
+                    latency: 0,
+                    latencyLimit: 0,
                     streamError: null,
                     theme: localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
                     controlsVisible: false,
@@ -888,6 +898,16 @@
                 document.addEventListener('webkitfullscreenchange', this._fsListener);
                 this.$refs.video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
                 this.$refs.video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
+                
+                setInterval(() => {
+                    if (!this.isPlaying()) {
+                        return;
+                    }
+                    this.latency = Math.round(this.dash.getCurrentLiveLatency() * 1000) || 0;
+                    // No dash.js equivalent of Player.bufferLimitMiddle: the live edge target is
+                    // the MPD suggestedPresentationDelay, exposed as getTargetLiveDelay().
+                    this.latencyLimit = Math.round(this.dash.getTargetLiveDelay() * 1000);
+                }, 700);
             },
             methods: {
                 // Manifest URL: a full URL typed by the user is used as-is, otherwise build the
@@ -924,6 +944,7 @@
                         this.$refs.video.removeAttribute('src');
                         this.$refs.video.load();
                         this.playState = PlayState.STOPPED;
+                        this.latency = this.latencyLimit = 0;
                         return;
                     }
                     this.streamError = null;
@@ -947,6 +968,12 @@
                         log('DASH error', error).error();
                     });
                     this.dash.initialize(video, url, true);
+                },
+
+                goLive() {
+                    if (this.dash) {
+                        this.dash.seekToOriginalLive();
+                    }
                 },
 
                 mute() {
