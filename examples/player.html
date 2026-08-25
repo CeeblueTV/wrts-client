@@ -573,47 +573,6 @@
             .msg-track { color: var(--accent-b); font-weight: 500; }
             .msg-time  { color: var(--txt-m); }
 
-            /* ── Timeline ── */
-            .tl-toolbar {
-                display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-                margin-bottom: 8px;
-            }
-            /* Match the .btn controls (follow, CSV) to the segmented-control size in this row. */
-            .tl-toolbar .btn { padding-top: 5px; padding-bottom: 5px; font-size: 12px; }
-            .tl-seg {
-                display: inline-flex; border: 1px solid var(--border);
-                border-radius: var(--r-sm); overflow: hidden;
-            }
-            .tl-seg button {
-                background: var(--bg-e); border: none; color: var(--txt-2);
-                font-family: var(--f-body); font-size: 12px; font-weight: 500;
-                padding: 5px 11px; cursor: pointer; transition: all var(--t);
-            }
-            .tl-seg button + button { border-left: 1px solid var(--border); }
-            .tl-seg button.on { background: var(--accent); color: #fff; }
-            .tl-seg button:hover:not(.on) { background: var(--bg-h); color: var(--txt); }
-            /* View-tracking state button — color-coded (solid teal = following the latest, amber = frozen). */
-            .tl-followbtn { min-width: 96px; justify-content: center; font-weight: 500; gap: 7px; }
-            .tl-followbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-            .tl-followbtn.on:hover:not(:disabled) { background: var(--accent-b); border-color: var(--accent-b); color: #fff; }
-            .tl-followbtn.off { background: rgba(230,168,23,.16); border-color: rgba(230,168,23,.55); color: var(--warn); }
-            .tl-followbtn.off:hover:not(:disabled) { background: rgba(230,168,23,.26); border-color: var(--warn); color: var(--warn); }
-            .tl-spacer { flex: 1; }
-            .tl-legend {
-                display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-                font-size: 11px; color: var(--txt-2);
-            }
-            .tl-legend span { display: inline-flex; align-items: center; gap: 4px; }
-            .tl-legend i.dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-            .tl-box {
-                position: relative;
-                background: var(--bg-s);
-                border: 1px solid var(--border);
-                border-radius: var(--r-sm);
-                overflow: hidden;
-                min-height: 60px;
-            }
-
             /* ── Modal ── */
             .modal-back {
                 position: fixed; inset: 0;
@@ -924,8 +883,6 @@
                             Messages
                             <span class="tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
                         </button>
-                        <button class="tab-btn" :class="{ on: activeBottomTab === 'timeline' }"
-                            @click="selectBottomTab('timeline')">Timeline</button>
                     </div>
 
                     <div class="tab-body">
@@ -952,43 +909,6 @@
                                     <span class="msg-time"> {{ message.receivedAt }} </span>{{ message.text }}
                                 </div>
                             </div>
-                        </div>
-
-                        <!-- Timeline (rendered by the UITimeline library widget into tl-box) -->
-                        <div v-show="activeBottomTab === 'timeline'">
-                            <div class="tl-toolbar">
-                                <button class="btn tl-followbtn" :class="tlFollowing ? 'on' : 'off'"
-                                    :title="tlFollowing ? 'Following the latest data — click to freeze, then drag the timeline to inspect the past' : 'Frozen — click to follow the latest data'"
-                                    @click="toggleTimelineFollow()">
-                                    <i class="fas" :class="tlFollowing ? 'fa-angles-right' : 'fa-lock'"></i>
-                                    <span>{{ tlFollowing ? 'Follow' : 'Frozen' }}</span>
-                                </button>
-                                <div class="tl-seg" title="Choose the time axis: stream timestamps (DTS) to spot desync, or wall-clock reception to spot late/slow tracks">
-                                    <button :class="{ on: tlAxis === 'media' }" @click="setTimelineAxis('media')">Media DTS</button>
-                                    <button :class="{ on: tlAxis === 'reception' }" @click="setTimelineAxis('reception')">Reception</button>
-                                </div>
-                                <div class="tl-seg" title="Visible time window">
-                                    <button v-for="w in tlWindows" :class="{ on: tlWindow === w }"
-                                        @click="setTimelineWindow(w)">{{ w }}s</button>
-                                </div>
-                                <button class="btn btn-icon" title="Download sequences as a CSV file"
-                                    @click="downloadTimeline()">
-                                    <i class="fas fa-download"></i>
-                                </button>
-                                <div class="tl-spacer"></div>
-                                <div class="tl-legend" title="Reception health: ratio of reception duration to media duration of each sequence">
-                                    <span>
-                                        <i class="dot" style="background:var(--ok)"></i>on time
-                                    </span>
-                                    <span>
-                                        <i class="dot" style="background:var(--warn)"></i>slow
-                                    </span>
-                                    <span>
-                                        <i class="dot" style="background:var(--err)"></i>congested
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="tl-box" ref="timelineBox"></div>
                         </div>
                     </div>
                 </div>
@@ -1115,7 +1035,7 @@
         <!-- .shell -->
     </body>
     <script type="module">
-        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, UITimeline, VERSION, utils } from "../dist/wrts-client.bundle.js";
+        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, VERSION, utils } from "../dist/wrts-client.bundle.js";
         // development version, includes helpful console warnings
         // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
         // production version, optimized for size and speed
@@ -1347,13 +1267,6 @@
                     activeBottomTab: 'graph',
                     messages: [],
                     unreadMessages: 0,
-
-                    // Timeline panel — the UITimeline widget owns the canvas/scrollbar/tooltip and all
-                    // per-sample data; these fields only mirror its state for the toolbar controls.
-                    tlAxis: 'reception',    // 'media' (DTS) | 'reception' (wall-clock)
-                    tlFollowing: true,      // play (pinned to live) | pause (frozen for inspection)
-                    tlWindow: 10,           // visible window in seconds
-                    tlWindows: [5, 10, 30, 60],
                     sourceType: undefined,
                     audioTracks: new Map(),
                     audioTrack: 'Audio',
@@ -1435,12 +1348,6 @@
 
                 this.uiStats = new UIMetrics(this.$refs.stats);
 
-                // Timeline widget: owns its canvas/scrollbar/tooltip and render loop.
-                this.uiTimeline = new UITimeline(this.$refs.timelineBox);
-                this.uiTimeline.getMediaTime = () => (this.player ? this.player.currentTime * 1000 : undefined);
-                // Keep the play/pause button in sync when the user grabs the scrollbar (auto-pauses).
-                this.uiTimeline.onFollowingChange = following => { this.tlFollowing = following; };
-
                 setInterval(() => {
                     const player = this.player;
                     if(player) {
@@ -1490,7 +1397,6 @@
                     document.removeEventListener('webkitfullscreenchange', this._fsListener);
                 }
                 if (this._controlsTimer) clearTimeout(this._controlsTimer);
-                if (this.uiTimeline) this.uiTimeline.destroy();
             },
             watch: {
                 // Bootstrap JS is not loaded here, so toggle `modal-open` on <body> manually so the
@@ -1773,8 +1679,6 @@
                     // reset stats!
                     this.resetMetrics(true);
                     this.resetMessages();
-                    this.uiTimeline.reset();
-                    this.tlFollowing = true;
                     // reset dump if activated
                     if(this.audioDump) {
                         this.audioDump.clear();
@@ -1840,15 +1744,11 @@
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
                     this.player.onData = (track, time, duration, data) => {
                         this.pushMessage(track, time, data);
-                        this.uiTimeline.pushData(track, { time, duration, data });
                         const codec = this.player.metadata.tracks.get(track)?.codecString;
                         log(
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
                         ).info();
                     };
-                    // Per-sample reception feed for the Timeline widget
-                    this.player.onVideo = (track, sample) => this.uiTimeline.pushVideo(track, sample);
-                    this.player.onAudio = (track, sample) => this.uiTimeline.pushAudio(track, sample);
                     this.player.onMediaKeys = (mediaKeysEngine) => {
                         log('MediaKeysEngine', mediaKeysEngine? 'started' : 'stopped').info();
                         // Update enabled DRM based on the active key system
@@ -2001,23 +1901,6 @@
                         this.unreadMessages += 1;
                     }
                     this.scrollMessagesToBottom();
-                },
-
-                // ── Timeline (UITimeline widget controls) ──
-                toggleTimelineFollow() {
-                    this.tlFollowing = !this.tlFollowing;
-                    this.uiTimeline.following = this.tlFollowing;
-                },
-                setTimelineAxis(axis) {
-                    this.tlAxis = axis;
-                    this.uiTimeline.axis = axis;
-                },
-                setTimelineWindow(seconds) {
-                    this.tlWindow = seconds;
-                    this.uiTimeline.windowDuration = seconds;
-                },
-                downloadTimeline() {
-                    this.download('timeline.csv', this.uiTimeline.toCSV(), 'text/csv;charset=utf-8;');
                 },
                 mute() {
                     this.muted = !this.muted;
