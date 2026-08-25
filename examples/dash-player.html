@@ -463,20 +463,19 @@
             }
             .ctrl-row .btn, .ctrl-row .tog { width: 100%; justify-content: center; }
 
-            /* Network profile + buffer min/max — single compact row.
+            /* Network profile + buffer target — single compact row.
                Grid-template-areas keep description glued under profile on mobile. */
             .net-row {
                 display: grid;
-                grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+                grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
                 grid-template-areas:
-                    'profile bufmin bufmax'
-                    'desc    desc   desc';
+                    'profile buftarget'
+                    'desc    desc';
                 gap: 8px;
                 align-items: end;
             }
             .net-row .net-prof { grid-area: profile; }
-            .net-row .buf-min  { grid-area: bufmin; }
-            .net-row .buf-max  { grid-area: bufmax; }
+            .net-row .buf-target { grid-area: buftarget; }
             .net-row .net-desc { grid-area: desc; }
             .net-row .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -750,7 +749,7 @@
                     grid-template-areas:
                         'profile profile'
                         'desc    desc'
-                        'bufmin  bufmax';
+                        'buftarget buftarget';
                 }
                 .row2 { grid-template-columns: 1fr; }
                 .rob-row { grid-template-columns: 1fr; }
@@ -855,12 +854,29 @@
                     </button>
 
                     <button class="btn" title="Jump to live position"
-                        :class="{ 'btn-red': latency > latencyLimit }"
-                        :disabled="latency <= latencyLimit"
+                        :class="{ 'btn-red': latency > bufferTarget }"
+                        :disabled="latency <= bufferTarget"
                         @click="goLive()">
                         <i class="fas fa-rocket"></i>
                         Live
                     </button>
+                </div>
+
+                <!-- Network profile + buffer target (single compact row). -->
+                <div class="net-row gap-panel">
+                    <div class="net-prof">
+                        <span class="lbl">Network profile</span>
+                        <select class="sel" v-model="netProfile" @change="setBuffer()">
+                            <option :value="profil" v-for="[profil, _] of netProfiles">{{ profil }}</option>
+                        </select>
+                    </div>
+                    <div class="buf-target">
+                        <span class="lbl">Buffer target (ms)</span>
+                        <input class="inp" type="number" min="0"
+                            required oninput="validity.valid||(value='');"
+                            v-model="bufferTarget" @change="setBuffer(this.bufferTarget)">
+                    </div>
+                    <p class="net-desc" v-html="netDescription"></p>
                 </div>
 
             </div>
@@ -895,7 +911,30 @@
                     host: null,
                     dash: null,
                     latency: 0,
-                    latencyLimit: 0,
+                    bufferTarget: 0,
+                    netDescription: "",
+                    netProfiles: new Map([
+                        ['-manual-', [
+                            "Manually configure a buffer target large enough to compensate for variations caused by network fluctuations.",
+                        ]],
+                        ['ideal', [
+                            "Ideal network conditions for low latency: streamer and player are geographically close with minimal intermediary hops.",
+                            350
+                        ]],
+                        ['normal', [
+                            "A stable and reliable network between streamer and player, making their geographical distance negligible.",
+                            600
+                        ]],
+                        ['distant', [
+                            "Streamer and player are significantly distant and/or the connection involves multiple intermediaries (e.g., VPNs, CDN providers).",
+                            1500
+                        ]],
+                        ['unstable', [
+                            "A resilient configuration designed for maximum stability even on challenging networks, prioritizing robustness over low latency.",
+                            3000
+                        ]],
+                    ]),
+                    netProfile: 'normal',
                     videoTracks: new Map(),
                     videoTrack: 'Video',
                     videoTrackId: undefined,
@@ -913,6 +952,7 @@
                 const host = options.host;
                 this.host = new NetAddress(host || location.host, 443);
                 this.stream = options.stream || '';
+                this.setBuffer(Number(options.bufferTarget));
 
                 // React to system theme changes
                 this._mql = matchMedia('(prefers-color-scheme: dark)');
@@ -932,9 +972,6 @@
                         return;
                     }
                     this.latency = Math.round(this.dash.getCurrentLiveLatency() * 1000) || 0;
-                    // No dash.js equivalent of Player.bufferLimitMiddle: the live edge target is
-                    // the MPD suggestedPresentationDelay, exposed as getTargetLiveDelay().
-                    this.latencyLimit = Math.round(this.dash.getTargetLiveDelay() * 1000);
                 }, 700);
             },
             methods: {
@@ -970,7 +1007,7 @@
                         this.$refs.video.removeAttribute('src');
                         this.$refs.video.load();
                         this.playState = PlayState.STOPPED;
-                        this.latency = this.latencyLimit = 0;
+                        this.latency = 0;
                         this.resetTracks();
                         return;
                     }
@@ -997,7 +1034,35 @@
                         };
                         log('DASH error', error).error();
                     });
+                    this.setBuffer();
                     this.dash.initialize(video, url, true);
+                },
+
+                // dash.js targets a single live delay
+                setBuffer(target) {
+                    let profile;
+                    if(!isNaN(target)) {
+                        // manual mode
+                        profile = this.netProfiles.entries().next().value;
+                        this.netProfile = profile[0];
+                        profile = profile[1];
+
+                        this.bufferTarget = Number(target);
+                    } else {
+                        // auto mode
+                        profile = this.netProfiles.get(this.netProfile);
+                        if(profile[1]) {
+                            this.bufferTarget = profile[1];
+                        }
+                    }
+
+                    if (this.dash) {
+                        this.dash.updateSettings({ streaming: { delay: { liveDelay: this.bufferTarget / 1000 } } });
+                    }
+
+                    // Display user description
+                    this.netDescription = profile[0];
+                    this.netDescription += '<br><strong>Expected buffering ≈ ' + this.bufferTarget + 'ms</strong>';
                 },
 
                 goLive() {
