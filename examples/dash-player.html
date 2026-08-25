@@ -818,6 +818,28 @@
                     </div>
                 </div>
 
+                <!-- Track selects -->
+                <div class="row2 gap-panel">
+                    <div>
+                        <span class="lbl">Video track</span>
+                        <select class="sel" id="video-track-selection"
+                            :disabled="!isPlaying()"
+                            v-model="videoTrackId" @change="onVideoTrackChange()">
+                            <option :value="undefined" :key="videoTrack">AUTO — {{ videoTrack }}</option>
+                            <option v-for="[id, track] of videoTracks" :value="id">{{ track }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <span class="lbl">Audio track</span>
+                        <select class="sel" id="audio-track-selection"
+                            :disabled="!isPlaying()"
+                            v-model="audioTrackId" @change="onAudioTrackChange()">
+                            <option :value="undefined" :key="audioTrack">AUTO — {{ audioTrack }}</option>
+                            <option v-for="[id, track] of audioTracks" :value="id">{{ track }}</option>
+                        </select>
+                    </div>
+                </div>
+
                 <!-- Stream name (full width) -->
                 <div class="stream-row gap-panel">
                     <input class="inp" :disabled="!isStopped()"
@@ -874,6 +896,12 @@
                     dash: null,
                     latency: 0,
                     latencyLimit: 0,
+                    videoTracks: new Map(),
+                    videoTrack: 'Video',
+                    videoTrackId: undefined,
+                    audioTracks: new Map(),
+                    audioTrack: 'Audio',
+                    audioTrackId: undefined,
                     streamError: null,
                     theme: localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
                     controlsVisible: false,
@@ -912,8 +940,6 @@
             methods: {
                 // Manifest URL: a full URL typed by the user is used as-is, otherwise build the
                 // Ceeblue CMAF/DASH path '/cmaf/<stream>/index.mpd' on the configured host.
-                // (The '/live/<stream>.mpd' output of the same server is the ffmpeg-based one and
-                //  fails with 400 avformat_write_header on these streams.)
                 manifestURL() {
                     if (!this.stream) {
                         this.stream = 'out+de1e6f7c-e5db-450b-9603-c3644274779b';
@@ -945,9 +971,11 @@
                         this.$refs.video.load();
                         this.playState = PlayState.STOPPED;
                         this.latency = this.latencyLimit = 0;
+                        this.resetTracks();
                         return;
                     }
                     this.streamError = null;
+                    this.resetTracks();
 
                     const url = this.manifestURL();
                     log('Play DASH manifest', url).info();
@@ -958,6 +986,8 @@
 
                     this.dash = MediaPlayer().create();
                     this.dash.on(MediaPlayer.events.PLAYBACK_PLAYING, () => { this.playState = PlayState.PLAYING; });
+                    this.dash.on(MediaPlayer.events.STREAM_INITIALIZED, () => this.onMetadata());
+                    this.dash.on(MediaPlayer.events.QUALITY_CHANGE_RENDERED, e => this.onTrackChange(e.mediaType, e.newRepresentation));
                     this.dash.on(MediaPlayer.events.ERROR, e => {
                         const error = e.error || {};
                         this.streamError = {
@@ -973,6 +1003,74 @@
                 goLive() {
                     if (this.dash) {
                         this.dash.seekToOriginalLive();
+                    }
+                },
+
+                resetTracks() {
+                    this.audioTracks = new Map();
+                    this.audioTrack = 'Audio';
+                    this.audioTrackId = undefined;
+                    this.videoTracks = new Map();
+                    this.videoTrack = 'Video';
+                    this.videoTrackId = undefined;
+                },
+
+                onMetadata() {
+                    this.videoTracks = this.buildTracks('video');
+                    this.audioTracks = this.buildTracks('audio');
+                    for (const type of ['video', 'audio']) {
+                        const current = this.dash.getCurrentRepresentationForType(type);
+                        if (current) {
+                            this.onTrackChange(type, current);
+                        }
+                    }
+                    log(`onMetadata ${Util.stringify({ video: [...this.videoTracks.values()], audio: [...this.audioTracks.values()] })}`).info();
+                },
+
+                buildTracks(type) {
+                    const tracks = new Map();
+                    for (const representation of this.dash.getRepresentationsByType(type)) {
+                        let name = representation.codecs || representation.id;
+                        if (type === 'video') {
+                            name += ` ${representation.width}x${representation.height} ${representation.frameRate}fps`;
+                        }
+                        tracks.set(representation.id, `${name} ${representation.bitrateInKbit.toFixed()}kbps`);
+                    }
+                    return tracks;
+                },
+
+                onTrackChange(type, representation) {
+                    const tracks = type === 'video' ? this.videoTracks : this.audioTracks;
+                    const label = tracks.get(representation.id);
+                    if (type === 'video') {
+                        if (this.videoTrackId != null) {
+                            this.videoTrackId = representation.id;
+                        }
+                        this.videoTrack = label;
+                    } else {
+                        if (this.audioTrackId != null) {
+                            this.audioTrackId = representation.id;
+                        }
+                        this.audioTrack = label;
+                    }
+                    log(`onTrackChange ${type} ${label}`).info();
+                },
+
+                onVideoTrackChange() {
+                    this.setTrack('video', this.videoTrackId);
+                },
+
+                onAudioTrackChange() {
+                    this.setTrack('audio', this.audioTrackId);
+                },
+
+                setTrack(type, id) {
+                    if (!this.dash) {
+                        return;
+                    }
+                    this.dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { [type]: id == null } } } });
+                    if (id != null) {
+                        this.dash.setRepresentationForTypeById(type, id);
                     }
                 },
 
