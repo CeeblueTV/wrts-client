@@ -852,10 +852,9 @@
                         <i class="fas" :class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
                         {{ muted ? 'Unmute' : 'Mute' }}
                     </button>
-
                     <button class="btn" title="Jump to live position"
-                        :class="{ 'btn-red': latency > bufferTarget }"
-                        :disabled="latency <= bufferTarget"
+                        :class="{ 'btn-red': player && latency > bufferTarget + 500 }"
+                        :disabled="!player || latency <= bufferTarget + 500"
                         @click="goLive()">
                         <i class="fas fa-rocket"></i>
                         Live
@@ -879,6 +878,45 @@
                     <p class="net-desc" v-html="netDescription"></p>
                 </div>
 
+                <!-- Tabs -->
+                <div>
+                    <div class="tab-bar">
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'graph' }"
+                            @click="selectBottomTab('graph')">Graph</button>
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'messages' }"
+                            @click="selectBottomTab('messages')">
+                            Messages
+                            <span class="tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+                        </button>
+                    </div>
+
+                    <div class="tab-body">
+                        <!-- Graph -->
+                        <div v-show="activeBottomTab === 'graph'">
+                            <ul class="stats-list" ref="stats"></ul>
+                            <div class="stats-actions" v-show="hasMetrics">
+                                <img alt="Reset" title="Reset incremental metrics and rescale the chart"
+                                    @click="resetMetrics()" src="./assets/reload.png">
+                                <img alt="Download CSV" title="Download metrics as a CSV file"
+                                    @click="downloadStats()" src="./assets/download.png">
+                                <img alt="Dump media" title="Dump media as MP4 files"
+                                    @click="dump()" src="./assets/dump.png"
+                                    v-show="audioDump || videoDump">
+                            </div>
+                        </div>
+
+                        <!-- Messages -->
+                        <div v-show="activeBottomTab === 'messages'">
+                            <div class="msg-box" ref="messagesPanel">
+                                <div class="msg-empty" v-if="messages.length === 0">No data messages received yet.</div>
+                                <div v-for="(message, idx) in messages" :key="idx" class="msg-row">
+                                    <span class="msg-track">[{{ message.track }}]</span>
+                                    <span class="msg-time"> {{ message.receivedAt }} </span>{{ message.text }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <!-- #main -->
         </div>
@@ -888,7 +926,7 @@
         import { utils } from "../dist/wrts-client.bundle.js";
         import { MediaPlayer } from "../node_modules/dashjs/dist/modern/esm/dash.all.min.js";
         import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
-        const { Util, NetAddress, LogLevel, log } = utils;
+        const { EpochTime, Util, NetAddress, LogLevel, log, UIMetrics, ByteRate } = utils;
 
         log.level = LogLevel.INFO;
 
@@ -902,6 +940,11 @@
 
         const THEME_CYCLE = ['light', 'dark'];
 
+        // Media-time step, in seconds, above which a poll is a discontinuity rather than playback.
+        // Matches dash.js streaming.gaps.threshold: it never jumps a gap smaller than that, so
+        // nothing real is missed and playback-rate sampling noise never accumulates.
+        const DISCONTINUITY_THRESHOLD = 0.3;
+
         createApp({
             data() {
                 return {
@@ -909,10 +952,23 @@
                     stream: '',
                     muted: false,
                     host: null,
-                    dash: null,
+                    player: /** @type {import('dashjs').MediaPlayerClass | null} */ (null),
                     latency: 0,
                     bufferTarget: 0,
+                    // Off-screen frame grab, EpochTime decodes the e2e timestamp from its pixels
+                    canvas: document.createElement('canvas'),
                     netDescription: "",
+                    activeBottomTab: 'graph',
+                    // No data-message source yet on the DASH side, the panel stays empty
+                    messages: [],
+                    unreadMessages: 0,
+                    stats: new Map(),
+                    uiStats: null,
+                    hasMetrics: false,
+                    // Local and media time of each sample, first two columns of the CSV export
+                    times: [],
+                    // Incremental metrics, fed by the player events and reset on each play
+                    stalls: 0,
                     netProfiles: new Map([
                         ['-manual-', [
                             "Manually configure a buffer target large enough to compensate for variations caused by network fluctuations.",
@@ -966,12 +1022,106 @@
                 document.addEventListener('webkitfullscreenchange', this._fsListener);
                 this.$refs.video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
                 this.$refs.video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
-                
-                setInterval(() => {
-                    if (!this.isPlaying()) {
+
+                const drawContext = this.canvas.getContext('2d');
+
+                // Stats to be displayed in the UI
+                const bandwidths = []; this.stats.set("Bandwidth", bandwidths);
+                const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
+                const latencies = []; this.stats.set("Latency", latencies);
+                const e2eLatencies = []; this.stats.set("Latency e2e", e2eLatencies);
+                const playbackRates = []; this.stats.set("Playback rate", playbackRates);
+                const playbackSpeeds = []; this.stats.set("Playback speed", playbackSpeeds);
+                const fps = []; this.stats.set("Video FPS", fps);
+                const trackAudio = []; this.stats.set("Track audio", trackAudio);
+                const trackVideo = []; this.stats.set("Track video", trackVideo);
+                const stalls = []; this.stats.set("Stalls", stalls);
+
+                this.uiStats = new UIMetrics(this.$refs.stats);
+
+                let previousMeasurementTimestamp = null;
+                let previousPlaybackPosition = 0;
+                let previousFrames = 0;
+
+                this._recvBytes = new ByteRate(2000);
+
+                this._stalling = false;
+                this._userSeek = false;
+                this.$refs.video.addEventListener('waiting', () => {
+
+                    if (this._stalling || this.$refs.video.seeking || !this.isPlaying()) {
                         return;
                     }
-                    this.latency = Math.round(this.dash.getCurrentLiveLatency() * 1000) || 0;
+                    this._stalling = true;
+                    ++this.stalls;
+                });
+                this.$refs.video.addEventListener('playing', () => { this._stalling = false; });
+
+                setInterval(() => {
+                    if (!this.isPlaying()) {
+                        // A stop or a restart breaks the continuity of the deltas below
+                        previousMeasurementTimestamp = null;
+                        this.latency = 0;
+                        this.uiStats.display(this.stats);
+                        return;
+                    }
+                    this.hasMetrics = true;
+                    const video = this.$refs.video;
+                    const now = performance.now();
+                    const elapsedSeconds = previousMeasurementTimestamp === null
+                        ? 0
+                        : (now - previousMeasurementTimestamp) / 1000;
+                    // No delta available on the first poll after a (re)start
+                    const perSecond = delta => (elapsedSeconds ? delta / elapsedSeconds : 0);
+                    // A seek makes every media-time delta of this poll meaningless
+                    const seekOccurred = this._userSeek || video.seeking;
+                    this._userSeek = false;
+
+                    bandwidths.push(Math.round(this._recvBytes.value() * 8 / 1000) + "kbps");
+
+                    const buffer = Math.min(
+                        this.player.getTracksFor('audio').length ? this.player.getBufferLength('audio') : Infinity,
+                        this.player.getTracksFor('video').length ? this.player.getBufferLength('video') : Infinity
+                    );
+
+                    bufferAmounts.push((Number.isFinite(buffer) ? Math.round(buffer * 1000) : 0) + "ms");
+
+                    this.latency = Math.round(this.player.getCurrentLiveLatency() * 1000) || 0;
+                    latencies.push(this.latency + "ms");
+
+                    const e2eLatency = EpochTime.getLatency(video, this.canvas, drawContext);
+                    if (e2eLatencies.length || (e2eLatency > 0 && e2eLatency < 0xFFFF)) {
+                        e2eLatencies.push(e2eLatency + "ms");
+                    }
+
+                    const playbackRate = this.player.getPlaybackRate() || 0;
+                    playbackRates.push(playbackRate.toFixed(2));
+
+       
+                    const playbackPositionChange = video.currentTime - previousPlaybackPosition;
+                    // No delta on the first poll after a (re)start: the whole position would read as a jump
+                    const discontinuity = elapsedSeconds ? playbackPositionChange - elapsedSeconds * playbackRate : 0;
+                    const isDiscontinuous = Math.abs(discontinuity) > DISCONTINUITY_THRESHOLD;
+
+                    // A seek or a jump voids this poll's media-time delta: repeat the last value
+                    playbackSpeeds.push(seekOccurred || isDiscontinuous
+                        ? Math.max((playbackSpeeds.at(-1) ?? "0.00"),0)
+                        : perSecond(playbackPositionChange).toFixed(2));
+
+                    const frames = video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
+                    fps.push(perSecond(frames - previousFrames).toFixed(2));
+
+                    trackAudio.push((this.player.getCurrentRepresentationForType('audio')?.bitrateInKbit ?? 0).toFixed() + "kbps");
+                    trackVideo.push((this.player.getCurrentRepresentationForType('video')?.bitrateInKbit ?? 0).toFixed() + "kbps");
+
+                    stalls.push(this.stalls);
+                    this.times.push({ time: new Date().toISOString(), mediaTime: video.currentTime });
+
+                    previousMeasurementTimestamp = now;
+                    previousPlaybackPosition = video.currentTime;
+                    previousFrames = frames;
+
+                    this.uiStats.display(this.stats);
                 }, 700);
             },
             methods: {
@@ -1000,19 +1150,20 @@
                 },
 
                 play() {
-                    if (this.dash) {
-                        this.dash.destroy();
-                        this.dash = null;
+                    if (this.player) {
+                        this.player.destroy();
+                        this.player = null;
                         // Clear the last displayed frame (destroy() only detaches the MediaSource)
                         this.$refs.video.removeAttribute('src');
                         this.$refs.video.load();
                         this.playState = PlayState.STOPPED;
-                        this.latency = 0;
                         this.resetTracks();
                         return;
                     }
                     this.streamError = null;
                     this.resetTracks();
+                    // reset stats!
+                    this.resetMetrics(true);
 
                     const url = this.manifestURL();
                     log('Play DASH manifest', url).info();
@@ -1021,11 +1172,14 @@
                     const video = this.$refs.video;
                     video.muted = this.muted;
 
-                    this.dash = MediaPlayer().create();
-                    this.dash.on(MediaPlayer.events.PLAYBACK_PLAYING, () => { this.playState = PlayState.PLAYING; });
-                    this.dash.on(MediaPlayer.events.STREAM_INITIALIZED, () => this.onMetadata());
-                    this.dash.on(MediaPlayer.events.QUALITY_CHANGE_RENDERED, e => this.onTrackChange(e.mediaType, e.newRepresentation));
-                    this.dash.on(MediaPlayer.events.ERROR, e => {
+                    this.player = MediaPlayer().create();
+                    this.player.on(MediaPlayer.events.PLAYBACK_PLAYING, () => { this.playState = PlayState.PLAYING; });
+                    this.player.on(MediaPlayer.events.STREAM_INITIALIZED, () => this.onMetadata());
+                    this.player.on(MediaPlayer.events.FRAGMENT_LOADING_COMPLETED, e => {
+                        this._recvBytes.addBytes(e.response?.byteLength || e.request?.bytesLoaded || 0);
+                    });
+                    this.player.on(MediaPlayer.events.QUALITY_CHANGE_RENDERED, e => this.onTrackChange(e.mediaType, e.newRepresentation));
+                    this.player.on(MediaPlayer.events.ERROR, e => {
                         const error = e.error || {};
                         this.streamError = {
                             type: 'Dash',
@@ -1035,8 +1189,9 @@
                         log('DASH error', error).error();
                     });
                     this.setBuffer();
-                    this.dash.initialize(video, url, true);
+                    this.player.initialize(video, url, true);
                 },
+                // TODO: Stop()
 
                 // dash.js targets a single live delay
                 setBuffer(target) {
@@ -1056,8 +1211,8 @@
                         }
                     }
 
-                    if (this.dash) {
-                        this.dash.updateSettings({ streaming: { delay: { liveDelay: this.bufferTarget / 1000 } } });
+                    if (this.player) {
+                        this.player.updateSettings({ streaming: { delay: { liveDelay: this.bufferTarget / 1000 } } });
                     }
 
                     // Display user description
@@ -1065,9 +1220,68 @@
                     this.netDescription += '<br><strong>Expected buffering ≈ ' + this.bufferTarget + 'ms</strong>';
                 },
 
+                selectBottomTab(tab) {
+                    this.activeBottomTab = tab;
+                    if (tab === 'messages') {
+                        this.unreadMessages = 0;
+                    }
+                },
+
+                resetMetrics(all = false) {
+                    this.uiStats.reset();
+                    // reset incremental metrics counters
+                    this.stalls = 0;
+                    const displayableCount = all ? 0 : this.uiStats.displayableCount;
+                    for (const [_, values] of this.stats) {
+                        values.splice(0, Math.max(0, values.length - displayableCount));
+                    }
+                    this.times.splice(0, Math.max(0, this.times.length - displayableCount));
+                    if (all) {
+                        this.hasMetrics = false;
+                        this._recvBytes.clear();
+                    }
+                },
+
+                download(name, data, type) {
+                    const url = URL.createObjectURL(new Blob([data], { type }));
+                    const link = document.createElement("a");
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", name);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                },
+
+                downloadStats() {
+                    // Write headers and compute max values
+                    let max = this.times.length;
+                    const headers = ["localTime", "mediaTime"];
+                    for (const [header, values] of this.stats) {
+                        headers.push(header);
+                        max = Math.max(max, values.length);
+                    }
+                    let csv = headers.join(';');
+
+                    // Write CSV
+                    for (let i = 0; i < max; ++i) {
+                        csv += '\n';
+                        const { time, mediaTime } = this.times[i] ?? {};
+                        csv += (time || '') + ';' + (mediaTime || '') + ';';
+                        for (const [_, values] of this.stats) {
+                            csv += (values[i] == null ? '' : parseFloat(values[i])) + ';';
+                        }
+                    }
+
+                    // Download the csv !
+                    this.download("stats.csv", csv, 'text/csv;charset=utf-8;');
+                },
+
                 goLive() {
-                    if (this.dash) {
-                        this.dash.seekToOriginalLive();
+                    if (this.player) {
+                        // Our own seeks are the ones the metrics must ignore, unlike dash.js gap jumps
+                        this._userSeek = true;
+                        this.player.seekToOriginalLive();
                     }
                 },
 
@@ -1084,7 +1298,7 @@
                     this.videoTracks = this.buildTracks('video');
                     this.audioTracks = this.buildTracks('audio');
                     for (const type of ['video', 'audio']) {
-                        const current = this.dash.getCurrentRepresentationForType(type);
+                        const current = this.player.getCurrentRepresentationForType(type);
                         if (current) {
                             this.onTrackChange(type, current);
                         }
@@ -1094,7 +1308,7 @@
 
                 buildTracks(type) {
                     const tracks = new Map();
-                    for (const representation of this.dash.getRepresentationsByType(type)) {
+                    for (const representation of this.player.getRepresentationsByType(type)) {
                         let name = representation.codecs || representation.id;
                         if (type === 'video') {
                             name += ` ${representation.width}x${representation.height} ${representation.frameRate}fps`;
@@ -1130,12 +1344,14 @@
                 },
 
                 setTrack(type, id) {
-                    if (!this.dash) {
+                    if (!this.player) {
                         return;
                     }
-                    this.dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { [type]: id == null } } } });
+                    // A track change replaces the buffer, same treatment as a seek for the metrics
+                    this._userSeek = true;
+                    this.player.updateSettings({ streaming: { abr: { autoSwitchBitrate: { [type]: id == null } } } });
                     if (id != null) {
-                        this.dash.setRepresentationForTypeById(type, id);
+                        this.player.setRepresentationForTypeById(type, id);
                     }
                 },
 
