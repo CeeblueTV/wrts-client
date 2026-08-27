@@ -1050,6 +1050,13 @@
                 let previousPlaybackPosition = 0;
                 let previousFrames = 0;
 
+                let presentedFrames = 0;
+                const countFrame = (_, metadata) => {
+                    presentedFrames = metadata.presentedFrames;
+                    this.$refs.video.requestVideoFrameCallback(countFrame);
+                };
+                this.$refs.video.requestVideoFrameCallback?.(countFrame);
+
                 this._recvBytes = new ByteRate(2000);
 
                 this._stalling = false;
@@ -1115,8 +1122,11 @@
                         ? Math.max((playbackSpeeds.at(-1) ?? "0.00"),0)
                         : perSecond(playbackPositionChange).toFixed(2));
 
-                    const frames = video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
-                    fps.push(perSecond(frames - previousFrames).toFixed(2));
+                    // Firefox has no requestVideoFrameCallback: fall back on the decode counter
+                    const frames = video.requestVideoFrameCallback
+                        ? presentedFrames
+                        : video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
+                    fps.push(Math.max(0, perSecond(frames - previousFrames)).toFixed(2));
 
                     trackAudio.push((this.player.getCurrentRepresentationForType('audio')?.bitrateInKbit ?? 0).toFixed() + "kbps");
                     trackVideo.push((this.player.getCurrentRepresentationForType('video')?.bitrateInKbit ?? 0).toFixed() + "kbps");
