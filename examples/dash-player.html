@@ -973,6 +973,11 @@
                     times: [],
                     // Incremental metrics, fed by the player events and reset on each play
                     stalls: 0,
+                    // Targets are a latency from the live edge, not a buffer size. The stream is delivered
+                    // progressively (availabilityTimeComplete="false"), so media arrives continuously and
+                    // the floor is set by delivery jitter, not by the segment duration: 1000ms holds on a
+                    // good network, each step adds margin for a longer hiccup. Without progressive
+                    // delivery the floor rises to a full segment and 'manifest target' is the safe choice.
                     netProfiles: new Map([
                         ['-manual-', [
                             "Manually configure a latency target high enough to absorb the variations caused by network fluctuations.",
@@ -982,19 +987,19 @@
                         ]],
                         ['ideal', [
                             "Ideal network conditions for low latency: streamer and player are geographically close with minimal intermediary hops.",
-                            350
+                            1000
                         ]],
                         ['normal', [
                             "A stable and reliable network between streamer and player, making their geographical distance negligible.",
-                            600
+                            1500
                         ]],
                         ['distant', [
                             "Streamer and player are significantly distant and/or the connection involves multiple intermediaries (e.g., VPNs, CDN providers).",
-                            1500
+                            2500
                         ]],
                         ['unstable', [
                             "A resilient configuration designed for maximum stability even on challenging networks, prioritizing robustness over low latency.",
-                            3000
+                            3500
                         ]],
                     ]),
                     netProfile: 'manifest target',
