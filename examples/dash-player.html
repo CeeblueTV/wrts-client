@@ -463,19 +463,19 @@
             }
             .ctrl-row .btn, .ctrl-row .tog { width: 100%; justify-content: center; }
 
-            /* Network profile + buffer target — single compact row.
+            /* Network profile + latency target — single compact row.
                Grid-template-areas keep description glued under profile on mobile. */
             .net-row {
                 display: grid;
                 grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
                 grid-template-areas:
-                    'profile buftarget'
+                    'profile latencytarget'
                     'desc    desc';
                 gap: 8px;
                 align-items: end;
             }
             .net-row .net-prof { grid-area: profile; }
-            .net-row .buf-target { grid-area: buftarget; }
+            .net-row .latency-target { grid-area: latencytarget; }
             .net-row .net-desc { grid-area: desc; }
             .net-row .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -749,7 +749,7 @@
                     grid-template-areas:
                         'profile profile'
                         'desc    desc'
-                        'buftarget buftarget';
+                        'latencytarget latencytarget';
                 }
                 .row2 { grid-template-columns: 1fr; }
                 .rob-row { grid-template-columns: 1fr; }
@@ -861,19 +861,19 @@
                     </button>
                 </div>
 
-                <!-- Network profile + buffer target (single compact row). -->
+                <!-- Network profile + latency target (single compact row). -->
                 <div class="net-row gap-panel">
                     <div class="net-prof">
                         <span class="lbl">Network profile</span>
-                        <select class="sel" v-model="netProfile" @change="setBuffer()">
+                        <select class="sel" v-model="netProfile" @change="setLatencyTarget()">
                             <option :value="profil" v-for="[profil, _] of netProfiles">{{ profil }}</option>
                         </select>
                     </div>
-                    <div class="buf-target">
+                    <div class="latency-target">
                         <span class="lbl">Target latency (ms)</span>
                         <input class="inp" type="number" min="0"
                             required oninput="validity.valid||(value='');"
-                            v-model="bufferTarget" @change="setBuffer(this.bufferTarget)">
+                            v-model="latencyTarget" @change="setLatencyTarget(this.latencyTarget)">
                     </div>
                     <p class="net-desc" v-html="netDescription"></p>
                 </div>
@@ -958,7 +958,7 @@
                     host: null,
                     player: /** @type {import('dashjs').MediaPlayerClass | null} */ (null),
                     latency: 0,
-                    bufferTarget: 0,
+                    latencyTarget: 0,
                     // Off-screen frame grab, EpochTime decodes the e2e timestamp from its pixels
                     canvas: document.createElement('canvas'),
                     netDescription: "",
@@ -975,7 +975,7 @@
                     stalls: 0,
                     netProfiles: new Map([
                         ['-manual-', [
-                            "Manually configure a buffer target large enough to compensate for variations caused by network fluctuations.",
+                            "Manually configure a latency target high enough to absorb the variations caused by network fluctuations.",
                         ]],
                         ['manifest target', [
                             "Follow the latency target advertised by the manifest (ServiceDescription/@suggestedPresentationDelay), like the dash.js reference player.",
@@ -1015,7 +1015,7 @@
                 const host = options.host;
                 this.host = new NetAddress(host || location.host, 443);
                 this.stream = options.stream || '';
-                this.setBuffer(Number(options.bufferTarget));
+                this.setLatencyTarget(Number(options.latencyTarget));
 
                 // React to system theme changes
                 this._mql = matchMedia('(prefers-color-scheme: dark)');
@@ -1144,7 +1144,7 @@
             computed: {
                 // Only offer the seek when we're further behind than the catch-up rate can absorb
                 isBehindLive() {
-                    return Boolean(this.player) && this.latency > Number(this.bufferTarget) + LIVE_DRIFT_THRESHOLD;
+                    return Boolean(this.player) && this.latency > Number(this.latencyTarget) + LIVE_DRIFT_THRESHOLD;
                 }
             },
             methods: {
@@ -1217,13 +1217,13 @@
                         };
                         log('DASH error', error).error();
                     });
-                    this.setBuffer();
+                    this.setLatencyTarget();
                     this.player.initialize(video, url, true);
                 },
                 // TODO: Stop()
 
                 // dash.js targets a single live delay
-                setBuffer(target) {
+                setLatencyTarget(target) {
                     let profile;
                     if(!isNaN(target)) {
                         // manual mode
@@ -1231,27 +1231,29 @@
                         this.netProfile = profile[0];
                         profile = profile[1];
 
-                        this.bufferTarget = Number(target);
+                        // Store it in the profile too: play() and the profile <select> call setLatencyTarget()
+                        // with no argument, and that path re-reads the target from the profile entry.
+                        profile[1] = this.latencyTarget = Number(target);
                     } else {
                         // Manifest or predefined target
                         profile = this.netProfiles.get(this.netProfile);
-                        this.bufferTarget = profile[1] ?? 0;
+                        this.latencyTarget = profile[1] ?? 0;
                     }
 
                     if (this.player) {
                         // 0 => NaN => no override: dash.js uses the manifest's ServiceDescription/@suggestedPresentationDelay.
                         // Forcing a target below the manifest's advertised minimum pins the catch-up rate at its
                         // maximum forever, which drains the buffer and stalls instead of stabilising it.
-                        this.player.updateSettings({ streaming: { delay: { liveDelay: this.bufferTarget / 1000 || NaN } } });
-                        if (!this.bufferTarget) {
-                            this.bufferTarget = this.manifestTarget();
+                        this.player.updateSettings({ streaming: { delay: { liveDelay: this.latencyTarget / 1000 || NaN } } });
+                        if (!this.latencyTarget) {
+                            this.latencyTarget = this.manifestTarget();
                         }
                     }
 
                     // Display user description
                     this.netDescription = profile[0];
-                    this.netDescription += this.bufferTarget
-                        ? '<br><strong>Target latency ≈ ' + this.bufferTarget + 'ms</strong>'
+                    this.netDescription += this.latencyTarget
+                        ? '<br><strong>Target latency ≈ ' + this.latencyTarget + 'ms</strong>'
                         : '<br><strong>Target latency read from the manifest</strong>';
                 },
 
@@ -1330,8 +1332,8 @@
                 },
 
                 onMetadata() {
-                    if (!this.bufferTarget) {
-                        this.bufferTarget = this.manifestTarget();
+                    if (!this.latencyTarget) {
+                        this.latencyTarget = this.manifestTarget();
                     }
                     this.videoTracks = this.buildTracks('video');
                     this.audioTracks = this.buildTracks('audio');
