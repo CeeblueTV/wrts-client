@@ -853,8 +853,8 @@
                         {{ muted ? 'Unmute' : 'Mute' }}
                     </button>
                     <button class="btn" title="Jump to live position"
-                        :class="{ 'btn-red': player && latency > bufferTarget + 500 }"
-                        :disabled="!player || latency <= bufferTarget + 500"
+                        :class="{ 'btn-red': isBehindLive }"
+                        :disabled="!isBehindLive"
                         @click="goLive()">
                         <i class="fas fa-rocket"></i>
                         Live
@@ -944,6 +944,10 @@
         // Matches dash.js streaming.gaps.threshold: it never jumps a gap smaller than that, so
         // nothing real is missed and playback-rate sampling noise never accumulates.
         const DISCONTINUITY_THRESHOLD = 0.3;
+
+        // Latency drift, in ms, above the target beyond which catch-up won't reasonably recover
+        // and only a seek to live will: that's when the Live button becomes actionable.
+        const LIVE_DRIFT_THRESHOLD = 500;
 
         createApp({
             data() {
@@ -1127,7 +1131,18 @@
                     this.uiStats.display(this.stats);
                 }, 700);
             },
+            computed: {
+                // Only offer the seek when we're further behind than the catch-up rate can absorb
+                isBehindLive() {
+                    return !!this.player && this.latency > Number(this.bufferTarget) + LIVE_DRIFT_THRESHOLD;
+                }
+            },
             methods: {
+                // Live delay dash.js resolved from the manifest, 0 until the stream is initialized
+                manifestTarget() {
+                    return this.player ? Math.round(this.player.getOriginalLiveDelay() * 1000) || 0 : 0;
+                },
+
                 // Manifest URL: a full URL typed by the user is used as-is, otherwise build the
                 // Ceeblue CMAF/DASH path '/cmaf/<stream>/index.mpd' on the configured host.
                 manifestURL() {
@@ -1209,7 +1224,7 @@
                     } else {
                         // auto mode
                         profile = this.netProfiles.get(this.netProfile);
-                        this.bufferTarget = profile[1] ?? 0;
+                        this.bufferTarget = profile[1] ?? this.manifestTarget();
                     }
 
                     if (this.player) {
@@ -1302,7 +1317,7 @@
 
                 onMetadata() {
                     if (!this.bufferTarget) {
-                        this.bufferTarget = Math.round(this.player.getOriginalLiveDelay() * 1000) || 0;
+                        this.bufferTarget = this.manifestTarget();
                     }
                     this.videoTracks = this.buildTracks('video');
                     this.audioTracks = this.buildTracks('audio');
