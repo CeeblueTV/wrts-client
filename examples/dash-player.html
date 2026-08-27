@@ -977,7 +977,7 @@
                         ['-manual-', [
                             "Manually configure a buffer target large enough to compensate for variations caused by network fluctuations.",
                         ]],
-                        ['-auto-', [
+                        ['manifest target', [
                             "Follow the latency target advertised by the manifest (ServiceDescription/@suggestedPresentationDelay), like the dash.js reference player.",
                         ]],
                         ['ideal', [
@@ -997,7 +997,7 @@
                             3000
                         ]],
                     ]),
-                    netProfile: '-auto-',
+                    netProfile: 'manifest target',
                     videoTracks: new Map(),
                     videoTrack: 'Video',
                     videoTrackId: undefined,
@@ -1233,7 +1233,7 @@
 
                         this.bufferTarget = Number(target);
                     } else {
-                        // auto mode
+                        // Manifest or predefined target
                         profile = this.netProfiles.get(this.netProfile);
                         this.bufferTarget = profile[1] ?? 0;
                     }
