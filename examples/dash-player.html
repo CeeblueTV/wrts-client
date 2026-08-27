@@ -1023,7 +1023,7 @@
                 this._mql.addEventListener('change', this._mqlListener);
 
                 this._fsListener = () => {
-                    this.isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+                    this.isFullscreen = Boolean((document.fullscreenElement || document.webkitFullscreenElement));
                 };
                 document.addEventListener('fullscreenchange', this._fsListener);
                 document.addEventListener('webkitfullscreenchange', this._fsListener);
@@ -1144,7 +1144,7 @@
             computed: {
                 // Only offer the seek when we're further behind than the catch-up rate can absorb
                 isBehindLive() {
-                    return !!this.player && this.latency > Number(this.bufferTarget) + LIVE_DRIFT_THRESHOLD;
+                    return Boolean(this.player) && this.latency > Number(this.bufferTarget) + LIVE_DRIFT_THRESHOLD;
                 }
             },
             methods: {
@@ -1235,7 +1235,7 @@
                     } else {
                         // auto mode
                         profile = this.netProfiles.get(this.netProfile);
-                        this.bufferTarget = profile[1] ?? this.manifestTarget();
+                        this.bufferTarget = profile[1] ?? 0;
                     }
 
                     if (this.player) {
@@ -1243,6 +1243,9 @@
                         // Forcing a target below the manifest's advertised minimum pins the catch-up rate at its
                         // maximum forever, which drains the buffer and stalls instead of stabilising it.
                         this.player.updateSettings({ streaming: { delay: { liveDelay: this.bufferTarget / 1000 || NaN } } });
+                        if (!this.bufferTarget) {
+                            this.bufferTarget = this.manifestTarget();
+                        }
                     }
 
                     // Display user description
