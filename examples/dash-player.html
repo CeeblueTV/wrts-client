@@ -1138,9 +1138,10 @@
                 }
             },
             methods: {
-                // Live delay dash.js resolved from the manifest, 0 until the stream is initialized
                 manifestTarget() {
-                    return this.player ? Math.round(this.player.getOriginalLiveDelay() * 1000) || 0 : 0;
+                    return this.player?.isReady()
+                        ? Math.round(this.player.getTargetLiveDelay() * 1000) || 0
+                        : 0;
                 },
 
                 // Manifest URL: a full URL typed by the user is used as-is, otherwise build the
