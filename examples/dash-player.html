@@ -870,7 +870,7 @@
                         </select>
                     </div>
                     <div class="buf-target">
-                        <span class="lbl">Buffer target (ms)</span>
+                        <span class="lbl">Target latency (ms)</span>
                         <input class="inp" type="number" min="0"
                             required oninput="validity.valid||(value='');"
                             v-model="bufferTarget" @change="setBuffer(this.bufferTarget)">
@@ -973,6 +973,9 @@
                         ['-manual-', [
                             "Manually configure a buffer target large enough to compensate for variations caused by network fluctuations.",
                         ]],
+                        ['-auto-', [
+                            "Follow the latency target advertised by the manifest (ServiceDescription/@suggestedPresentationDelay), like the dash.js reference player.",
+                        ]],
                         ['ideal', [
                             "Ideal network conditions for low latency: streamer and player are geographically close with minimal intermediary hops.",
                             350
@@ -990,7 +993,7 @@
                             3000
                         ]],
                     ]),
-                    netProfile: 'normal',
+                    netProfile: '-auto-',
                     videoTracks: new Map(),
                     videoTrack: 'Video',
                     videoTrackId: undefined,
@@ -1206,18 +1209,21 @@
                     } else {
                         // auto mode
                         profile = this.netProfiles.get(this.netProfile);
-                        if(profile[1]) {
-                            this.bufferTarget = profile[1];
-                        }
+                        this.bufferTarget = profile[1] ?? 0;
                     }
 
                     if (this.player) {
-                        this.player.updateSettings({ streaming: { delay: { liveDelay: this.bufferTarget / 1000 } } });
+                        // 0 => NaN => no override: dash.js uses the manifest's ServiceDescription/@suggestedPresentationDelay.
+                        // Forcing a target below the manifest's advertised minimum pins the catch-up rate at its
+                        // maximum forever, which drains the buffer and stalls instead of stabilising it.
+                        this.player.updateSettings({ streaming: { delay: { liveDelay: this.bufferTarget / 1000 || NaN } } });
                     }
 
                     // Display user description
                     this.netDescription = profile[0];
-                    this.netDescription += '<br><strong>Expected buffering ≈ ' + this.bufferTarget + 'ms</strong>';
+                    this.netDescription += this.bufferTarget
+                        ? '<br><strong>Target latency ≈ ' + this.bufferTarget + 'ms</strong>'
+                        : '<br><strong>Target latency read from the manifest</strong>';
                 },
 
                 selectBottomTab(tab) {
@@ -1295,6 +1301,9 @@
                 },
 
                 onMetadata() {
+                    if (!this.bufferTarget) {
+                        this.bufferTarget = Math.round(this.player.getOriginalLiveDelay() * 1000) || 0;
+                    }
                     this.videoTracks = this.buildTracks('video');
                     this.audioTracks = this.buildTracks('audio');
                     for (const type of ['video', 'audio']) {
