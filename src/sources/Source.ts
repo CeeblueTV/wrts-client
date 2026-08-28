@@ -661,6 +661,10 @@ export abstract class Source extends EventEmitter implements ICMCD {
             return;
         }
         this._audioPerSecond.addBytes(1);
+        // Inform audio skip
+        if (this._audioTime >= 0 && sample.time > this._audioTime) {
+            this.skipMedia(Media.Type.AUDIO, sample.time - this._audioTime);
+        }
         // Fix timestamp
         this._audioTime = this.fixTimestamp(Media.Type.AUDIO, trackId, this._audioTime, sample);
         this.onAudio(trackId, sample);
@@ -668,7 +672,6 @@ export abstract class Source extends EventEmitter implements ICMCD {
 
     /**
      * Ingest video sample for trackId, if sample is undefined it only changes the tracks
-     * If sample.duration is negative, it will extend the sample until the currentTime to repair synchronization
      * @param trackId
      * @param sample
      */
@@ -689,24 +692,12 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
         this._videoPerSecond.addBytes(1);
 
-        // Assign extendable duration and fix sample.duration
-        let extendableDuration;
-        if (sample.duration < 0) {
-            sample.duration = extendableDuration = -sample.duration;
+        // Inform video skip
+        if (this._videoTime >= 0 && sample.time > this._videoTime) {
+            this.skipMedia(Media.Type.VIDEO, sample.time - this._videoTime);
         }
-
         // Fix timestamp
         this._videoTime = this.fixTimestamp(Media.Type.VIDEO, trackId, this._videoTime, sample);
-
-        // Extends time to fix sync if need
-        const delay = this.currentTime - this._videoTime;
-        if (extendableDuration && delay > 0) {
-            sample.duration += delay;
-            this._videoTime = this.currentTime;
-            this.log(`Extends video duration from ${sample.duration - delay} to ${sample.duration}ms track ${trackId}`).warn();
-            this._skippedVideo += delay;
-            this._playing.onVideoSkipping(delay);
-        }
 
         if (sample.isKeyFrame) {
             // compute an average on each GOP
@@ -770,14 +761,20 @@ export abstract class Source extends EventEmitter implements ICMCD {
         }
     }
 
-    protected skipAudio(duration: number) {
-        this._skippedAudio += duration;
-        this._playing.onAudioSkipping(duration);
-    }
-
-    protected skipVideo(duration: number) {
-        this._skippedVideo += duration;
-        this._playing.onVideoSkipping(duration);
+    protected skipMedia(type: Media.Type, duration: number) {
+        switch (type) {
+            case Media.Type.AUDIO:
+                this._skippedAudio += duration;
+                this._playing.onAudioSkipping(duration);
+                break;
+            case Media.Type.VIDEO:
+                this._skippedVideo += duration;
+                this._playing.onVideoSkipping(duration);
+                break;
+            default:
+                this.log('Media ' + Media.typeToString(type) + ' skips ' + duration + 'ms').warn();
+                break;
+        }
     }
 
     protected fixTimestamp(type: Media.Type, trackId: number, currentTime: number, sample: Media.Sample): number {
@@ -793,20 +790,11 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 if (Math.abs(delta) > TIMESTAMP_HOLE_TOLERANCE) {
                     // to limit log frequency for small correction (can happen sometime on timescale mistake)
                     let log = `Timestamp fix ${sample.time / 1000}s to ${currentTime / 1000}s on ${Media.typeToString(type)} track ${trackId}`;
-                    log += ` (duration: ${Math.abs(sample.duration)} => ${newDuration}ms)`;
+                    log += ` (duration: ${sample.duration} => ${newDuration}ms)`;
                     this.log(log)[delta < 0 ? 'warn' : 'info']();
                 }
                 sample.time = currentTime;
                 sample.duration = newDuration; // increase/decrease duration to keep the same next time as the input
-            }
-        }
-
-        // audio/video skipping AFTER timestamp fix (to get an ordered log information)
-        if (delta > 0) {
-            if (type === Media.Type.AUDIO) {
-                this.skipAudio(delta);
-            } else if (type === Media.Type.VIDEO) {
-                this.skipVideo(delta);
             }
         }
 

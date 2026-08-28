@@ -12,6 +12,7 @@ import { AdaptiveRetry } from '../media/AdaptiveRetry';
 import { BufferState, IPlaying } from './IPlaying';
 import { CMCD } from '../media/CMCD';
 import { Reader } from '../media/reader/Reader';
+import { MediaTrack } from '../media/MediaTrack';
 
 /**
  * HTTP Adaptive Streaming
@@ -36,17 +37,15 @@ export class HTTPAdaptiveSource extends Source {
 
     // To emulate UP rendition before to switch
     private _upController?: AbortController;
-    // For channel sequence-skippable + first sample morphable, basically for video in unreliable mode
+    // For channel sequence-cancelable + morphable (first frame), basically for video in unreliable mode
     private _alterableController: AbortController;
-    // For channel sequence-skippable on stall, basically for audio in unreliable mode
-    private _skippableController: AbortController;
+    // For channel sequence-cancelable on stall, basically for audio in unreliable mode
+    private _cancelableController: AbortController;
     // For reliable channel, basically for all channels in reliable mode
     private _reliableController: AbortController;
+    // To know if the last sequence was live or not
+    private _lastSequenceWasLive: boolean = true;
     private _sequencePattern: string;
-    private _maxSequenceDuration?: number;
-    // Duration of the last sequence received, only sent by the origin for a complete sequence:
-    // undefined means we are receiving the current real-time sequence, so nothing exists ahead of it
-    private _sequenceDuration?: number;
     private _cmcd?: CMCD;
     private _trackSeparator: string = '';
 
@@ -54,13 +53,13 @@ export class HTTPAdaptiveSource extends Source {
         super(playing, 'https', params);
         this._sequencePattern = '';
         this._alterableController = new AbortController();
-        this._skippableController = new AbortController();
+        this._cancelableController = new AbortController();
         this._reliableController = new AbortController();
         playing.signal.addEventListener(
             'abort',
             () => {
                 this._alterableController.abort();
-                this._skippableController.abort();
+                this._cancelableController.abort();
                 this._reliableController.abort();
                 this._upController?.abort();
             },
@@ -72,9 +71,16 @@ export class HTTPAdaptiveSource extends Source {
     }
 
     protected async play(url: URL, tracks: Media.Tracks, playing: IPlaying): Promise<void> {
-        if (!url.pathname.toLowerCase().endsWith('.json')) {
+        const extension = Util.getExtension(url.pathname).toLowerCase();
+        if (extension !== '.json') {
             // URL is '/wrts/' + params.streamName + params.mediaExt, change it to request index.json
-            url.pathname = url.pathname.slice(0, -Util.getExtension(url.pathname).length) + '/index.json';
+            if (extension) {
+                url.pathname = url.pathname.slice(0, -extension.length);
+            }
+            if (!url.pathname.endsWith('/')) {
+                url.pathname += '/';
+            }
+            url.pathname += 'index.json';
         }
 
         // GET METADATA!
@@ -90,7 +96,7 @@ export class HTTPAdaptiveSource extends Source {
                 this.log(`Fetch again ${url.toString()}`).info();
             }
             try {
-                response = await this.fetchWithRTT(url, playing);
+                response = await this.fetchWithRTT(url, { signal: playing.signal });
                 if (response.error) {
                     // unrecoverable error
                     return this.close({ type: 'SourceError', name: 'Request error', detail: response.error });
@@ -147,10 +153,9 @@ export class HTTPAdaptiveSource extends Source {
             const currentGopElapsed = metadata.liveTime - sequenceTime;
             const bufferTarget = playing.bufferLimitMiddle - currentGopElapsed;
             if (bufferTarget > 0) {
-                const sequenceTime = Number(mSequence.current?.time);
                 const sequenceFirstTime = Number(mSequence.first?.time);
                 const idDiff = sequenceId - sequenceFirstId;
-                if (idDiff > 0 && !isNaN(sequenceTime) && !isNaN(sequenceFirstTime)) {
+                if (idDiff > 0 && !isNaN(sequenceFirstTime)) {
                     const gopSize = Math.max(1, sequenceTime - sequenceFirstTime) / idDiff;
                     deltaSequence = Math.ceil(bufferTarget / gopSize);
                 }
@@ -172,108 +177,98 @@ export class HTTPAdaptiveSource extends Source {
                     this._upController?.abort();
                 }
             },
-            playing // for AbortSignal
+            { signal: playing.signal }
         );
 
-        let stall = false;
+        let videoTrack: MediaTrack | undefined;
         playing.on(
             'Stall',
             async () => {
                 // STALL
-                stall = true;
                 this._upController?.abort();
-                if (this._sequenceDuration == null) {
-                    // The sequence in reception is the current real-time one, there is no sequence
-                    // ahead to skip to => keep receiving it rather than losing its end for nothing
-                    return;
+                if (videoTrack?.down || !this._lastSequenceWasLive) {
+                    // Stop media reception immediately to relieve socket pressure
+                    // before attempting to switch to a lower rendition or
+                    // before to try to recover live edge if we are not on it
+                    this._alterableController.abort();
+                    this._cancelableController.abort();
                 }
-                // Cancel immediately media reception to try to skip sequences!
-                this._alterableController.abort();
-                this._skippableController.abort();
             },
-            playing // for AbortSignal
+            { signal: playing.signal }
         );
 
+        let maxSequenceDuration = 0;
+
         // Start download
-        let again = false;
-        let prevVideoTime;
-        let prevVideoSequence;
-        const adaptiveRetry = new AdaptiveRetry();
-        adaptiveRetry.log = this.log.bind(this, 'Adaptive Bitrate,') as ILog;
+        const upRetry = new AdaptiveRetry();
+        upRetry.log = this.log.bind(this, 'Adaptive Bitrate,') as ILog;
 
         while (!this.closed) {
-            let videoTrack;
-            const bandwidthMeasure = this.recvByteRate.value();
-            if (playing.bufferState !== BufferState.NONE) {
-                videoTrack = this.videoSelected == null && metadata.tracks.get(tracks.video ?? -1);
-                if (videoTrack) {
-                    let up = false;
-                    if (stall || this._alterableController.signal.aborted) {
-                        // video or audio were aborted (stall or buffer empty)!
-                        // => We are facing a bandwidh limit!
-                        if (!this._upController) {
-                            // was no emulation, so we have to down at least of one level
-                            videoTrack = videoTrack.down ?? videoTrack;
-                        }
-                        const audioBandwidth = metadata.tracks.get(tracks.audio ?? -1)?.bandwidth ?? 0;
-                        while (videoTrack.down && videoTrack.bandwidth + audioBandwidth > bandwidthMeasure) {
-                            videoTrack = videoTrack.down;
-                        }
-                        adaptiveRetry.raise();
-                    } else if (this._upController && !this._upController.signal.aborted) {
-                        // UP emulated success !
-                        up = true;
-                        videoTrack = videoTrack.up ?? videoTrack;
-                    } else if (playing.bufferState === BufferState.LOW) {
-                        // is low but without bandwidth estimation => only down !
+            // Process MBR
+            videoTrack =
+                this.videoSelected == null && playing.bufferState !== BufferState.NONE
+                    ? metadata.tracks.get(tracks.video ?? -1)
+                    : undefined;
+            if (videoTrack) {
+                const bandwidthMeasure = this.recvByteRate.value();
+                let up = false;
+                const aborted = this._cancelableController.signal.aborted || this._alterableController.signal.aborted;
+                const low = playing.bufferState === BufferState.LOW && !this._upController;
+                if (
+                    aborted || // we have aborted a sequence because of a stall or a low buffer
+                    low // we are low in buffer without UP emulation perturbation
+                ) {
+                    // We have to down one level
+                    if (!this._upController && !upRetry.failed) {
+                        // was no emulation, and no a consecutive fail
+                        // so we have to down at least of one level
                         videoTrack = videoTrack.down ?? videoTrack;
-                        adaptiveRetry.raise();
                     }
-
-                    // make compatible with displayable screen
-                    while (Media.overScreenSize(videoTrack.resolution, playing.maximumResolution) && videoTrack.down) {
+                    // Compute the best rendition to play according to the bandwidth measure
+                    // Just when was not already failing before to avoid bad measure on consecutive failures
+                    const audioBandwidth = metadata.tracks.get(tracks.audio ?? -1)?.bandwidth ?? 0;
+                    while (videoTrack.down && videoTrack.bandwidth + audioBandwidth > bandwidthMeasure) {
                         videoTrack = videoTrack.down;
                     }
-
-                    if (tracks.video !== videoTrack.id) {
-                        // change track
-                        let log = `MBR ${up ? 'UP' : 'DOWN'} from track ${tracks.video} to ${videoTrack.id} at ${(videoTrack.bandwidth * 8) / 1000}kbps ${Util.stringify(videoTrack.resolution)}`;
-                        if (!up) {
-                            log += ' (constraint=' + ((bandwidthMeasure * 8) / 1000).toFixed() + 'kbps)';
-                        }
-                        this.log(log)[up ? 'info' : 'warn']();
-                        tracks.video = videoTrack.id;
-                    }
-                } else {
-                    // if no video track selected or no video metadata => reset
-                    adaptiveRetry.reset();
+                    // Mark the failure AFTER checking upRetry.failed
+                    upRetry.fail();
+                } else if (this._upController && !this._upController.signal.aborted && playing.bufferState !== BufferState.LOW) {
+                    // UP emulation success, we can try to go up one level
+                    up = true;
+                    videoTrack = videoTrack.up ?? videoTrack;
                 }
+
+                // make compatible with displayable screen
+                while (Media.overScreenSize(videoTrack.resolution, playing.maximumResolution) && videoTrack.down) {
+                    videoTrack = videoTrack.down;
+                }
+
+                if (tracks.video !== videoTrack.id) {
+                    // change track
+                    let log = `MBR ${up ? 'UP' : 'DOWN'} from track ${tracks.video} to ${videoTrack.id} at ${(videoTrack.bandwidth * 8) / 1000}kbps ${Util.stringify(videoTrack.resolution)}`;
+                    if (!up) {
+                        log += ' (constraint=' + ((bandwidthMeasure * 8) / 1000).toFixed() + 'kbps)';
+                    }
+                    this.log(log)[up ? 'info' : 'warn']();
+                    tracks.video = videoTrack.id;
+                }
+            } else {
+                // if no video track selected or no video metadata => reset
+                upRetry.reset();
             }
 
-            let skipSequences = 0;
             // Compute Skip Sequences
-            if (!this.reliable && playing.bufferState === BufferState.LOW && playing.buffering) {
+            let skipSequences = 0;
+            if (!this.reliable && playing.bufferState === BufferState.LOW && playing.buffering && this.currentTime >= 0) {
                 // We can skip some frames while buffering because means a stall has occurred
-                if (this._sequenceDuration == null) {
-                    // No 'sequence-duration' header received => we are already on the current real-time
-                    // sequence, which is not complete yet: nothing to skip, the origin has nothing ahead
-                    this.log(
-                        `No sequence to skip, ${sequence} is the current real-time sequence ${Util.stringify({
-                            delay: metadata.liveTime - this.currentTime
-                        })}`
-                    ).warn();
-                } else if (this._maxSequenceDuration != null) {
+                if (maxSequenceDuration) {
                     let newSequence = Infinity;
                     let fixLiveTime = 0;
 
                     // Check newSequence exists
                     while (metadata.liveTime > this.currentTime) {
-                        const track = tracks.audio != null && tracks.audio >= 0 ? tracks.audio : tracks.video;
-                        if (track == null) {
-                            throw Error('Nothing to download, no track enabled');
-                        }
                         newSequence = Math.min(
-                            sequence + Math.floor((metadata.liveTime - this.currentTime) / this._maxSequenceDuration),
+                            sequence + Math.floor((metadata.liveTime - this.currentTime) / maxSequenceDuration),
                             newSequence - 1
                         );
 
@@ -283,13 +278,21 @@ export class HTTPAdaptiveSource extends Source {
                         }
 
                         // HEAD request to check if frame exists!
-                        const response = await this._downloadSequence(playing, this._reliableController, track, newSequence, 0);
+                        const response = await this._downloadSequence(
+                            playing,
+                            this._reliableController,
+                            Media.getMainTrack(tracks) ?? [],
+                            newSequence,
+                            0
+                        );
+                        if (this.closed) {
+                            return;
+                        }
                         if (response.ok) {
-                            again = false;
                             this.log(
                                 `Skip sequences ${sequence} to ${newSequence - 1} ${Util.stringify({
                                     delay: metadata.liveTime - this.currentTime,
-                                    maxSequenceDuration: this._maxSequenceDuration
+                                    maxSequenceDuration: maxSequenceDuration
                                 })}`
                             ).warn();
                             if (version < 2) {
@@ -298,16 +301,11 @@ export class HTTPAdaptiveSource extends Source {
                             } else {
                                 skipSequences = newSequence - sequence;
                             }
+                            this._lastSequenceWasLive = isNaN(parseInt(response.headers.get('sequence-duration') || ''));
                             break;
                         }
 
-                        fixLiveTime -= this._maxSequenceDuration;
-                        this.log(
-                            `Fails to skip sequences ${sequence} to ${newSequence - 1} ${Util.stringify({
-                                delay: metadata.liveTime - this.currentTime,
-                                maxSequenceDuration: this._maxSequenceDuration
-                            })}`
-                        ).warn();
+                        fixLiveTime -= maxSequenceDuration;
                     }
 
                     // Fix evaluation if need
@@ -323,66 +321,44 @@ export class HTTPAdaptiveSource extends Source {
                 }
             }
 
+            // Effective download of the sequence
             do {
-                // Reset controller and state
-                this._skippableController = new AbortController();
+                // Reset controller
+                this._cancelableController = new AbortController();
                 this._alterableController = new AbortController();
                 this._upController = undefined;
-                stall = false;
 
                 // Fill channels
                 const channels = {
                     alterable: new Set<number>(), // Frame alterable
-                    skippable: new Set<number>(), // sequence skippable
+                    cancelable: new Set<number>(), // Sequence cancelable
                     reliable: new Set<number>() // Reliable
                 };
-                const promises = [];
                 /// Audio
                 if (tracks.audio != null && tracks.audio >= 0) {
-                    (this.reliable ? channels.reliable : channels.skippable).add(tracks.audio);
+                    (this.reliable ? channels.reliable : channels.cancelable).add(tracks.audio);
                 }
                 /// Video
                 if (tracks.video != null && tracks.video >= 0) {
                     if (this.reliable) {
                         channels.reliable.add(tracks.video);
                     } else if (metadata.tracks.get(tracks.video)?.down) {
-                        channels.skippable.add(tracks.video);
+                        channels.cancelable.add(tracks.video);
                     } else {
                         // last rendition => we can try to drop frames
                         channels.alterable.add(tracks.video);
-                    }
-                    // Add a factice track to emulate UP rendition?
-                    if (
-                        videoTrack &&
-                        prevVideoSequence != null &&
-                        adaptiveRetry.try() &&
-                        videoTrack.up &&
-                        !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution)
-                    ) {
-                        this._upController = new AbortController();
-                        const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
-                        if (extraByteRateRequired >= 0) {
-                            const bytes = Math.ceil((extraByteRateRequired * (this.videoTime - (prevVideoTime ?? 0))) / 1000);
-                            this.log(
-                                `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs by adding ${((extraByteRateRequired * 8) / 1000).toFixed()}kbs to current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
-                            ).info();
-                            promises.push(
-                                this._downloadSequence(playing, this._upController, videoTrack.up.id, prevVideoSequence, bytes)
-                            );
-                        } else {
-                            this.log(`Up quality looks requires the same bandwidth, no need to emulate it`).warn();
-                        }
                     }
                 }
                 /// Data
                 /// WIP use a possible data.reliable information to make it always
                 /// reliable for reliable data channel like SCTE35 for example
-                const dataTracks = this.reliable ? channels.reliable : channels.skippable;
+                const dataTracks = this.reliable ? channels.reliable : channels.cancelable;
                 for (const track of tracks.data ?? []) {
                     dataTracks.add(track);
                 }
 
                 // Create promises
+                const promises = [];
                 if (channels.reliable.size) {
                     if (version < 2 || !playing.tracksCombinable) {
                         for (const track of channels.reliable) {
@@ -391,50 +367,78 @@ export class HTTPAdaptiveSource extends Source {
                     } else {
                         promises.push(this._downloadSequence(playing, this._reliableController, channels.reliable, sequence));
                     }
+                } else if (skipSequences > 0) {
+                    // No reliable data, we can skip sequences
+                    --skipSequences;
+                    ++sequence;
+                    continue;
                 }
-                if (skipSequences) {
-                    if (!promises.length) {
-                        --skipSequences;
-                        ++sequence;
-                        again = false;
-                        continue;
-                    }
-                } else {
-                    if (channels.skippable.size) {
-                        if (version < 2 || !playing.tracksCombinable) {
-                            for (const track of channels.skippable) {
-                                promises.push(this._downloadSequence(playing, this._skippableController, track, sequence));
-                            }
-                        } else {
-                            promises.push(
-                                this._downloadSequence(playing, this._skippableController, channels.skippable, sequence)
-                            );
+                if (channels.cancelable.size) {
+                    if (version < 2 || !playing.tracksCombinable) {
+                        for (const track of channels.cancelable) {
+                            promises.push(this._downloadSequence(playing, this._cancelableController, track, sequence));
                         }
+                    } else {
+                        promises.push(this._downloadSequence(playing, this._cancelableController, channels.cancelable, sequence));
                     }
-                    if (channels.alterable.size) {
-                        if (version < 2 || !playing.tracksCombinable) {
-                            for (const track of channels.alterable) {
-                                promises.push(this._downloadSequence(playing, this._alterableController, track, sequence));
-                            }
-                        } else {
-                            promises.push(
-                                this._downloadSequence(playing, this._alterableController, channels.alterable, sequence)
-                            );
+                }
+                if (channels.alterable.size) {
+                    if (version < 2 || !playing.tracksCombinable) {
+                        for (const track of channels.alterable) {
+                            promises.push(this._downloadSequence(playing, this._alterableController, track, sequence));
                         }
+                    } else {
+                        promises.push(this._downloadSequence(playing, this._alterableController, channels.alterable, sequence));
                     }
                 }
                 if (!promises.length) {
                     throw Error('Nothing to download, no track enabled?');
                 }
 
+                // Add a factice track to emulate UP rendition?
+                let mbrOK = false;
+                if (
+                    videoTrack &&
+                    sequence > 0 &&
+                    maxSequenceDuration &&
+                    this._lastSequenceWasLive && // just if we are on live edge, any delay means a possible bandwidth issue
+                    upRetry.try() &&
+                    videoTrack.up &&
+                    !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution)
+                ) {
+                    const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
+                    this._upController = new AbortController();
+                    if (extraByteRateRequired > 0) {
+                        const bytes = Math.ceil((extraByteRateRequired * maxSequenceDuration) / 1000);
+                        this.log(
+                            `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs by adding ${((extraByteRateRequired * 8) / 1000).toFixed()}kbs to current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
+                        ).info();
+                        this._downloadSequence(playing, this._upController, videoTrack.up.id, sequence - 1, bytes).then(
+                            response => (mbrOK = response.ok)
+                        );
+                    } else {
+                        mbrOK = true;
+                        this.log(
+                            `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs requires no extra bandwidth over current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
+                        ).warn();
+                    }
+                }
+
                 // Effective download
                 this.initTracks(tracks); // announce track to receive!
-                this.log(
-                    `Download ${Util.stringify([...channels.reliable, ...channels.skippable, ...channels.alterable])} sequence ${sequence}`
-                )[again ? 'warn' : 'info']();
-                again = true;
-                prevVideoTime = this.videoTime;
+                const what: Array<string | number> = [...channels.reliable];
+                if (channels.cancelable.size) {
+                    what.push('cancelable', ...channels.cancelable);
+                }
+                if (channels.alterable.size) {
+                    what.push('alterable', ...channels.alterable);
+                }
+                this.log(`Download ${Util.stringify(what)} sequence ${sequence} at ${this.currentTime}`).info();
                 const responses = await Promise.all(promises);
+                if (this.closed) {
+                    return;
+                }
+                let success = 0;
                 for (const response of responses) {
                     if (response.error) {
                         // unrecoverable error
@@ -444,22 +448,47 @@ export class HTTPAdaptiveSource extends Source {
                             detail: response.error
                         });
                     }
-                    if (again && response.ok) {
-                        // at least one has gotten the sequence!
-                        prevVideoSequence = sequence++;
-                        --skipSequences;
-                        again = false;
-                    }
+
+                    if (response.ok) {
+                        // 200-299
+                        ++success;
+                        if (response.status === 206) {
+                            // partial content, cancel the MBR UP attempt
+                            mbrOK = false;
+                        }
+                        const duration = parseInt(response.headers.get('max-sequence-duration') || '');
+                        if (duration > 0) {
+                            maxSequenceDuration = duration;
+                        }
+                    } // else is 408 => aborted by controller
+                }
+                if (success) {
+                    // few responses are ok, we have to increment sequence
+                    // for next loop to avoid duplicate sequence download
+                    ++sequence;
+                    --skipSequences;
                 }
 
-                if (this._upController?.signal.aborted) {
-                    adaptiveRetry.raise();
+                // STOP MBR
+                if (
+                    this._upController &&
+                    (!mbrOK || // MBR NOK, or always running
+                        success < responses.length || // Error in media download
+                        this._upController.signal.aborted) // Aborted possibly after success, means congestion
+                ) {
+                    // Cancel MBR request if is always progressing
+                    // OR if sequence got a partial download
+                    // OR if sequence got a fail download (408 aborted)
+                    this._upController.abort();
+                    // learn this fail
+                    upRetry.fail();
+                    // display log
                     this.log(
                         `Bandwidth emulation fails to reach ${(((videoTrack ? (videoTrack.up ?? videoTrack).bandwidth : 0) * 8) / 1000).toFixed()}kbs`
                     ).warn();
                 }
             } while (!this.closed && skipSequences > 0);
-        }
+        } // Main sequence while loop
     }
 
     /**
@@ -480,15 +509,24 @@ export class HTTPAdaptiveSource extends Source {
             controllerType = 'alterable';
         } else if (controller === this._reliableController) {
             controllerType = 'reliable';
-        } else if (controller === this._skippableController) {
-            controllerType = 'skippable';
+        } else if (controller === this._cancelableController) {
+            controllerType = 'cancelable';
+        } else if (controller === this._upController) {
+            controllerType = 'emulated';
         }
+        // Record the state BEFORE to start download because the operation is async
+        // and variable instance like this._upController can change during the download
+        const emulation = controller === this._upController;
+        const alterable = controller === this._alterableController;
 
         if (typeof tracks == 'number') {
             tracks = [tracks];
         } else if (tracks instanceof Set) {
             // sorts
             tracks = Array.from(tracks).sort((a, b) => a - b);
+        }
+        if (!tracks.length) {
+            return new Response(null, { status: 400, statusText: 'No track to download' });
         }
 
         const strTracks = tracks.join(this._trackSeparator);
@@ -497,41 +535,45 @@ export class HTTPAdaptiveSource extends Source {
             this.url
         );
 
-        let onlyKeyFrame = false;
-        let videoAborted = false;
-        if (length == null) {
-            if (
-                controller === this._alterableController && // skip frame allowed
-                !playing.buffering &&
-                playing.bufferState === BufferState.LOW // we are low in last rendition before to download keyframe => last chance rendition !
-            ) {
-                // do the HEAD request to get first-sample-length
-                const response = await this._downloadSequence(playing, controller, tracks, sequence, 0);
-                if (response.ok) {
-                    // WIP remove old 'first-frame-length'
-                    length = parseInt(
-                        response.headers.get('first-sample-length') || response.headers.get('first-frame-length') || ''
-                    );
-                    if (length) {
-                        onlyKeyFrame = true;
+        let onlyFirstSample = false;
+        if (
+            length == null &&
+            alterable && // skip frame allowed
+            !playing.buffering &&
+            playing.bufferState === BufferState.LOW // we are low in last rendition before to download keyframe => last chance rendition !
+        ) {
+            // do the HEAD request to get first-sample-length
+            const response = await this._downloadSequence(playing, controller, tracks, sequence, 0);
+            if (response.ok) {
+                // WIP remove old 'first-frame-length'
+                length = parseInt(
+                    response.headers.get('first-sample-length') || response.headers.get('first-frame-length') || ''
+                );
+                if (length > 0) {
+                    const sequenceDuration = parseInt(response.headers.get('sequence-duration') || '');
+                    if (!isNaN(sequenceDuration)) {
+                        // We can opt for the first sample only if we have the sequence-duration information
+                        onlyFirstSample = true;
                         this.log(
                             `Download only first video frame of ${controllerType} sequence ${sequence} track ${strTracks}`
                         ).warn();
-                    } else {
-                        this.log('Cannot download only first video because there is no valid first-sample-length header').error();
                     }
                 } else {
-                    // aborted, log already displaid and nothing downloaded
-                    if (this.closed) {
-                        return response;
-                    }
-                    // maybe we have gotten a 404, due to immediate HEAD response and a possible origin switch
-                    // Try a full GET what ensures to wait future sequence if there is
-                    this.log(
-                        `First video frame download for ${controllerType} sequence ${sequence} track ${strTracks} failed, \
-                        switching to a full sequence download`
-                    ).warn();
+                    this.log('Cannot download only first video because there is no valid first-sample-length header').error();
                 }
+                if (!onlyFirstSample) {
+                    length = undefined;
+                }
+            } else {
+                // aborted, log already displaid and nothing downloaded
+                if (this.closed) {
+                    return response;
+                }
+                // maybe we have gotten a 404, due to immediate HEAD response and a possible origin switch
+                // Try a full GET what ensures to wait future sequence if there is
+                this.log(
+                    `First video frame download for ${controllerType} sequence ${sequence} track ${strTracks} failed, switching to a full sequence download`
+                ).error();
             }
         }
 
@@ -539,11 +581,12 @@ export class HTTPAdaptiveSource extends Source {
         let reader: Reader | undefined;
         let headers;
         const bufferAmount = playing.bufferAmount;
-        const videoTime = this.videoTime;
+        let lastError = '';
 
-        while (!reader && !controller.signal.aborted) {
+        while (!this.closed && !reader && !controller.signal.aborted) {
             if (headers) {
-                this.log(`Fetch again ${controllerType} sequence ${sequence} track ${strTracks} from ${url}`).info();
+                await Util.sleep(400);
+                this.log(`Fetch again ${controllerType} sequence ${sequence} track ${strTracks} from ${url}`).warn();
             } else {
                 headers = new Headers();
                 if (length) {
@@ -552,11 +595,13 @@ export class HTTPAdaptiveSource extends Source {
             }
 
             try {
-                if (length === 0 || controller === this._upController) {
+                const time = Util.time();
+                if (length === 0 || emulation) {
                     // Only HEAD or GET without media (bandwidth emulation)
                     response = await this.fetch(url, {
                         method: length === 0 ? 'HEAD' : 'GET',
                         signal: controller.signal,
+                        cache: 'no-store',
                         headers
                     });
                 } else {
@@ -567,33 +612,39 @@ export class HTTPAdaptiveSource extends Source {
                     });
                 }
 
-                const maxSequenceDuration = parseInt(response.headers.get('max-sequence-duration') || '');
-                if (!isNaN(maxSequenceDuration)) {
-                    this._maxSequenceDuration = maxSequenceDuration;
-                }
-                if (controller !== this._upController) {
-                    // 'sequence-duration' is only sent for a complete sequence, its absence tells that
-                    // we are on the current real-time sequence (bandwidth emulation reads a past sequence => ignore it)
-                    const sequenceDuration = parseInt(response.headers.get('sequence-duration') || '');
-                    this._sequenceDuration = isNaN(sequenceDuration) ? undefined : sequenceDuration;
+                if (length === 0) {
+                    // Ony header: whatever the result ok/error we can return as now!
+                    return response;
                 }
 
                 if (response.error) {
+                    if (
+                        response.status === 404 &&
+                        // 404 for an UP emulation on a previous segment is a unexpected error
+                        !emulation &&
+                        // 404 with waiting means that it's a live sequence not yet available
+                        Util.time() - time > 1000
+                    ) {
+                        this.log(`Sequence ${sequence} track ${strTracks} not available yet, waiting...`).warn();
+                        continue;
+                    }
+                    // unrecoverable error, no need to retry
                     return response;
                 }
-                if (length === 0) {
-                    // Ony header
-                    return response;
+
+                let sequenceDuration = parseInt(response.headers.get('sequence-duration') || '');
+                if (!emulation) {
+                    this._lastSequenceWasLive = isNaN(sequenceDuration);
                 }
                 const body = response.body?.getReader();
 
                 do {
                     const chunk = await body?.read();
                     if (!chunk || chunk.done) {
-                        // All downloaded!
+                        // All downloaded: SUCCESS!
                         return response;
                     }
-                    if (controller === this._upController) {
+                    if (emulation) {
                         // UP emulation !
                         continue;
                     }
@@ -602,65 +653,55 @@ export class HTTPAdaptiveSource extends Source {
                         reader.onMetadata = Util.EMPTY_FUNCTION;
                         reader.onInitTracks = Util.EMPTY_FUNCTION;
                         reader.onSample = (type: Media.Type, trackId: number, sample: Media.Sample) => {
-                            if (controller !== this._alterableController || type !== Media.Type.VIDEO) {
-                                this.readSample(type, trackId, sample);
-                                return;
-                            }
-                            if (videoAborted) {
-                                return;
-                            }
-                            // Define a 1-frame-per-GOP fallback rendition and abort the current video request if:
-                            // - we reached a key frame while downloading only the first frame (last-resort rendition), or
-                            // - we lost buffer (bufferAmount dropped to 0) while it was previously available.
-                            const isKey = sample?.isKeyFrame;
-                            if ((isKey && onlyKeyFrame) || (bufferAmount && !playing.bufferAmount)) {
-                                videoAborted = true;
-                                if (!length) {
-                                    // if is a cancel whereas was not a firt-frame download => cancel the transfer
+                            if (alterable && sequenceDuration >= sample.duration) {
+                                // We are on a alterable sequence and we have a valid sequenceDuration,
+                                // so we can skip the rest of the sequence if we lost buffer
+                                sequenceDuration -= sample.duration;
+                                if (!onlyFirstSample && bufferAmount && !playing.bufferAmount) {
+                                    // We lost buffer (bufferAmount dropped to 0) while it was previously available
+                                    // Abort the rest of the sequence, acceptable because is the alterable controller,
+                                    // cannot impact other tracks
                                     controller.abort();
-                                } // keep the connection alive !
-                                if (sample) {
+                                }
+                                if (onlyFirstSample || controller.signal.aborted) {
                                     // stretch duration for all the sequence
-                                    const duration = this._maxSequenceDuration
-                                        ? Math.max(1, this._maxSequenceDuration - this.videoTime + videoTime)
-                                        : sample.duration;
-                                    const skipped = duration - sample.duration;
-                                    if (skipped > 0) {
-                                        this.skipVideo(skipped);
+                                    if (sequenceDuration) {
+                                        sample.duration += sequenceDuration;
+                                        this.skipMedia(type, sequenceDuration);
                                     }
-                                    // make duration extendable
-                                    sample.duration = -duration;
+                                    // ensure no other call!
+                                    if (reader) {
+                                        reader.onSample = Util.EMPTY_FUNCTION;
+                                    }
                                 }
                             }
-                            this.readVideo(trackId, sample);
+                            this.readSample(type, trackId, sample);
                         };
                     }
                     reader.read(chunk.value);
                 } while (!controller.signal.aborted);
             } catch (e) {
                 // Request error, already displaid as a console error log => try again!
-                await Util.sleep(500);
+                lastError = Util.stringify(e);
             }
         } // main while loop
 
-        const aborted = controller.signal.aborted;
-        if (videoAborted) {
-            // to signal that we don't have download all !
-            controller.abort();
-        }
-
-        if (this.closed || !reader) {
-            // CLOSED or Not even started to download, sequence recoverable on a next call
+        if (this.closed || emulation) {
+            // - Closed or UP emulation => we don't want any log or caller behavior: not ok + no error
             return new Response(null, { headers: response?.headers, status: 408 });
         }
+
         // download started but failed, impossible to retry without rewind the reception
-        if (aborted) {
+        if (controller.signal.aborted) {
             this.log(`Abort ${controllerType} sequence ${sequence} track ${strTracks}`).warn();
         } else {
-            this.log(`Fails to download ${controllerType} sequence ${sequence} track ${strTracks} from ${url}`).warn();
+            this.log(
+                `Fails to download ${controllerType} sequence ${sequence} track ${strTracks} from ${url}, ${lastError || 'no error'}`
+            ).error();
         }
-        // Sequence partially gotten
-        return new Response(null, { headers: response?.headers, status: 206 });
+        // 206 => OK, sequence partially downloaded, cannot try again without media duplication
+        // 408 => NOK, sequence not downloaded at all, try again?
+        return new Response(null, { headers: response?.headers, status: reader ? 206 : 408 });
     }
 
     protected setTracks(tracks: Media.Tracks) {
