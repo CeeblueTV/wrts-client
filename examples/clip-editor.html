@@ -1,0 +1,333 @@
+<!doctype html>
+<!--
+    Copyright 2025 Ceeblue B.V.
+    This file is part of https://github.com/CeeblueTV/wrts-client which is released under GNU Affero General Public License.
+    See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
+-->
+<html lang="en">
+    <head>
+        <title>Ceeblue CMAF Clip Editor</title>
+        <meta charset="UTF-8">
+        <meta content="width=device-width, initial-scale=1.0" name="viewport">
+        <meta name="color-scheme" content="light dark">
+
+        <link rel="icon" href="./assets/ceeblue-logo-32x32.png" sizes="32x32">
+        <link rel="icon" href="./assets/ceeblue-logo-192x192.png" sizes="192x192">
+
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+        <!-- Shared design system: tokens, .hdr, .player, .btn, .sel, .lbl, .theme-btn. Linked
+            before the block below so the page-specific overrides win at equal specificity. -->
+        <link href="./css/main.css" rel="stylesheet">
+
+        <script>
+            // Apply theme synchronously to avoid FOUC. Same 'wrts-theme' key as the players, so the
+            // editor follows their theme when embedded in the DASH player's iframe.
+            (function() {
+                var stored = localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
+            })();
+        </script>
+
+        <style>
+            /* Page-specific only. Everything else comes from css/main.css: the token palette
+               (identical values, player names), the reset, body, .hdr, .player, .btn/.btn-primary,
+               .sel, .lbl and .theme-btn were all duplicated here under the SDK's own names. */
+
+            /* Full-bleed: a timeline is a scrubber and wants every pixel of width, so drop
+               main.css's 960px cap. Embedded in an iframe, so the whole tool must fit the viewport
+               without scrolling: flex column, and the preview absorbs the leftover height. */
+            html { background: transparent; }
+            body { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+            .shell { max-width: none; padding: 14px 0 24px; height: 100vh; gap: 0; }
+            .hdr { margin: 0 14px; flex: none; }
+
+            .editor { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 24px; }
+            .editor-heading {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: end;
+                justify-content: space-between;
+                gap: 24px;
+                /* Aligned on the preview below, not on the wider timeline */
+                width: calc(100% - 30px);
+                max-width: calc(60vh * 16 / 9);
+                margin: 0 auto 14px;
+            }
+            .editor-heading h2 { color: var(--navy); font-size: 20px; font-weight: 600; }
+            .editor-heading p {
+                max-width: 440px;
+                margin-left: auto;
+                color: var(--txt-2);
+                font-size: 12px;
+                text-align: right;
+            }
+            .editor-heading p.is-error { color: var(--err); }
+
+            /* Takes the height left over by the heading, timeline and actions, and derives its
+               width from main.css's aspect-ratio: 16/9 — so it shrinks to fit any viewport with no
+               reserve to guess at. Drops main.css's 60vh/width:100% caps, which flex replaces. */
+            .player {
+                flex: 1;
+                min-height: 0;
+                width: auto;
+                max-width: calc(100% - 30px);
+                max-height: none;
+                margin: 0 auto 24px;
+            }
+            /* main.css hides the native controls because both players draw their own overlay. This
+               page has no overlay and needs them to play at all. `revert` is safe: the page already
+               hard-requires dialog.showModal(), whose support is newer than revert's everywhere. */
+            #video-preview::-webkit-media-controls,
+            #video-preview::-webkit-media-controls-start-playback-button { display: revert !important; }
+            /* The element styles its own interior in its shadow root, only the outer box is ours. */
+            dash-timeline { display: block; width: calc(100% - 60px); margin: 0 auto; }
+
+            /* No fontawesome on this page, one glyph is not worth two stylesheets and a webfont. */
+            .theme-icon::before { content: "\263E"; }
+            html[data-theme="dark"] .theme-icon::before { content: "\2600"; }
+
+            .download-actions { width: calc(100% - 30px); margin: 44px auto 0; text-align: center; }
+            .download-actions img { width: 27px; height: 27px; }
+
+            #download-dialog {
+                /* Centred explicitly rather than through the UA's `dialog:modal { inset: 0;
+                   margin: auto }`, which main.css's author-level `* { margin: 0 }` defeats.
+                   right/bottom are cleared so the box is not over-constrained by that inset. */
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                right: auto;
+                bottom: auto;
+                transform: translate(-50%, -50%);
+                margin: 0;
+                max-height: calc(100% - 32px);
+                overflow: auto;
+                width: min(460px, calc(100% - 32px));
+                padding: 0;
+                border: 1px solid var(--border-s);
+                border-radius: var(--r-lg);
+                background: var(--bg);
+                color: var(--txt);
+                box-shadow: var(--shadow-modal);
+            }
+            #download-dialog::backdrop { background: var(--modal-back); backdrop-filter: blur(4px); }
+
+            .download-form fieldset { display: grid; gap: 12px; padding: 20px 22px; border: 0; }
+            .download-form h2 { color: var(--navy); font-size: 17px; font-weight: 600; }
+            .download-form .lbl { margin-top: 4px; }
+            #download-status { min-height: 1.25em; color: var(--err); font-size: 12px; }
+            /* appearance: none drops the native widget, so the track and the value both need
+               painting or the bar renders invisible. */
+            #download-progress {
+                width: 100%;
+                height: 6px;
+                appearance: none;
+                overflow: hidden;
+                border: 0;
+                border-radius: 3px;
+                background: var(--bg-e);
+            }
+            #download-progress::-webkit-progress-bar { background: var(--bg-e); }
+            #download-progress::-webkit-progress-value { background: var(--accent); }
+            #download-progress::-moz-progress-bar { background: var(--accent); }
+            .download-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+
+            @media (max-width: 580px) {
+                .hdr { margin-inline: 10px; }
+                .editor { margin-top: 18px; }
+                .editor-heading { align-items: start; flex-direction: column; gap: 4px; }
+                .editor-heading p { margin-left: 0; text-align: left; }
+                .player { margin-bottom: 20px; }
+                .download-actions { margin-top: 38px; }
+            }
+        </style>
+
+        <script type="module">
+            import { Timeline, parseManifest, PreviewPlayer, MediaExporter } from "./assets/vendor/cmaf-clip-sdk.bundle.min.js";
+
+            async function main() {
+                const video = document.querySelector("#video-preview");
+                const timeline = document.querySelector("dash-timeline");
+                const openDownloadDialogButton = document.querySelector("#open-download-dialog");
+                const downloadDialog = document.querySelector("#download-dialog");
+                const downloadForm = document.querySelector("#download-form");
+                const downloadFormat = document.querySelector("#download-format");
+                const downloadStatus = document.querySelector("#download-status");
+                const downloadProgress = document.querySelector("#download-progress");
+                const submitDownloadButton = document.querySelector("#submit-download");
+                const cancelDownloadButton = document.querySelector("#cancel-download");
+                const themeButton = document.querySelector("#theme-toggle");
+
+                const updateThemeButton = () => {
+                    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+                    const label = `Switch to ${nextTheme} theme`;
+                    themeButton.title = label;
+                    themeButton.setAttribute("aria-label", label);
+                };
+
+                themeButton.addEventListener("click", () => {
+                    document.documentElement.dataset.theme =
+                        document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+                    localStorage.setItem("wrts-theme", document.documentElement.dataset.theme);
+                    updateThemeButton();
+                });
+                updateThemeButton();
+
+                // For example "?url=http://localhost:8082/index.mpd" or ".../index.m3u8"
+                const manifestUrl = new URLSearchParams(location.search).get("url");
+                if (!manifestUrl) {
+                    throw new Error("Missing the manifest's url in query");
+                }
+                // We assume that the manifest is in a folder named after the video, e.g. "videos/big-buck-bunny/index.mpd".
+                const parts = new URL(manifestUrl).pathname.split("/").filter(Boolean);
+                const filename = parts.at(-2) ?? "record";
+
+                if (!(timeline instanceof Timeline)) {
+                    throw new Error("Missing <dash-timeline> element");
+                }
+
+                const media = await parseManifest(manifestUrl);
+
+                const player = new PreviewPlayer(video, media);
+                await player.load(manifestUrl);
+
+                timeline.addEventListener("selection-change", event => player.setBufferingEnd(event.detail.end));
+
+                timeline.setupSelectionHandles(
+                    media.video,
+                    video,
+                    timestampS => player.seek(timestampS),
+                    () => player.getCurrentTime()
+                );
+
+                const exporter = new MediaExporter(media);
+
+                openDownloadDialogButton.addEventListener("click", () => {
+                    downloadForm.reset();
+                    downloadStatus.textContent = "";
+                    downloadProgress.hidden = true;
+                    downloadDialog.showModal();
+                });
+
+                // Set while an export runs, so closing the dialog cancels its downloads.
+                let exportAbort = null;
+
+                cancelDownloadButton.addEventListener("click", () => downloadDialog.close());
+                // Reached by the Cancel button, by Esc and by the close of a finished export, where aborting is a no-op.
+                downloadDialog.addEventListener("close", () => exportAbort?.abort());
+
+                downloadForm.addEventListener("submit", async event => {
+                    event.preventDefault();
+                    const format = downloadFormat.value;
+                    // Only the format and the submit button are disabled, so Cancel stays clickable while busy.
+                    const abort = new AbortController();
+                    exportAbort = abort;
+                    downloadFormat.disabled = true;
+                    submitDownloadButton.disabled = true;
+                    downloadStatus.textContent = "Preparing download…";
+                    downloadProgress.value = 0;
+                    downloadProgress.hidden = false;
+
+                    try {
+                        const written = await exporter.saveSelection(
+                            format,
+                            timeline.selection,
+                            filename,
+                            ratio => { downloadProgress.value = ratio; },
+                            abort.signal
+                        );
+
+                        if (written) {
+                            downloadDialog.close();
+                        } else {
+                            downloadStatus.textContent = "";
+                        }
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        downloadStatus.textContent = `Download failed: ${message}`;
+                        console.error("Could not download selection", error);
+                    } finally {
+                        exportAbort = null;
+                        downloadFormat.disabled = false;
+                        submitDownloadButton.disabled = false;
+                        downloadProgress.hidden = true;
+                    }
+                });
+
+                openDownloadDialogButton.disabled = false;
+
+                await timeline.startResponsiveThumbnailGeneration(media.video);
+            }
+
+            main().catch(error => {
+                console.error(error);
+                // The page is often embedded in an iframe, where the console isn't the first place one looks
+                const hint = document.querySelector("#editor-hint");
+                hint.textContent = error instanceof Error ? error.message : String(error);
+                hint.classList.add("is-error");
+            });
+        </script>
+    </head>
+    <body>
+        <div class="shell">
+            <header class="hdr">
+                <img src="./assets/ceeblue-logo.png" alt="Ceeblue">
+                <h1>
+                    CMAF <em>Clip Editor</em>
+                </h1>
+                <button id="theme-toggle" class="theme-btn" type="button"
+                    title="Toggle color theme" aria-label="Toggle color theme">
+                    <span class="theme-icon" aria-hidden="true"></span>
+                </button>
+            </header>
+
+            <main class="editor" aria-labelledby="editor-title">
+                <div class="editor-heading">
+                    <div>
+                        <span class="lbl">Media tools</span>
+                        <h2 id="editor-title">Create a clip</h2>
+                    </div>
+                    <p id="editor-hint">Select the beginning and end of your selection on the timeline.</p>
+                </div>
+
+                <div class="player">
+                    <video id="video-preview" controls playsinline></video>
+                </div>
+                <dash-timeline></dash-timeline>
+                <div class="download-actions">
+                    <button class="btn btn-primary" id="open-download-dialog" type="button" disabled>
+                        <img src="./assets/download.png" alt="">
+                        Download selection
+                    </button>
+                </div>
+            </main>
+        </div>
+
+        <dialog id="download-dialog" aria-labelledby="download-dialog-title">
+            <form id="download-form" class="download-form">
+                <fieldset>
+                    <h2 id="download-dialog-title">Download selection</h2>
+
+                    <label class="lbl" for="download-format">File format</label>
+                    <select class="sel" id="download-format" name="format">
+                        <option value="mp4">MP4</option>
+                        <option value="mkv">Matroska (MKV)</option>
+                        <option value="mov">QuickTime (MOV)</option>
+                        <option value="mpeg-ts">MPEG-TS</option>
+                    </select>
+
+                    <p id="download-status" role="status"></p>
+                    <progress id="download-progress" max="1" value="0" hidden></progress>
+
+                    <div class="download-dialog-actions">
+                        <button class="btn" id="cancel-download" type="button">Cancel</button>
+                        <button class="btn btn-primary" id="submit-download" type="submit">Download</button>
+                    </div>
+                </fieldset>
+            </form>
+        </dialog>
+    </body>
+</html>
