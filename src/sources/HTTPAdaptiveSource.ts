@@ -45,6 +45,7 @@ export class HTTPAdaptiveSource extends Source {
     private _reliableController: AbortController;
     // To know if the last sequence was live or not
     private _lastSequenceWasLive: boolean = true;
+    private _maxSequenceDuration: number = 0;
     private _sequencePattern: string;
     private _cmcd?: CMCD;
     private _trackSeparator: string = '';
@@ -197,8 +198,6 @@ export class HTTPAdaptiveSource extends Source {
             { signal: playing.signal }
         );
 
-        let maxSequenceDuration = 0;
-
         // Start download
         const upRetry = new AdaptiveRetry();
         upRetry.log = this.log.bind(this, 'Adaptive Bitrate,') as ILog;
@@ -261,14 +260,14 @@ export class HTTPAdaptiveSource extends Source {
             let skipSequences = 0;
             if (!this.reliable && playing.bufferState === BufferState.LOW && playing.buffering && this.currentTime >= 0) {
                 // We can skip some frames while buffering because means a stall has occurred
-                if (maxSequenceDuration) {
+                if (this._maxSequenceDuration) {
                     let newSequence = Infinity;
                     let fixLiveTime = 0;
 
                     // Check newSequence exists
                     while (metadata.liveTime > this.currentTime) {
                         newSequence = Math.min(
-                            sequence + Math.floor((metadata.liveTime - this.currentTime) / maxSequenceDuration),
+                            sequence + Math.floor((metadata.liveTime - this.currentTime) / this._maxSequenceDuration),
                             newSequence - 1
                         );
 
@@ -292,7 +291,7 @@ export class HTTPAdaptiveSource extends Source {
                             this.log(
                                 `Skip sequences ${sequence} to ${newSequence - 1} ${Util.stringify({
                                     delay: metadata.liveTime - this.currentTime,
-                                    maxSequenceDuration: maxSequenceDuration
+                                    maxSequenceDuration: this._maxSequenceDuration
                                 })}`
                             ).warn();
                             if (version < 2) {
@@ -305,7 +304,7 @@ export class HTTPAdaptiveSource extends Source {
                             break;
                         }
 
-                        fixLiveTime -= maxSequenceDuration;
+                        fixLiveTime -= this._maxSequenceDuration;
                     }
 
                     // Fix evaluation if need
@@ -400,7 +399,7 @@ export class HTTPAdaptiveSource extends Source {
                 if (
                     videoTrack &&
                     sequence > 0 &&
-                    maxSequenceDuration &&
+                    this._maxSequenceDuration &&
                     this._lastSequenceWasLive && // just if we are on live edge, any delay means a possible bandwidth issue
                     upRetry.try() &&
                     videoTrack.up &&
@@ -409,7 +408,7 @@ export class HTTPAdaptiveSource extends Source {
                     const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
                     this._upController = new AbortController();
                     if (extraByteRateRequired > 0) {
-                        const bytes = Math.ceil((extraByteRateRequired * maxSequenceDuration) / 1000);
+                        const bytes = Math.ceil((extraByteRateRequired * this._maxSequenceDuration) / 1000);
                         this.log(
                             `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs by adding ${((extraByteRateRequired * 8) / 1000).toFixed()}kbs to current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
                         ).info();
@@ -455,10 +454,6 @@ export class HTTPAdaptiveSource extends Source {
                         if (response.status === 206) {
                             // partial content, cancel the MBR UP attempt
                             mbrOK = false;
-                        }
-                        const duration = parseInt(response.headers.get('max-sequence-duration') || '');
-                        if (duration > 0) {
-                            maxSequenceDuration = duration;
                         }
                     } // else is 408 => aborted by controller
                 }
@@ -635,9 +630,13 @@ export class HTTPAdaptiveSource extends Source {
                 let sequenceDuration = parseInt(response.headers.get('sequence-duration') || '');
                 if (!emulation) {
                     this._lastSequenceWasLive = isNaN(sequenceDuration);
+                    const maxSequenceDuration = parseInt(response.headers.get('max-sequence-duration') || '');
+                    if (maxSequenceDuration > 0) {
+                        this._maxSequenceDuration = maxSequenceDuration;
+                    }
                 }
-                const body = response.body?.getReader();
 
+                const body = response.body?.getReader();
                 do {
                     const chunk = await body?.read();
                     if (!chunk || chunk.done) {
