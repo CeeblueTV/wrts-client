@@ -27,7 +27,7 @@ const MAXIMUM_TRY_DELAY = 30000;
  * - `maximumTryDelay`: Maximum delay in milliseconds before allowing another retry (default: `30000`).
  *
  * @example
- * const retry = new AdaptiveRetry({
+ * const retry = new AdaptiveRetry("MySystem",{
  *   learningTryStep: 2000,   // increase delay by 2s on each failure
  *   maximumTryDelay: 10000   // cap retry delay at 10s
  * });
@@ -46,6 +46,9 @@ const MAXIMUM_TRY_DELAY = 30000;
  * }
  */
 export class AdaptiveRetry extends Loggable {
+    get name(): string {
+        return this._name;
+    }
     /**
      * try delay before to accept new try
      */
@@ -72,6 +75,7 @@ export class AdaptiveRetry extends Loggable {
         return this._failed ?? false;
     }
 
+    private _name: string;
     private _tryDelay!: number;
     private _appreciationTime!: number;
     private _failed?: boolean;
@@ -86,12 +90,14 @@ export class AdaptiveRetry extends Loggable {
      * @param params.maximumTryDelay `30000`, Maximum retry delay in milliseconds. Once reached, further failures will not increase the delay.
      */
     constructor(
+        name: string,
         private _params: {
             learningTryStep?: number;
             maximumTryDelay?: number;
         } = {}
     ) {
         super();
+        this._name = name;
         this._params = Object.assign(
             {
                 learningTryStep: LEARNING_TRY_STEP,
@@ -141,36 +147,48 @@ export class AdaptiveRetry extends Loggable {
      * Mark the current observation as failed.
      * The first failure after initialization or a success increases the delay;
      * consecutive failures only restart the waiting period.
+     *
+     * @param forceIncrease Increase the delay even when the current failure period is already marked as failed.
+     * @returns true if the delay was increased, false for a consecutive failure or if the delay is already at maximum
      */
-    fail(): void {
+    fail(forceIncrease: boolean = false): boolean {
         // reset appreciation time on any fail !
         this._appreciationTime = 0;
         // First failure in this failure period => increase the delay before trying again.
-        if (!this._failed) {
-            this._failed = true;
-            this.increase();
+        if (!forceIncrease && this._failed) {
+            return false;
         }
+        this._failed = true;
+        return this.increase();
     }
 
     /**
      * Force to increase the delay before to try
+     *
+     * @returns true if the delay was increased, false if it was already at maximum
      */
-    increase() {
+    increase(): boolean {
         const tryDelay = this._tryDelay;
         this._tryDelay = Math.min(this._tryDelay + this.learningTryStep, this.maximumTryDelay);
-        if (this._tryDelay > tryDelay) {
-            this.log(`Increase try delay from ${tryDelay}ms to ${this._tryDelay}ms`).info();
+        if (this._tryDelay <= tryDelay) {
+            return false;
         }
+        this.log(`Increase ${this._name} try delay from ${tryDelay}ms to ${this._tryDelay}ms`).info();
+        return true;
     }
 
     /**
      * Force to decrease the delay before to try
+     *
+     * @returns true if the delay was decreased, false if it was already at minimum
      */
-    decrease() {
+    decrease(): boolean {
         const tryDelay = this._tryDelay;
         this._tryDelay = Math.max(this._tryDelay - this.learningTryStep, this.learningTryStep);
-        if (this._tryDelay < tryDelay) {
-            this.log(`Decrease try delay from ${tryDelay}ms to ${this._tryDelay}ms`).info();
+        if (this._tryDelay >= tryDelay) {
+            return false;
         }
+        this.log(`Decrease ${this._name} try delay from ${tryDelay}ms to ${this._tryDelay}ms`).info();
+        return true;
     }
 }

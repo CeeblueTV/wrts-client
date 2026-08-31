@@ -238,7 +238,7 @@
                         network <br class="d-md-none">profiles
                     </div>
                     <div class="form-group col-3 p-0">
-                        <select class="custom-select text-center" v-model="netProfile" @change="setBuffer()">
+                        <select class="custom-select text-center" v-model="netProfile" @change="setBuffer(undefined, undefined, true)">
                             <option v-bind:value="profil" v-for="[profil, _] of netProfiles">
                                 {{ profil }}
                             </option>
@@ -256,6 +256,7 @@
                     <div class="form-group col-2 p-0">
                         <input class="form-control text-center"
                             type="number" min="0" required oninput="validity.valid||(value='');"
+                            :disabled="netProfile === '-auto-'"
                             v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
                     </div>
 
@@ -472,8 +473,8 @@
                     stream: '',
                     muted: false,
                     host: null,
-                    bufferMin: 0,
-                    bufferMax: 0,
+                    bufferMin: 200,
+                    bufferMax: 1000,
 
                     audioDump: options.dump ? new BinaryWriter() : undefined,
                     videoDump: options.dump ? new BinaryWriter() : undefined,
@@ -532,6 +533,9 @@
                     player: null,
                     latencies: [],
                     netProfiles: new Map([
+                        ['-auto-', [
+                            "Dynamically adjusts the maximum buffer limit based on the configured minimum buffer limit and current network conditions.",
+                        ]],
                         ['-manual-', [
                             "Manually configure a buffer window large enough to compensate for variations caused by network fluctuations.",
                         ]],
@@ -552,7 +556,7 @@
                             2000, 4000 // 3 seconds
                         ]],
                     ]),
-                    netProfile: 'normal'
+                    netProfile: '-auto-'
                 }
             },
             mounted() {
@@ -565,7 +569,12 @@
                 this.host = new NetAddress(host || location.host, 443);
                 this.stream = options.stream || '';
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
-                this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
+                const bufferMin = Number(options.bufferMin);
+                const bufferMax = Number(options.bufferMax);
+                if (Number.isFinite(bufferMax)) {
+                    this.netProfile = '-manual-';
+                }
+                this.setBuffer(bufferMin, bufferMax);
 
                 const drawContext = this.canvas.getContext('2d');
 
@@ -596,6 +605,9 @@
                 setInterval(() => {
                     const player = this.player;
                     if(player) {
+                        if(this.netProfile === '-auto-' && this.bufferMax !== player.bufferLimitHigh) {
+                            this.bufferMax = player.bufferLimitHigh;
+                        }
                         this.hasMetrics = true;
                         const stats = player.computeStats();
                        // For bandwidth calculation, using player.recvByteRate is faster than
@@ -1119,44 +1131,61 @@
                         this.player.audioTrack = this.audioTrackId;
                     }
                 },
-                setBuffer(min, max) {
-                    let profile;
-                    if(!isNaN(min) || !isNaN(max)) {
-                        // manual mode
-                        profile = this.netProfiles.entries().next().value;
-                        this.netProfile = profile[0];
-                        profile = profile[1];
+                setBuffer(min, max, profileChanged = false) {
+                    const hasMin = min !== '' && Number.isFinite(Number(min));
+                    const hasMax = max !== '' && Number.isFinite(Number(max));
+                    const automatic = this.netProfile === '-auto-';
+                    let profile = this.netProfiles.get(this.netProfile);
 
-                        this.bufferMin = Math.min(min || max, max || min);
-                        this.bufferMax = Math.max(min || max, max || min);
-                    } else {
-                        // auto mode
+                    if(automatic) {
+                        if(hasMin) {
+                            this.bufferMin = Number(min);
+                        }
+                    } else if(hasMin || hasMax) {
+                        // manual mode
+                        this.netProfile = '-manual-';
                         profile = this.netProfiles.get(this.netProfile);
-                        if(profile[1]) {
+
+                        const minValue = hasMin ? Number(min) : Number(max);
+                        const maxValue = hasMax ? Number(max) : Number(min);
+                        this.bufferMin = Math.min(minValue, maxValue);
+                        this.bufferMax = Math.max(minValue, maxValue);
+                    } else {
+                        // preset mode
+                        if(profile[1] != null) {
                             this.bufferMin = profile[1];
                         }
-                        if(profile[2]) {
+                        if(profile[2] != null) {
                             this.bufferMax = profile[2];
                         }
                     }
 
-                    
                     if (this.player) {
-                        // fix possible player correction!
-                        this.bufferMin = (this.player.bufferLimitLow = this.bufferMin);
-                        this.bufferMax = (this.player.bufferLimitHigh = this.bufferMax);
+                        if(automatic) {
+                            this.player.bufferLimitHigh = undefined;
+                        } else if(profileChanged && this.netProfile === '-manual-') {
+                            this.player.bufferLimitHigh = this.player.bufferLimitHigh;
+                        } else {
+                            this.player.bufferLimitHigh = this.bufferMax;
+                        }
+                        this.player.bufferLimitLow = this.bufferMin;
+                        this.bufferMax = this.player.bufferLimitHigh;
                     }
-                    
+
                     // Display user description
                     this.netDescription = profile[0];
-                    this.netDescription += "<br>Expected buffering ≈" + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + "ms";
+                    if(!automatic) {
+                        this.netDescription += "<br>Expected buffering ≈" + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + "ms";
+                    }
 
                     this.updateURL();
-                    
                 },
                 updateURL() {
                     if (history.pushState) {
-                        let path = location.origin + location.pathname + '?stream=' + encodeURIComponent(this.buildStream()) + '&bufferMin=' + this.bufferMin + '&bufferMax=' + this.bufferMax;
+                        let path = location.origin + location.pathname + '?stream=' + encodeURIComponent(this.buildStream()) + '&bufferMin=' + this.bufferMin;
+                        if(this.netProfile !== '-auto-') {
+                            path += '&bufferMax=' + this.bufferMax;
+                        }
                         if(options.token != null) {
                             path += "&token=" + options.token;
                         }

@@ -8,7 +8,7 @@ import { Connect, ILog, Util } from '@ceeblue/web-utils';
 import * as Media from '../media/Media';
 import { Source } from './Source';
 import { Metadata } from '../media/Metadata';
-import { AdaptiveRetry } from '../media/AdaptiveRetry';
+import { AdaptiveRetry } from '../utils/AdaptiveRetry';
 import { BufferState, IPlaying } from './IPlaying';
 import { CMCD } from '../media/CMCD';
 import { Reader } from '../media/reader/Reader';
@@ -203,7 +203,7 @@ export class HTTPAdaptiveSource extends Source {
         );
 
         // Start download
-        const upRetry = new AdaptiveRetry();
+        const upRetry = new AdaptiveRetry('MBR');
         upRetry.log = this.log.bind(this, 'Adaptive Bitrate,') as ILog;
 
         while (!this.closed) {
