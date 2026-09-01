@@ -1026,6 +1026,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     this._source.onVideo = Util.EMPTY_FUNCTION;
                     this._source.onData = Util.EMPTY_FUNCTION;
                     this._source.onTrackChange = Util.EMPTY_FUNCTION;
+                    this._source.onVideoChange = Util.EMPTY_FUNCTION;
+                    this._source.onAudioChange = Util.EMPTY_FUNCTION;
                 }
 
                 // close media playback
