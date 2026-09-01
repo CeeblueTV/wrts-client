@@ -37,14 +37,18 @@ export class HTTPAdaptiveSource extends Source {
 
     // To emulate UP rendition before to switch
     private _upController?: AbortController;
-    // For channel sequence-cancelable + morphable (first frame), basically for video in unreliable mode
+    // For channel sequence-cancelable + morphable (first frame),
+    // basically for video in unreliable mode once an exact sequence duration is known
     private _alterableController: AbortController;
-    // For channel sequence-cancelable on stall, basically for audio in unreliable mode
+    // For channel sequence-cancelable on stall,
+    // basically for audio in unreliable mode
     private _cancelableController: AbortController;
-    // For reliable channel, basically for all channels in reliable mode
+    // For reliable channel,
+    // basically for all channels in reliable mode
     private _reliableController: AbortController;
-    // To know if the last sequence was live or not
+    // No Sequence-Duration header means that the last sequence was the current, still-open live sequence
     private _lastSequenceWasLive: boolean = true;
+    // Upper bound used to locate sequence live edge
     private _maxSequenceDuration: number = 0;
     private _sequencePattern: string;
     private _cmcd?: CMCD;
@@ -524,7 +528,7 @@ export class HTTPAdaptiveSource extends Source {
         let onlyFirstSample = false;
         if (
             length == null &&
-            alterable && // skip frame allowed
+            alterable && // first-frame fallback allowed if the HEAD response also provides the exact sequence duration
             !playing.buffering &&
             playing.bufferState === BufferState.LOW // we are low in last rendition before to download keyframe => last chance rendition !
         ) {
@@ -538,7 +542,7 @@ export class HTTPAdaptiveSource extends Source {
                 if (length > 0) {
                     const sequenceDuration = parseInt(response.headers.get('sequence-duration') || '');
                     if (!isNaN(sequenceDuration)) {
-                        // We can opt for the first sample only if we have the sequence-duration information
+                        // Sequence-Duration is only present for a completed sequence.
                         onlyFirstSample = true;
                         this.log(
                             `Download only first video frame of ${controllerType} sequence ${sequence} track ${strTracks}`
@@ -621,6 +625,8 @@ export class HTTPAdaptiveSource extends Source {
                     return response;
                 }
 
+                // Exact duration of a completed sequence. NaN deliberately identifies the current,
+                // still-open live sequence and disables duration-dependent frame alteration below.
                 let sequenceDuration = parseInt(response.headers.get('sequence-duration') || '');
                 if (!emulation) {
                     this._lastSequenceWasLive = isNaN(sequenceDuration);
@@ -647,8 +653,9 @@ export class HTTPAdaptiveSource extends Source {
                         reader.onInitTracks = Util.EMPTY_FUNCTION;
                         reader.onSample = (type: Media.Type, trackId: number, sample: Media.Sample) => {
                             if (alterable && sequenceDuration >= sample.duration) {
-                                // We are on a alterable sequence and we have a valid sequenceDuration,
-                                // so we can skip the rest of the sequence if we lost buffer
+                                // The alterable sequence is complete and its exact remaining duration is known,
+                                // so we can discard its remaining video data if the buffer becomes empty.
+                                // An open live sequence has no Sequence-Duration and intentionally bypasses this block.
                                 sequenceDuration -= sample.duration;
                                 if (!onlyFirstSample && bufferAmount && !playing.bufferAmount) {
                                     // We lost buffer (bufferAmount dropped to 0) while it was previously available
@@ -657,7 +664,7 @@ export class HTTPAdaptiveSource extends Source {
                                     controller.abort();
                                 }
                                 if (onlyFirstSample || controller.signal.aborted) {
-                                    // stretch duration for all the sequence
+                                    // Stretch the sample across the exact remaining duration of the completed sequence
                                     if (sequenceDuration) {
                                         sample.duration += sequenceDuration;
                                         this.skipMedia(type, sequenceDuration);
