@@ -172,7 +172,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @event
      */
     onBufferState(oldState: BufferState) {
-        this.log(`Buffer change from ${oldState} to ${this.bufferState} (bufferAmount=${this.bufferAmount}ms)`).info();
+        this.log(`Buffer change from ${oldState} to ${this.bufferState} (bufferAmount=${this.bufferAmount}ms)`)[
+            this.bufferState === BufferState.LOW ? 'warn' : 'info'
+        ]();
     }
 
     /**
@@ -1206,7 +1208,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         if (highLimit > this._bufferLimitHigh) {
-            this.log(`Increase bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).warn();
+            this.log(`Increase bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).info();
             this._bufferLimitHighAuto?.fail();
         } else {
             this.log(`Decrease bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).info();
