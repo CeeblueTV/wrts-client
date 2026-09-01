@@ -816,8 +816,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             };
             this._source.onVideoChange = (videoTrack: number, videoTrackOld?: number) => {
                 if (this._playback && videoTrackOld != null && this._bufferLimitHighAuto) {
-                    // Reset buffer-auto metrics and fail to avoid a wrong buffer diminution
-                    this._bufferLimitHighAuto.fail();
+                    // Reset buffer-auto metrics and rearm attempts
+                    this._bufferLimitHighAuto.rearm();
                     this._bufferMeasure = new BufferMeasure();
                 }
             };

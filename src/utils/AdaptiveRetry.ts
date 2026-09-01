@@ -155,6 +155,13 @@ export class AdaptiveRetry extends Loggable {
     }
 
     /**
+     * Restarts the waiting period without changing the retry delay or failure state.
+     */
+    rearm() {
+        this._appreciationTime = Util.time();
+    }
+
+    /**
      * Mark the current observation as failed.
      * The first failure after initialization or a success increases the delay;
      * consecutive failures only restart the waiting period.
