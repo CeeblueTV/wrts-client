@@ -29,7 +29,7 @@ This logic is primarily handled within the `Player` class (`src/Player.ts`) and 
     -   In `LOW` state, `playbackRate` is reduced (e.g., to `0.92x`) to slow down consumption and allow the buffer to refill.
     -   In `HIGH` state, `playbackRate` is increased (e.g., to `1.08x`) to drain the buffer faster and move closer to the live edge.
 
-4.  **Partial Reliability & Frame Skipping**: This is the most critical part of the low-latency strategy. When the player is configured for partial reliability and the network deteriorates while the buffer is under the `LOW` state, it doesn’t wait for every video frame—risking a stall—instead it can **proactively skip individual frames** to preserve audio continuity, or if a stall has already occurred **skip several video segments** to rejoin the live edge.
+4.  **Partial Reliability & Frame Skipping**: This is the most critical part of the low-latency strategy. When the player is configured for partial reliability and the network deteriorates while the buffer is under the `LOW` state, it doesn’t wait for every video frame from a completed sequence—risking a stall—instead it can **proactively skip individual frames** to preserve audio continuity, or if a stall has already occurred **skip several completed video segments** to rejoin the live edge.
 
 ### How Frame Skipping Works (in `HTTPAdaptiveSource`)
 
@@ -37,7 +37,7 @@ The `HTTPAdaptiveSource` is a pull-based protocol, fetching media in sequences (
 
 1.  **Stall/Low Buffer Detection**: The `Player` notifies the `HTTPAdaptiveSource` when the buffer state becomes `LOW` or when a playback `stall` is detected.
 
-2.  **Abort Current Downloads**: If the `reliable` property is `false`, the source immediately aborts any ongoing video segment downloads. This frees up the network connection instantly.
+2.  **Abort Current Downloads**: If the `reliable` property is `false`, the source immediately aborts ongoing media downloads when it can switch to a lower rendition or when a newer sequence is already available on the origin (see step 4). This frees up the network connection instantly.
 
 3.  **Calculate the Delay**: The source calculates the time difference between the current playback time and the live edge (`delay = metadata.liveTime - player.currentTime`).
 
@@ -45,12 +45,14 @@ The `HTTPAdaptiveSource` is a pull-based protocol, fetching media in sequences (
 
     *Example*: If the player is 2.5 seconds behind the live edge and each sequence is 1 second long, it will skip sequences `n` and `n+1` and will try to download sequence `n+2`.
 
-5.  **Prioritize Audio**: In severe congestion scenarios, the client can be configured to download only the audio and the first frame of the video sequence. This ensures that the audio remains continuous (which is less jarring to the user than broken audio) while providing a visual update, even if it's just a single frame, before resuming smooth video playback once the connection improves.
+    Skipping only makes sense when the client is genuinely *behind*, so it is conditioned on the `Sequence-Duration` response header: the origin sends it only for a sequence it has already completed. Its absence means the client is receiving the current real-time sequence, which is still open — no sequence exists ahead of it and its final duration is still unknown. In that case the client does not abort it merely to request a sequence the origin cannot serve yet. `Max-Sequence-Duration` is only an upper bound and is not used as an estimate of the open sequence's duration. This matters when the publisher itself is late: the delay grows while the client is already at the live edge, and only the publisher can resolve it.
+
+5.  **Prioritize Audio**: In severe congestion scenarios, the client can be configured to download only the audio and the first frame of a completed video sequence whose exact `Sequence-Duration` is known. This fallback is disabled for the current open sequence rather than estimating its duration. This ensures that the audio remains continuous (which is less jarring to the user than broken audio) while providing a visual update, even if it's just a single frame, before resuming smooth video playback once the connection improves.
 
 ### Why This Enables Low Latency
 
 -   **Prevents Stalls**: By proactively skipping frames, the player avoids the most significant cause of user-perceived latency: the rebuffering or stalling of the video.
--   **Stays at the Live Edge**: Traditional players will buffer several seconds of video, creating a built-in delay. The WebRTS client aggressively tries to keep the buffer minimal, and when it falls behind, it can actively skips content to catch up rather than delaying playback.
+-   **Stays at the Live Edge**: Traditional players will buffer several seconds of video, creating a built-in delay. The WebRTS client aggressively tries to keep the buffer minimal, and when it falls behind, it can actively skip content to catch up rather than delaying playback.
 -   **Adapts to Real-World Conditions**: The combination of adaptive bitrate (choosing a adapted quality) and frame skipping (throwing away data) provides a two-tiered defense against poor network conditions, ensuring the stream remains live, even if it means a temporary reduction in quality or frame rate.
 
 ---

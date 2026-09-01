@@ -58,6 +58,26 @@ export type Resolution = {
     height: number;
 };
 
+/**
+ * Get the main track to play, prefer video over audio over data
+ * @param tracks
+ * @returns the main track id or undefined if no track is available
+ */
+export function getMainTrack(tracks: Tracks): number | undefined {
+    if (tracks.video != null && tracks.video >= 0) {
+        return tracks.video;
+    }
+    if (tracks.audio != null && tracks.audio >= 0) {
+        return tracks.audio;
+    }
+    return tracks.data?.values().next().value;
+}
+
+/**
+ * Morph a {@link Type} type into a string for logging
+ * @param type
+ * @returns the string representation of the type
+ */
 export function typeToString(type: Type) {
     switch (type) {
         case Type.AUDIO:
@@ -71,6 +91,10 @@ export function typeToString(type: Type) {
     return 'unknown';
 }
 
+/**
+ * Get the screen resolution of the device
+ * @returns the screen resolution or undefined if not available
+ */
 export function screenResolution(): Resolution | undefined {
     if (typeof window === 'undefined' || !window.screen) {
         return;
