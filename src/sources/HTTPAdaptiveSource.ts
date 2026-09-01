@@ -8,7 +8,7 @@ import { Connect, ILog, Util } from '@ceeblue/web-utils';
 import * as Media from '../media/Media';
 import { Source } from './Source';
 import { Metadata } from '../media/Metadata';
-import { AdaptiveRetry } from '../media/AdaptiveRetry';
+import { AdaptiveRetry } from '../utils/AdaptiveRetry';
 import { BufferState, IPlaying } from './IPlaying';
 import { CMCD } from '../media/CMCD';
 import { Reader } from '../media/reader/Reader';
@@ -203,7 +203,7 @@ export class HTTPAdaptiveSource extends Source {
         );
 
         // Start download
-        const upRetry = new AdaptiveRetry();
+        const upRetry = new AdaptiveRetry('MBR');
         upRetry.log = this.log.bind(this, 'Adaptive Bitrate,') as ILog;
 
         while (!this.closed) {
@@ -399,25 +399,30 @@ export class HTTPAdaptiveSource extends Source {
                 sequence > 0 &&
                 this._maxSequenceDuration &&
                 this._lastSequenceWasLive && // just if we are on live edge, any delay means a possible bandwidth issue
-                upRetry.try() &&
-                videoTrack.up &&
-                !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution)
+                upRetry.try()
             ) {
-                const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
-                this._upController = new AbortController();
-                if (extraByteRateRequired > 0) {
-                    const bytes = Math.ceil((extraByteRateRequired * this._maxSequenceDuration) / 1000);
-                    this.log(
-                        `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs by adding ${((extraByteRateRequired * 8) / 1000).toFixed()}kbs to current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
-                    ).info();
-                    this._downloadSequence(playing, this._upController, videoTrack.up.id, sequence - 1, bytes).then(
-                        response => (mbrOK = response.ok)
-                    );
-                } else {
-                    mbrOK = true;
-                    this.log(
-                        `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs requires no extra bandwidth over current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
-                    ).warn();
+                if (videoTrack.up && !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution)) {
+                    const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
+                    this._upController = new AbortController();
+                    if (extraByteRateRequired > 0) {
+                        const bytes = Math.ceil((extraByteRateRequired * this._maxSequenceDuration) / 1000);
+                        this.log(
+                            `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs by adding ${((extraByteRateRequired * 8) / 1000).toFixed()}kbs to current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
+                        ).info();
+                        this._downloadSequence(playing, this._upController, videoTrack.up.id, sequence - 1, bytes).then(
+                            response => (mbrOK = response.ok)
+                        );
+                    } else {
+                        mbrOK = true;
+                        this.log(
+                            `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs requires no extra bandwidth over current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
+                        ).warn();
+                    }
+                } else if (upRetry.success) {
+                    // We are at the maximum rendition: a success here means the network sustains the top level,
+                    // so the next UP recovery attempt can happen sooner after a future DOWN.
+                    // Note: no decrease on a successful UP emulation below the top, the next UP would be harder.
+                    upRetry.decrease();
                 }
             }
 
