@@ -606,11 +606,14 @@ export class HTTPAdaptiveSource extends Source {
                 if (response.error) {
                     if (
                         response.status === 404 &&
-                        // 404 for an UP emulation on a previous segment is a unexpected error
+                        // A 404 for an UP emulation on a previous segment is an unexpected error
                         !emulation &&
-                        // 404 with waiting means that it's a live sequence not yet available
+                        // A 404 while waiting means it's a live sequence that is not available yet
                         Util.time() - time > 1000
                     ) {
+                        // WIP: distinguish these two cases using different HTTP status codes:
+                        // - 410 GONE for a sequence that is no longer available (before the first)
+                        // - 404 NOT FOUND for a sequence that is not available yet (after the last)
                         this.log(`Sequence ${sequence} track ${strTracks} not available yet, waiting...`).warn();
                         continue;
                     }
