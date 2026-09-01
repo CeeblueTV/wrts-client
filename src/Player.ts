@@ -1354,18 +1354,14 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         // Automatic max buffer?
-        if (this._bufferLimitHighAuto) {
-            // resolve in first the case where test samples is too short
-            while (this._bufferMeasure.lowHighDuration > this._bufferLimitHighAuto.tryDelay) {
-                if (!this._bufferLimitHighAuto.increase()) {
-                    break;
-                }
+        if (this._bufferLimitHighAuto?.try()) {
+            // Try to optimize automatically the buffer for low latency
+            this._adjustBufferLimitHigh();
+            if (this._bufferLimitHighAuto.success) {
+                // decrease try period if all is ok
+                this._bufferLimitHighAuto.decrease(this._bufferMeasure.lowHighDuration);
             }
-            if (this._bufferLimitHighAuto.try()) {
-                // Try to optimize automatically the buffer for low latency
-                this._adjustBufferLimitHigh();
-                this._bufferMeasure = new BufferMeasure();
-            }
+            this._bufferMeasure = new BufferMeasure();
         }
 
         // Buffer change detection
