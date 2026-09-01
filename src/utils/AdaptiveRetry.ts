@@ -13,13 +13,15 @@ const MAXIMUM_TRY_DELAY = 30000;
  * AdaptiveRetry is a helper class that manages retry attempts with an **adaptive retry strategy**.
  *
  * The goal is to avoid retrying too frequently after a failure by adapting the delay before the next attempt.
- * A failure starts a new waiting period, while a successful observation allows the delay to decrease progressively.
+ * A failure starts a new waiting period, while every pair of consecutive successful observations allows the delay to
+ * decrease progressively.
  *
  * ## Behavior
  * - `try()` returns `true` after the current retry delay has elapsed without a new failure.
  * - The first `fail()` after initialization or a success increases the retry delay by `learningTryStep`, up to `maximumTryDelay`.
  * - Consecutive `fail()` calls restart the waiting period without increasing the delay again.
- * - After a successful attempt, starting the next observation decreases the delay by `learningTryStep`.
+ * - Every two consecutive successful observations decrease the delay by `learningTryStep`. Success pairs do not
+ *   overlap: after a decrease, two new successful observations are required for the next decrease.
  * - The retry delay resets when calling `reset()`.
  *
  * ## Parameters
@@ -90,7 +92,8 @@ export class AdaptiveRetry extends Loggable {
      * Create a new AdaptiveRetry instance.
      *
      * The first failure in a failure period increases the retry delay by `learningTryStep` milliseconds,
-     * capped at `maximumTryDelay`. After a successful attempt, the delay can progressively decrease.
+     * capped at `maximumTryDelay`. Every pair of consecutive successful observations can progressively decrease the
+     * delay by `learningTryStep`.
      *
      * @param name A descriptive name for this AdaptiveRetry instance, used in logging.
      * @param params Optional parameters to configure the retry behavior.
@@ -129,8 +132,11 @@ export class AdaptiveRetry extends Loggable {
     }
 
     /**
-     * New try, return true on ok
-     * @returns true on success
+     * Start or continue a successful observation period.
+     * Every second consecutive successful period decreases the retry delay by `learningTryStep`.
+     * A failure interrupts the current success pair.
+     *
+     * @returns `true` when the current retry delay has elapsed without a failure, otherwise `false`.
      */
     try(): boolean {
         // OK
@@ -138,10 +144,6 @@ export class AdaptiveRetry extends Loggable {
         if (!this._appreciationTime) {
             // First correct appreciation
             this._appreciationTime = now;
-            if (this._failed === false) {
-                // Double success, decrease !
-                this.decrease();
-            }
         }
 
         const elapsed = now - this._appreciationTime;
@@ -150,7 +152,13 @@ export class AdaptiveRetry extends Loggable {
         }
         // OK for long time!
         this._appreciationTime = 0;
-        this._failed = false;
+        if (this._failed === false) {
+            // Double success, decrease the delay
+            this._failed = undefined;
+            this.decrease();
+        } else {
+            this._failed = false;
+        }
         return true;
     }
 
