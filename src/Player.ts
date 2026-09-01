@@ -372,6 +372,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (value == null) {
             this._bufferLimitHighAuto = new AdaptiveRetry('Buffer');
             this._bufferMeasure = new BufferMeasure();
+            // to fix bufferLimitHigh and update _bufferLimitMiddle
+            this._setBufferLimitHigh(this._bufferLimitHigh);
         } else {
             this._bufferLimitHighAuto = undefined;
             this._setBufferLimitHigh(value);
@@ -1162,8 +1164,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     private _setBufferLimitHigh(value: number) {
         value = Math.round(value);
-        this._bufferLimitHigh = value;
         this._bufferLimitLow = Math.min(value, this._bufferLimitLow);
+        if (this._bufferLimitHighAuto) {
+            value = Math.max(this._bufferLimitLow + BUFFER_MIN_WINDOW, value);
+        }
+        this._bufferLimitHigh = value;
         this._bufferLimitMiddle = Math.max(0, this._bufferLimitLow + Math.round((value - this._bufferLimitLow) / 2));
     }
 
