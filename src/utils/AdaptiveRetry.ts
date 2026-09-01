@@ -62,6 +62,12 @@ export class AdaptiveRetry extends Loggable {
         return this._params.learningTryStep || 0;
     }
     /**
+     * minimum delay to move away the next try
+     */
+    get minimumTryDelay(): number {
+        return this._params.minimumTryDelay || 0;
+    }
+    /**
      * maximum delay to move away the next try
      */
     get maximumTryDelay(): number {
@@ -86,12 +92,16 @@ export class AdaptiveRetry extends Loggable {
      * The first failure in a failure period increases the retry delay by `learningTryStep` milliseconds,
      * capped at `maximumTryDelay`. After a successful attempt, the delay can progressively decrease.
      *
+     * @param name A descriptive name for this AdaptiveRetry instance, used in logging.
+     * @param params Optional parameters to configure the retry behavior.
+     * @param params.minimumTryDelay `3000`, Minimum retry delay in milliseconds. The delay will not decrease below this value.
      * @param params.learningTryStep `3000`, Number of milliseconds added to the retry delay after each failure.
      * @param params.maximumTryDelay `30000`, Maximum retry delay in milliseconds. Once reached, further failures will not increase the delay.
      */
     constructor(
         name: string,
         private _params: {
+            minimumTryDelay?: number;
             learningTryStep?: number;
             maximumTryDelay?: number;
         } = {}
@@ -100,6 +110,7 @@ export class AdaptiveRetry extends Loggable {
         this._name = name;
         this._params = Object.assign(
             {
+                minimumTryDelay: LEARNING_TRY_STEP,
                 learningTryStep: LEARNING_TRY_STEP,
                 maximumTryDelay: MAXIMUM_TRY_DELAY
             },
@@ -112,7 +123,7 @@ export class AdaptiveRetry extends Loggable {
      * Reset the Adaptive Retry algorithm to its initial state
      */
     reset() {
-        this._tryDelay = this.learningTryStep;
+        this._tryDelay = this.minimumTryDelay;
         this._appreciationTime = 0;
         this._failed = undefined;
     }
@@ -184,7 +195,7 @@ export class AdaptiveRetry extends Loggable {
      */
     decrease(): boolean {
         const tryDelay = this._tryDelay;
-        this._tryDelay = Math.max(this._tryDelay - this.learningTryStep, this.learningTryStep);
+        this._tryDelay = Math.max(this._tryDelay - this.learningTryStep, this.minimumTryDelay);
         if (this._tryDelay >= tryDelay) {
             return false;
         }
