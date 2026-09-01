@@ -35,13 +35,37 @@ export class BufferMeasure {
         return this._high - this._low;
     }
 
+    get starting() {
+        return this._starting != null;
+    }
+    set starting(value: boolean) {
+        this._starting = value ? 0 : undefined;
+    }
+
     private _low: number = 0;
     private _lowTime: number = 0;
     private _high: number = 0;
     private _highTime: number = 0;
     private _time: number = 0;
+    private _starting?: number;
 
-    set(bufferAmount: number) {
+    set(bufferAmount: number, playbackSpeed: number) {
+        // eject starting values
+        if (this._starting != null) {
+            if (playbackSpeed < 1 && playbackSpeed >= this._starting) {
+                this._starting = playbackSpeed;
+                return;
+            }
+            this._starting = undefined;
+        }
+        // Compute buffer amount relative to playback rate
+        if (playbackSpeed > 1) {
+            bufferAmount /= playbackSpeed;
+        } else if (playbackSpeed < 1) {
+            bufferAmount *= playbackSpeed;
+        }
+        bufferAmount = Math.round(bufferAmount);
+        // Save the current time and update low/high values
         this._time = Date.now();
         if (!this._lowTime || bufferAmount <= this._low) {
             this._low = bufferAmount;

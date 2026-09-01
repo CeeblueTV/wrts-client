@@ -884,7 +884,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 }
             };
             this._playback.onClose = error => this.stop(error);
-
+            this._bufferMeasure.starting = true;
             this.onStart();
         };
 
@@ -1323,7 +1323,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
         const bufferAmount = this.bufferAmount;
 
-        this._bufferMeasure.set(bufferAmount);
+        this._bufferMeasure.set(bufferAmount, this.playbackSpeed);
 
         // Playing progress => check buffering!
         if (bufferAmount > this._bufferLimitLow) {
