@@ -1195,15 +1195,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     // minumum acceptable relative to low buffer
                     this._bufferLimitLow + BUFFER_AUTO_MIN_WINDOW
                 );
-            } else {
-                // no change, already at the target value!
-                return;
             }
         }
 
+        if (highLimit === this._bufferLimitHigh) {
+            // no change
+            return;
+        }
+
         if (highLimit > this._bufferLimitHigh) {
-            this._bufferLimitHighAuto?.fail();
             this.log(`Increase bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).warn();
+            this._bufferLimitHighAuto?.fail();
         } else {
             this.log(`Decrease bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).info();
         }
