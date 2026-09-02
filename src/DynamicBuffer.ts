@@ -209,7 +209,7 @@ export class DynamicBuffer extends Loggable {
     }
 
     private _onFailure(reason: string) {
-        this._shrinkRetry.raise(); // back off before trying to shrink again
+        this._shrinkRetry.fail(); // back off before trying to shrink again
         this._comfort = 0;
         if (!this._shrunk) {
             // Not caused by our probing (jitter/congestion at a level we didn't shrink into) — don't inflate.
