@@ -12,12 +12,14 @@ const MAXIMUM_TRY_DELAY = 30000;
 /**
  * AdaptiveRetry is a helper class that manages retry attempts with an **adaptive retry strategy**.
  *
- * The goal is to avoid retrying too frequently after a failure, by increasing the delay before the next attempt.
- * When a retry succeeds, the timer resets and the next attempt can occur immediately.
+ * The goal is to avoid retrying too frequently after a failure by adapting the delay before the next attempt.
+ * A failure starts a new waiting period, while a successful observation allows the delay to decrease progressively.
  *
  * ## Behavior
- * - On success (`try()` returns true), the system can proceed without waiting.
- * - On failure (`raise()`), the retry delay increases progressively (by `learningTryStep`) up to a maximum (`maximumTryDelay`).
+ * - `try()` returns `true` after the current retry delay has elapsed without a new failure.
+ * - The first `fail()` after initialization or a success increases the retry delay by `learningTryStep`, up to `maximumTryDelay`.
+ * - Consecutive `fail()` calls restart the waiting period without increasing the delay again.
+ * - After a successful attempt, starting the next observation decreases the delay by `learningTryStep`.
  * - The retry delay resets when calling `reset()`.
  *
  * ## Parameters
@@ -38,7 +40,7 @@ const MAXIMUM_TRY_DELAY = 30000;
  *   try {
  *     await doSomething(); // your async operation
  *   } catch (e) {
- *     retry.raise(); // notify AdaptiveRetry of the failure
+ *     retry.fail(); // notify AdaptiveRetry of the failure
  *     console.error("Task failed, will retry later...");
  *   }
  * }
@@ -63,15 +65,22 @@ export class AdaptiveRetry extends Loggable {
         return this._params.maximumTryDelay || 0;
     }
 
+    /**
+     * Indicates whether the last attempt failed.
+     */
+    get failed(): boolean {
+        return this._failed ?? false;
+    }
+
     private _tryDelay!: number;
     private _appreciationTime!: number;
-    private _success!: boolean;
+    private _failed?: boolean;
 
     /**
      * Create a new AdaptiveRetry instance.
      *
-     * Each failure increases the retry delay by `learningTryStep` milliseconds, capped at `maximumTryDelay`.
-     * On success, the retry delay can reset.
+     * The first failure in a failure period increases the retry delay by `learningTryStep` milliseconds,
+     * capped at `maximumTryDelay`. After a successful attempt, the delay can progressively decrease.
      *
      * @param params.learningTryStep `3000`, Number of milliseconds added to the retry delay after each failure.
      * @param params.maximumTryDelay `30000`, Maximum retry delay in milliseconds. Once reached, further failures will not increase the delay.
@@ -99,7 +108,7 @@ export class AdaptiveRetry extends Loggable {
     reset() {
         this._tryDelay = this.learningTryStep;
         this._appreciationTime = 0;
-        this._success = false;
+        this._failed = undefined;
     }
 
     /**
@@ -112,7 +121,7 @@ export class AdaptiveRetry extends Loggable {
         if (!this._appreciationTime) {
             // First correct appreciation
             this._appreciationTime = now;
-            if (this._success) {
+            if (this._failed === false) {
                 // Double success, decrease !
                 this.decrease();
             }
@@ -124,19 +133,21 @@ export class AdaptiveRetry extends Loggable {
         }
         // OK for long time!
         this._appreciationTime = 0;
-        this._success = true;
+        this._failed = false;
         return true;
     }
 
     /**
-     * Raise a fail: reset appreciation time and increase delay if was on a success
+     * Mark the current observation as failed.
+     * The first failure after initialization or a success increases the delay;
+     * consecutive failures only restart the waiting period.
      */
-    raise(): void {
+    fail(): void {
         // reset appreciation time on any fail !
         this._appreciationTime = 0;
-        // fail => increase delay before to try again!
-        if (this._success) {
-            this._success = false;
+        // First failure in this failure period => increase the delay before trying again.
+        if (!this._failed) {
+            this._failed = true;
             this.increase();
         }
     }
