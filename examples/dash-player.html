@@ -25,9 +25,13 @@
         <!-- dash.js control bar: the DASH-IF reference player's own UI. It brings the DVR
             seekbar (so the stream can be time-shifted), the live indicator, play/pause,
             volume, playback rate, quality/track/caption menus and fullscreen. Its icons
-            are Bootstrap Icons, which it expects the page to load. -->
+            are Bootstrap Icons, which it expects the page to load.
+
+            dash.js is not a dependency of the library, only of this page, so all of it is
+            pulled from the CDN at a pinned version (see the imports below for the same
+            version) rather than vendored. -->
         <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1/font/bootstrap-icons.min.css" rel="stylesheet">
-        <link href="../node_modules/dashjs/contrib/controlbar/controlbar.css" rel="stylesheet">
+        <link href="https://cdn.jsdelivr.net/npm/dashjs@5.2.1/contrib/controlbar/controlbar.css" rel="stylesheet">
 
         <!-- Applies the stored theme before the first paint, must stay a classic script -->
         <script src="./js/theme.js"></script>
@@ -267,8 +271,9 @@
     <script type="module">
         import { CMAFReader, Media, UITimeline, utils } from "../dist/wrts-client.bundle.js";
         // Namespace import: the control bar reads the event maps off a `dashjs` global.
-        import * as dashjs from "../node_modules/dashjs/dist/modern/esm/dash.all.min.js";
-        import { ControlBar } from "../node_modules/dashjs/contrib/controlbar/ControlBar.js";
+        // Pinned, and kept in step with the controlbar.css version linked in <head>.
+        import * as dashjs from "https://cdn.jsdelivr.net/npm/dashjs@5.2.1/dist/modern/esm/dash.all.min.js";
+        import { ControlBar } from "https://cdn.jsdelivr.net/npm/dashjs@5.2.1/contrib/controlbar/ControlBar.js";
         import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
         // Chrome shared with player.html: theme, tabs/messages, metrics export, layout
         import {
