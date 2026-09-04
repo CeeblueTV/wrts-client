@@ -192,6 +192,8 @@
                             Messages
                             <span class="tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
                         </button>
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'timeline' }"
+                            @click="selectBottomTab('timeline')">Timeline</button>
                         <button class="layout-btn" :class="{ on: sidePanel }"
                             :title="sidePanel ? 'Dock the panel to the bottom' : 'Dock the panel to the right (side-by-side)'"
                             @click="toggleSidePanel()">
@@ -223,6 +225,43 @@
                                     <span class="msg-time"> {{ message.receivedAt }} </span>{{ message.text }}
                                 </div>
                             </div>
+                        </div>
+
+                        <!-- Timeline (rendered by the UITimeline library widget into tl-box) -->
+                        <div v-show="activeBottomTab === 'timeline'">
+                            <div class="tl-toolbar">
+                                <button class="btn tl-followbtn" :class="tlFollowing ? 'on' : 'off'"
+                                    :title="tlFollowing ? 'Following the latest data — click to freeze, then drag the timeline to inspect the past' : 'Frozen — click to follow the latest data'"
+                                    @click="toggleTimelineFollow()">
+                                    <i class="fas" :class="tlFollowing ? 'fa-angles-right' : 'fa-lock'"></i>
+                                    <span>{{ tlFollowing ? 'Follow' : 'Frozen' }}</span>
+                                </button>
+                                <div class="tl-seg" title="Choose the time axis: stream timestamps (DTS) to spot desync, or wall-clock reception to spot late/slow tracks">
+                                    <button :class="{ on: tlAxis === 'media' }" @click="setTimelineAxis('media')">Media DTS</button>
+                                    <button :class="{ on: tlAxis === 'reception' }" @click="setTimelineAxis('reception')">Reception</button>
+                                </div>
+                                <div class="tl-seg" title="Visible time window">
+                                    <button v-for="w in tlWindows" :class="{ on: tlWindow === w }"
+                                        @click="setTimelineWindow(w)">{{ w }}s</button>
+                                </div>
+                                <button class="btn btn-icon" title="Download sequences as a CSV file"
+                                    @click="downloadTimeline()">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                                <div class="tl-spacer"></div>
+                                <div class="tl-legend" title="Reception health: ratio of reception duration to media duration of each sequence">
+                                    <span>
+                                        <i class="dot" style="background:var(--ok)"></i>on time
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--warn)"></i>slow
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--err)"></i>congested
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="tl-box" ref="timelineBox"></div>
                         </div>
                     </div>
                 </div>
@@ -349,14 +388,14 @@
         <!-- .shell -->
     </body>
     <script type="module">
-        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, VERSION, utils } from "../dist/wrts-client.bundle.js";
+        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, UITimeline, VERSION, utils } from "../dist/wrts-client.bundle.js";
         // development version, includes helpful console warnings
         // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
         // production version, optimized for size and speed
         import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
         // Chrome shared with dash-player.html: theme, tabs/messages, metrics export, layout
         import {
-            PlayState, themeMixin, messagesMixin, sidePanelMixin, metricsMixin,
+            PlayState, themeMixin, messagesMixin, sidePanelMixin, metricsMixin, timelineMixin,
             normalizeError, setupDebugOverlay, logMediaEvents
         } from "./js/common.js";
         const { EpochTime, Util, NetAddress, Connect, LogLevel, log, UIMetrics, BinaryWriter } = utils;
@@ -408,7 +447,7 @@
         }
 
         createApp({
-            mixins: [themeMixin, messagesMixin, sidePanelMixin, metricsMixin],
+            mixins: [themeMixin, messagesMixin, sidePanelMixin, metricsMixin, timelineMixin],
             data() {
                 return {
                     PlayState: PlayState,
@@ -545,6 +584,10 @@
                 const stalls = []; this.stats.set("Stalls", stalls);
 
                 this.uiStats = new UIMetrics(this.$refs.stats);
+
+                // Timeline widget: owns its canvas/tooltip and render loop, fed per sample below.
+                this.bindTimeline(new UITimeline(this.$refs.timelineBox),
+                    () => (this.player ? this.player.currentTime * 1000 : undefined));
 
                 setInterval(() => {
                     const player = this.player;
@@ -829,6 +872,7 @@
                     // reset stats!
                     this.resetMetrics(true);
                     this.resetMessages();
+                    this.resetTimeline();
                     // reset dump if activated
                     if(this.audioDump) {
                         this.audioDump.clear();
@@ -892,8 +936,12 @@
 
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
+                    // Per-sample reception feed for the Timeline widget
+                    this.player.onVideo = (track, sample) => this.uiTimeline.pushVideo(track, sample);
+                    this.player.onAudio = (track, sample) => this.uiTimeline.pushAudio(track, sample);
                     this.player.onData = (track, time, duration, data) => {
                         this.pushMessage(track, data);
+                        this.uiTimeline.pushData(track, { time, duration, data });
                         const codec = this.player.metadata.tracks.get(track)?.codecString;
                         log(
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`

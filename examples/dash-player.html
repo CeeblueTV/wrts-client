@@ -177,6 +177,8 @@
                             Messages
                             <span class="tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
                         </button>
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'timeline' }"
+                            @click="selectBottomTab('timeline')">Timeline</button>
                         <button class="layout-btn" :class="{ on: sidePanel }"
                             :title="sidePanel ? 'Dock the panel to the bottom' : 'Dock the panel to the right (side-by-side)'"
                             @click="toggleSidePanel()">
@@ -206,6 +208,43 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Timeline (rendered by the UITimeline library widget into tl-box) -->
+                        <div v-show="activeBottomTab === 'timeline'">
+                            <div class="tl-toolbar">
+                                <button class="btn tl-followbtn" :class="tlFollowing ? 'on' : 'off'"
+                                    :title="tlFollowing ? 'Following the latest data — click to freeze, then drag the timeline to inspect the past' : 'Frozen — click to follow the latest data'"
+                                    @click="toggleTimelineFollow()">
+                                    <i class="fas" :class="tlFollowing ? 'fa-angles-right' : 'fa-lock'"></i>
+                                    <span>{{ tlFollowing ? 'Follow' : 'Frozen' }}</span>
+                                </button>
+                                <div class="tl-seg" title="Choose the time axis: stream timestamps (DTS) to spot desync, or wall-clock reception to spot late/slow tracks">
+                                    <button :class="{ on: tlAxis === 'media' }" @click="setTimelineAxis('media')">Media DTS</button>
+                                    <button :class="{ on: tlAxis === 'reception' }" @click="setTimelineAxis('reception')">Reception</button>
+                                </div>
+                                <div class="tl-seg" title="Visible time window">
+                                    <button v-for="w in tlWindows" :class="{ on: tlWindow === w }"
+                                        @click="setTimelineWindow(w)">{{ w }}s</button>
+                                </div>
+                                <button class="btn btn-icon" title="Download sequences as a CSV file"
+                                    @click="downloadTimeline()">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                                <div class="tl-spacer"></div>
+                                <div class="tl-legend" title="Reception health: ratio of reception duration to media duration of each sequence">
+                                    <span>
+                                        <i class="dot" style="background:var(--ok)"></i>on time
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--warn)"></i>slow
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--err)"></i>congested
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="tl-box" ref="timelineBox"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -226,14 +265,14 @@
         <!-- .shell -->
     </body>
     <script type="module">
-        import { utils } from "../dist/wrts-client.bundle.js";
+        import { CMAFReader, Media, UITimeline, utils } from "../dist/wrts-client.bundle.js";
         // Namespace import: the control bar reads the event maps off a `dashjs` global.
         import * as dashjs from "../node_modules/dashjs/dist/modern/esm/dash.all.min.js";
         import { ControlBar } from "../node_modules/dashjs/contrib/controlbar/ControlBar.js";
         import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
         // Chrome shared with player.html: theme, tabs/messages, metrics export, layout
         import {
-            PlayState, themeMixin, messagesMixin, sidePanelMixin, metricsMixin,
+            PlayState, themeMixin, messagesMixin, sidePanelMixin, metricsMixin, timelineMixin,
             normalizeError, setupDebugOverlay, logMediaEvents
         } from "./js/common.js";
         const { EpochTime, Util, NetAddress, LogLevel, log, UIMetrics, ByteRate } = utils;
@@ -262,8 +301,13 @@
         // The vod manifest URL the clipper opens. If null, the clipper uses the current stream's manifest URL.
         const CLIP_MANIFEST_URL = null;
 
+        // Timeline row per media type, not per mp4 track_id: every DASH representation is its own
+        // file numbered track_id 1, so keying by type keeps an ABR switch on the same row instead
+        // of forking it (and keeps video and audio from colliding on id 1).
+        const TIMELINE_ROW = { [Media.Type.VIDEO]: 1, [Media.Type.AUDIO]: 2 };
+
         createApp({
-            mixins: [themeMixin, messagesMixin, sidePanelMixin, metricsMixin],
+            mixins: [themeMixin, messagesMixin, sidePanelMixin, metricsMixin, timelineMixin],
             data() {
                 return {
                     playState: PlayState.STOPPED,
@@ -347,6 +391,14 @@
                 const stalls = []; this.stats.set("Stalls", stalls);
 
                 this.uiStats = new UIMetrics(this.$refs.stats);
+
+                // Timeline widget: owns its canvas/tooltip and render loop, fed by _feedTimeline().
+                // No playhead here: we read raw tfdt timestamps off the fragments, while dash.js
+                // shifts them by the period's presentationTimeOffset before appending, so
+                // video.currentTime is not in the same space as the DTS drawn on the media axis.
+                this.bindTimeline(new UITimeline(this.$refs.timelineBox));
+                // One CMAFReader per media type, rebuilt on each play (see _feedTimeline)
+                this._readers = new Map();
 
                 let previousMeasurementTimestamp = null;
                 let previousPlaybackPosition = 0;
@@ -499,6 +551,45 @@
                     }
                 },
 
+                // dash.js exposes no per-frame callback, but it does hand us the CMAF bytes it
+                // downloads. Parsing them with the library's own CMAFReader recovers the per-sample
+                // structure UITimeline needs (DTS, duration, size, keyframe flag).
+                //
+                // One reader per media type: video and audio are independent byte streams and must
+                // not be interleaved into a single parser. Both events carry a disjoint part of the
+                // stream, so both are fed: in low-latency chunked delivery dash.js emits each
+                // box-aligned chunk on FRAGMENT_LOADING_PROGRESS and only the tail on COMPLETED,
+                // while a whole-segment download reports nothing until COMPLETED. Feeding chunk by
+                // chunk is what keeps the reception axis honest — one timestamp per segment would
+                // otherwise flatten every sequence onto its arrival instant.
+                _feedTimeline(request, bytes) {
+                    const mediaType = request && request.mediaType;
+                    if (!bytes || !bytes.byteLength || (mediaType !== 'video' && mediaType !== 'audio')) {
+                        return;
+                    }
+                    let reader = this._readers.get(mediaType);
+                    if (!reader) {
+                        reader = new CMAFReader();
+                        // A media segment before its init segment has no track to attach to. That is
+                        // expected while recovering from an abandoned download, so warn rather than
+                        // surfacing it as a stream error.
+                        reader.onError = error => log('CMAFReader', mediaType, error).warn();
+                        reader.onSample = (type, _trackId, sample) => {
+                            const row = TIMELINE_ROW[type];
+                            if (row == null) {
+                                return;
+                            }
+                            if (type === Media.Type.VIDEO) {
+                                this.uiTimeline.pushVideo(row, sample);
+                            } else {
+                                this.uiTimeline.pushAudio(row, sample);
+                            }
+                        };
+                        this._readers.set(mediaType, reader);
+                    }
+                    reader.read(bytes);
+                },
+
                 // Mute is the control bar's, keep its icon in sync when we drive it ourselves.
                 setMuted(muted) {
                     this.$refs.video.muted = muted;
@@ -526,6 +617,9 @@
                     this.resetTracks();
                     // reset stats!
                     this.resetMetrics(true);
+                    this.resetTimeline();
+                    // A new stream means new init segments, so start from fresh parsers
+                    this._readers.clear();
 
                     const url = this.manifestURL();
                     log('Play DASH manifest', url).info();
@@ -538,6 +632,14 @@
                     this.player.on(MediaPlayer.events.STREAM_INITIALIZED, () => this.onMetadata());
                     this.player.on(MediaPlayer.events.FRAGMENT_LOADING_COMPLETED, e => {
                         this._recvBytes.addBytes(e.response?.byteLength || e.request?.bytesLoaded || 0);
+                        this._feedTimeline(e.request, e.response);
+                    });
+                    this.player.on(MediaPlayer.events.FRAGMENT_LOADING_PROGRESS, e => this._feedTimeline(e.request, e.response));
+                    this.player.on(MediaPlayer.events.FRAGMENT_LOADING_ABANDONED, e => {
+                        // Half a segment is buffered in the parser and the switch means no more of it
+                        // is coming. Drop the reader rather than reset() it, which would also drop the
+                        // init tracks: the new representation sends its own init segment anyway.
+                        this._readers.delete(e.request?.mediaType);
                     });
                     this.player.on(MediaPlayer.events.QUALITY_CHANGE_RENDERED, e => this.onTrackChange(e.mediaType, e.newRepresentation));
                     // Every seek voids the media-time deltas, wherever it came from: the Live

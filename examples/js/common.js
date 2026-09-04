@@ -154,6 +154,59 @@ export const sidePanelMixin = {
 };
 
 /**
+ * Timeline toolbar: mirrors the UITimeline widget's state for the axis / window / follow
+ * controls. The widget owns the canvas and every sample, these fields only drive the
+ * buttons. The page creates the widget itself and exposes it as `this.uiTimeline`.
+ */
+export const timelineMixin = {
+    data() {
+        return {
+            tlAxis: 'reception', // 'media' (DTS) | 'reception' (wall-clock)
+            tlFollowing: true, // pinned to live | frozen for inspection
+            tlWindow: 10, // visible window in seconds
+            tlWindows: [5, 10, 30, 60]
+        };
+    },
+    beforeUnmount() {
+        if (this.uiTimeline) {
+            this.uiTimeline.destroy();
+        }
+    },
+    methods: {
+        // Wires the widget the page just built: the playhead source and the follow-state
+        // feedback (grabbing the overview auto-freezes it, the button must follow).
+        bindTimeline(uiTimeline, getMediaTime) {
+            this.uiTimeline = uiTimeline;
+            uiTimeline.axis = this.tlAxis;
+            uiTimeline.windowDuration = this.tlWindow;
+            uiTimeline.getMediaTime = getMediaTime;
+            uiTimeline.onFollowingChange = following => {
+                this.tlFollowing = following;
+            };
+        },
+        resetTimeline() {
+            this.uiTimeline.reset();
+            this.tlFollowing = true;
+        },
+        toggleTimelineFollow() {
+            this.tlFollowing = !this.tlFollowing;
+            this.uiTimeline.following = this.tlFollowing;
+        },
+        setTimelineAxis(axis) {
+            this.tlAxis = axis;
+            this.uiTimeline.axis = axis;
+        },
+        setTimelineWindow(seconds) {
+            this.tlWindow = seconds;
+            this.uiTimeline.windowDuration = seconds;
+        },
+        downloadTimeline() {
+            this.download('timeline.csv', this.uiTimeline.toCSV(), 'text/csv;charset=utf-8;');
+        }
+    }
+};
+
+/**
  * Metrics chart plumbing: the `stats` series feeding UIMetrics, their CSV export, and the
  * generic file download. Each page keeps its own sampling loop and `resetMetrics()`, this
  * only holds what both do identically.
