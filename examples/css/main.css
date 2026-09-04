@@ -434,6 +434,8 @@ select option { background: var(--bg); color: var(--txt); }
     align-items: stretch;
 }
 .ctrl-row .btn, .ctrl-row .tog { width: 100%; justify-content: center; }
+/* dash-player.html — three controls, the DASH control bar owns mute and playback */
+.ctrl-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 /* Network profile row — single compact line, one variant per page.
    Grid-template-areas keep description glued under profile on mobile. */
@@ -504,6 +506,41 @@ select option { background: var(--bg); color: var(--txt); }
 
 .tab-body { padding-top: 10px; }
 
+/* ── Side-by-side layout: dock the graph/messages panel to the right of the video
+   on large screens (toggle in the tab bar). Bottom-docked by default. ── */
+.layout-btn {
+    display: none;               /* only offered on wide screens */
+    margin-left: auto;           /* push to the right end of the tab bar */
+    align-self: center;
+    background: none; border: none;
+    color: var(--txt-m);
+    font-size: 14px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: color var(--t);
+}
+.layout-btn:hover { color: var(--txt-2); }
+.layout-btn.on { color: var(--accent); }
+
+@media (min-width: 1200px) {
+    .layout-btn { display: inline-flex; align-items: center; }
+    html.layout-side .shell { max-width: 1600px; }
+    html.layout-side .stage {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        column-gap: 18px;
+        align-items: start;
+    }
+    /* video + controls stack in the left column; the panel fills the right one */
+    html.layout-side .stage > * { grid-column: 1; }
+    html.layout-side .stage > .stage-panel {
+        grid-column: 2;
+        grid-row: 1 / span 20;
+        align-self: stretch;
+        min-width: 0;
+    }
+}
+
 /* ── Stats ── */
 .stats-list {
     background: transparent;
@@ -533,8 +570,6 @@ select option { background: var(--bg); color: var(--txt); }
     transition: opacity var(--t);
 }
 .stats-actions img:hover { opacity: .9; }
-/* In dark mode, invert the PNG icons so they read on a dark background */
-html[data-theme="dark"] .stats-actions img { filter: invert(1) brightness(1.05); }
 
 /* ── Messages ── */
 .msg-box {

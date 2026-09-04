@@ -22,14 +22,10 @@
             before the block below so the page-specific overrides win at equal specificity. -->
         <link href="./css/main.css" rel="stylesheet">
 
-        <script>
-            // Apply theme synchronously to avoid FOUC. Same 'wrts-theme' key as the players, so the
-            // editor follows their theme when embedded in the DASH player's iframe.
-            (function() {
-                var stored = localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-                document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
-            })();
-        </script>
+        <!-- Applies the stored theme before the first paint, must stay a classic script. Same
+            'wrts-theme' key as the players, so the editor follows their theme when embedded
+            in the DASH player's iframe. -->
+        <script src="./js/theme.js"></script>
 
         <style>
             /* Page-specific only. Everything else comes from css/main.css: the token palette

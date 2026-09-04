@@ -22,16 +22,8 @@
         <link href="./css/fontawesome.css" rel="stylesheet">
         <link href="./css/main.css" rel="stylesheet">
 
-        <script>
-            // Apply theme synchronously to avoid FOUC. Stored value is 'light' | 'dark'.
-            (function() {
-                console.log("localStorage theme:", localStorage.getItem('wrts-theme'));
-                console.log("prefers-color-scheme:", matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-
-                var stored = localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-                document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
-            })();
-        </script>
+        <!-- Applies the stored theme before the first paint, must stay a classic script -->
+        <script src="./js/theme.js"></script>
     </head>
     <body>
         <div class="shell" id="main" v-cloak>
@@ -46,7 +38,7 @@
                 </button>
             </header>
 
-            <div>
+            <div class="stage">
 
                 <!-- Video -->
                 <div class="player" ref="player"
@@ -190,8 +182,8 @@
                     <p class="net-desc" v-html="netDescription"></p>
                 </div>
 
-                <!-- Tabs -->
-                <div>
+                <!-- Panel: graph / messages (docks bottom by default, or right on wide screens) -->
+                <div class="stage-panel">
                     <div class="tab-bar">
                         <button class="tab-btn" :class="{ on: activeBottomTab === 'graph' }"
                             @click="selectBottomTab('graph')">Graph</button>
@@ -199,6 +191,11 @@
                             @click="selectBottomTab('messages')">
                             Messages
                             <span class="tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+                        </button>
+                        <button class="layout-btn" :class="{ on: sidePanel }"
+                            :title="sidePanel ? 'Dock the panel to the bottom' : 'Dock the panel to the right (side-by-side)'"
+                            @click="toggleSidePanel()">
+                            <i class="fas fa-table-columns"></i>
                         </button>
                     </div>
 
@@ -356,7 +353,12 @@
         // development version, includes helpful console warnings
         // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
         // production version, optimized for size and speed
-        import { createApp, nextTick } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
+        import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
+        // Chrome shared with dash-player.html: theme, tabs/messages, metrics export, layout
+        import {
+            PlayState, themeMixin, messagesMixin, sidePanelMixin, metricsMixin,
+            normalizeError, setupDebugOverlay, logMediaEvents
+        } from "./js/common.js";
         const { EpochTime, Util, NetAddress, Connect, LogLevel, log, UIMetrics, BinaryWriter } = utils;
 
         // displays logs ERROR, WARN & INFO logs,
@@ -374,14 +376,6 @@
         log('wrts-client version:', VERSION).info();
         log('web-utils version:', utils.VERSION).info();
 
-        const PlayState = {
-            PLAYING: 'PLAYING',
-            STARTING: 'STARTING',
-            STOPPED: 'STOPPED'
-        };
-
-        const THEME_CYCLE = ['light', 'dark'];
-
         // HTMLMediaElement.error.code → MediaError constant name. Surfaced in the alert when the
         // native video element fires `onerror` (the Player usually wraps this in a richer
         // 'Playback error' via onStop, but we render the raw code in case it doesn't).
@@ -391,11 +385,6 @@
             3: 'MEDIA_ERR_DECODE',
             4: 'MEDIA_ERR_SRC_NOT_SUPPORTED'
         };
-
-        // Keys handled explicitly by the alert UI (rendered as title/badge/detail). Any other
-        // own-property on the error object is shown as a key/value chip so subsystem-specific
-        // context (mimeType, track, url, reason, code, …) stays visible without per-variant code.
-        const ALERT_RESERVED_KEYS = new Set(['type', 'name', 'detail']);
 
         // URL-safe base64 round-trip for UTF-8 strings: `+` and `/` are remapped to `-` and `_`
         // and padding is stripped, so the encoded value can sit directly in a query parameter
@@ -418,109 +407,8 @@
             return new TextDecoder().decode(bytes);
         }
 
-        // Builds a fixed, collapsible on-screen panel that mirrors every `log()` line (newest at the end,
-        // so logs can be read and copied directly on a device. Hooks the global `log.on` non-destructively
-        // (default console output still runs). Enabled via the `?debugoverlay` query parameter.
-        function setupDebugOverlay() {
-            const PANEL_VH = 40; // expanded height
-            const MAX_ROWS = 500; // cap retained log rows to avoid unbounded DOM/memory growth
-            // Container: header bar (always visible) + scrollable log box.
-            const panel = document.createElement('div');
-            panel.style.cssText =
-                'position:fixed;bottom:0;left:0;right:0;z-index:99999;' +
-                'background:rgba(0,0,0,.85);font:11px/1.35 monospace;';
-            const header = document.createElement('div');
-            header.style.cssText =
-                'display:flex;gap:8px;align-items:center;padding:3px 6px;' +
-                'background:#111;color:#ccc;border-top:1px solid #333;cursor:pointer;user-select:none';
-            const title = document.createElement('span');
-            title.textContent = '▾ debug logs';
-            title.style.flex = '1';
-            const copyBtn = document.createElement('button');
-            copyBtn.textContent = 'copy';
-            copyBtn.style.cssText = 'font:11px monospace';
-            const clearBtn = document.createElement('button');
-            clearBtn.textContent = 'clear';
-            clearBtn.style.cssText = 'font:11px monospace';
-            const box = document.createElement('div');
-            box.style.cssText =
-                'overflow:auto;color:#9f9;padding:4px 6px;white-space:pre-wrap;word-break:break-word;' +
-                'height:' + PANEL_VH + 'vh';
-            header.append(title, copyBtn, clearBtn);
-            panel.append(header, box);
-
-            let collapsed = false;
-            const apply = () => {
-                box.style.display = collapsed ? 'none' : 'block';
-                title.textContent = (collapsed ? '▸' : '▾') + ' debug logs';
-                // Reserve page space so the panel never permanently hides page content
-                // (e.g. the bottom of the metrics graph). Collapsed → just the header bar.
-                document.body.style.paddingBottom = collapsed ? '26px' : 'calc(' + PANEL_VH + 'vh + 26px)';
-            };
-            header.onclick = e => {
-                if (e.target === clearBtn || e.target === copyBtn) { return; }
-                collapsed = !collapsed;
-                apply();
-            };
-            clearBtn.onclick = () => { box.textContent = ''; };
-            copyBtn.onclick = () => {
-                // Rows are oldest-on-top (chronological), copy as-is.
-                const text = Array.from(box.children).map(r => r.textContent).join('\n');
-                const done = ok => {
-                    copyBtn.textContent = ok ? 'copied!' : 'copy failed';
-                    setTimeout(() => { copyBtn.textContent = 'copy'; }, 1500);
-                };
-                // navigator.clipboard needs a secure context (https/localhost); fall back to
-                // a temporary textarea + execCommand for plain-http LAN access from the phone.
-                if (navigator.clipboard && window.isSecureContext) {
-                    navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
-                } else {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-                    document.body.appendChild(ta);
-                    ta.focus();
-                    ta.select();
-                    let ok = false;
-                    try { ok = document.execCommand('copy'); } catch (_) {}
-                    document.body.removeChild(ta);
-                    done(ok);
-                }
-            };
-
-            const ready = () => { document.body.appendChild(panel); apply(); };
-            document.readyState === 'loading' ? addEventListener('DOMContentLoaded', ready) : ready();
-            log.on = (level, args) => {
-                const line = args
-                    .map(a => (typeof a === 'object' && a !== null ? Util.stringify(a) : String(a)))
-                    .join(' ');
-                const row = document.createElement('div');
-                row.style.color = level === 'error' ? '#f55' : level === 'warn' ? '#fd5' : '#9f9';
-                const d = new Date();
-                const ts =
-                    String(d.getHours()).padStart(2, '0') + ':' +
-                    String(d.getMinutes()).padStart(2, '0') + ':' +
-                    String(d.getSeconds()).padStart(2, '0') + '.' +
-                    String(d.getMilliseconds()).padStart(3, '0');
-                row.textContent = `${ts} [${level}] ${line}`;
-                // Stick to the end only when the user is already at the bottom and isn't
-                // selecting text inside the box (so manual scroll-up / text selection is preserved).
-                const slack = 4; // px tolerance for "at bottom"
-                const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - slack;
-                const sel = window.getSelection();
-                const selecting = sel && !sel.isCollapsed && box.contains(sel.anchorNode);
-                box.appendChild(row); // newest at the end
-                // Trim oldest rows (top) to keep DOM/memory bounded on long sessions
-                while (box.childElementCount > MAX_ROWS) {
-                    box.removeChild(box.firstChild);
-                }
-                if (wasAtBottom && !selecting) {
-                    box.scrollTop = box.scrollHeight;
-                }
-            };
-        }
-
         createApp({
+            mixins: [themeMixin, messagesMixin, sidePanelMixin, metricsMixin],
             data() {
                 return {
                     PlayState: PlayState,
@@ -539,7 +427,7 @@
                     keySystem: null,
                     showSettings: false,
 
-                    theme: localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+                    sidePanel: options.sidePanel ? true : false, // dock the metrics panel to the right (large screens)
                     controlsVisible: false,
                     _controlsTimer: null,
                     isFullscreen: false,
@@ -581,19 +469,12 @@
                     videoTracks: new Map(),
                     videoTrack: 'Video',
                     videoTrackId: undefined,
-                    activeBottomTab: 'graph',
-                    messages: [],
-                    unreadMessages: 0,
                     sourceType: undefined,
                     audioTracks: new Map(),
                     audioTrack: 'Audio',
                     audioTrackId: undefined,
                     streamError: null,
-                    stats: new Map(),
-                    times: new Array(),
-                    hasMetrics:false,
                     deltaStats: {},
-                    uiStats: null,
                     player: null,
                     latencies: [],
                     netProfiles: new Map([
@@ -632,11 +513,6 @@
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
                 this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
 
-                // React to system theme changes
-                this._mql = matchMedia('(prefers-color-scheme: dark)');
-                this._mqlListener = () => { this.applyTheme(true); };
-                this._mql.addEventListener('change', this._mqlListener);
-
                 // Track fullscreen state so the overlay button can flip between expand/compress icons.
                 // iOS Safari uses native video fullscreen (webkit*fullscreen events on the video).
                 this._fsListener = () => {
@@ -646,6 +522,11 @@
                 document.addEventListener('webkitfullscreenchange', this._fsListener);
                 this.$refs.video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
                 this.$refs.video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
+
+                // Debug: log raw <video> media events to diagnose freezes (append ?events to the URL).
+                if (options.events) {
+                    logMediaEvents(this.$refs.video, () => (this.player ? 'speed=' + (this.player.playbackSpeed || 0).toFixed(2) : ''));
+                }
 
                 const drawContext = this.canvas.getContext('2d');
 
@@ -708,7 +589,6 @@
                 }, 700);
             },
             beforeUnmount() {
-                if (this._mql && this._mqlListener) this._mql.removeEventListener('change', this._mqlListener);
                 if (this._fsListener) {
                     document.removeEventListener('fullscreenchange', this._fsListener);
                     document.removeEventListener('webkitfullscreenchange', this._fsListener);
@@ -723,55 +603,8 @@
                 }
             },
             methods: {
-                // ── Error display ──
-                // Normalizes any error shape (Player onStop union, synthesized video onerror,
-                // synthesized input-validation error) into the structure the .player-alert renders:
-                //   { type, name, detail, fields: [{label, value}] }
-                // Anything not in ALERT_RESERVED_KEYS becomes a key/value chip so subsystem-specific
-                // context (mimeType, track, url, reason, code, …) is shown without per-variant UI.
                 setStreamError(error) {
-                    if (!error) { this.streamError = null; return; }
-                    const fields = [];
-                    for (const key of Object.keys(error)) {
-                        if (ALERT_RESERVED_KEYS.has(key)) { continue; }
-                        const value = error[key];
-                        if (value == null || value === '') { continue; }
-                        // Stringify primitives directly; for objects, fall back to JSON so they
-                        // don't render as "[object Object]".
-                        let display;
-                        if (typeof value === 'object') {
-                            try { display = JSON.stringify(value); } catch (_) { display = String(value); }
-                        } else {
-                            display = String(value);
-                        }
-                        fields.push({ label: key, value: display });
-                    }
-                    // Strip the redundant 'Error' suffix from union discriminants so the badge
-                    // reads 'SOURCE' rather than 'SOURCEERROR'.
-                    const type = (error.type || '').replace(/Error$/, '') || null;
-                    this.streamError = {
-                        type,
-                        name: error.name || 'Unknown error',
-                        detail: error.detail || null,
-                        fields
-                    };
-                },
-
-                // ── Theme ──
-                cycleTheme() {
-                    this.theme = THEME_CYCLE[(THEME_CYCLE.indexOf(this.theme) + 1) % THEME_CYCLE.length];
-                    localStorage.setItem('wrts-theme', this.theme);
-                    this.applyTheme();
-                },
-                applyTheme(systemChange = false) {
-                    const dark = systemChange? matchMedia('(prefers-color-scheme: dark)').matches : this.theme === 'dark';
-                    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-                },
-                themeIcon() {
-                    return { light: 'fa-sun', dark: 'fa-moon' }[this.theme];
-                },
-                themeTooltip() {
-                    return `Theme: ${this.theme} (click to cycle)`;
+                    this.streamError = normalizeError(error);
                 },
 
                 // ── Player overlay controls (fullscreen / stop on hover or tap) ──
@@ -1060,7 +893,7 @@
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
                     this.player.onData = (track, time, duration, data) => {
-                        this.pushMessage(track, time, data);
+                        this.pushMessage(track, data);
                         const codec = this.player.metadata.tracks.get(track)?.codecString;
                         log(
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
@@ -1177,48 +1010,6 @@
                         }
                     }
                 },
-                selectBottomTab(tab) {
-                    this.activeBottomTab = tab;
-                    if(tab === 'messages') {
-                        this.unreadMessages = 0;
-                        this.scrollMessagesToBottom();
-                    }
-                },
-                resetMessages() {
-                    this.messages = [];
-                    this.unreadMessages = 0;
-                    this.activeBottomTab = 'graph';
-                },
-                formatReceptionTime(date = new Date()) {
-                    return date.toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit'
-                    });
-                },
-                scrollMessagesToBottom() {
-                    nextTick(() => {
-                        const panel = this.$refs.messagesPanel;
-                        if(panel) {
-                            panel.scrollTop = panel.scrollHeight;
-                        }
-                    });
-                },
-                pushMessage(track, time, data) {
-                    const message = Util.stringify(data);
-                    this.messages.push({
-                        track,
-                        receivedAt: this.formatReceptionTime(),
-                        text: message.replace(/[\r\n]+/g, ' ')
-                    });
-                    if(this.messages.length > 200) {
-                        this.messages.splice(0, this.messages.length - 200);
-                    }
-                    if(this.activeBottomTab !== 'messages') {
-                        this.unreadMessages += 1;
-                    }
-                    this.scrollMessagesToBottom();
-                },
                 mute() {
                     this.muted = !this.muted;
                     this.$refs.video.muted = this.muted;
@@ -1245,55 +1036,17 @@
                 },
                 resetMetrics(all=false) {
                     this.uiStats.reset();
-                    // reset incremental metrics counters
+                    // Rebaseline the counters the Player reports cumulatively, so the chart
+                    // shows what happened since this reset and not since the stream started.
                     if (this.player) {
-                        let playerStats = this.player.computeStats();
-                        const {skippedAudio, skippedVideo, stallCount} = playerStats;
-                        this.deltaStats = { skippedAudio, skippedVideo, stallCount} ;
+                        const {skippedAudio, skippedVideo, stallCount} = this.player.computeStats();
+                        this.deltaStats = { skippedAudio, skippedVideo, stallCount };
                     }
-                    const displayableCount = all ? 0 : this.uiStats.displayableCount;
-                    for(let [_, values] of this.stats) {
-                        values.splice(0, Math.max(0, values.length - displayableCount));
-                    }
-                    this.times.splice(0, Math.max(0, this.times.length - displayableCount));
+                    this.trimStats(all);
                     if (all){
                         this.hasMetrics = false;
                         this.deltaStats = {};
                     }
-                },
-                download(name, data, type) {
-                    const url = URL.createObjectURL(new Blob([data], {type}));
-                    const link = document.createElement("a");
-                    link.setAttribute("href", url);
-                    link.setAttribute("download", name);
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                },
-                downloadStats() {
-                    // Write headers and compute max values
-                    let csv = "";
-                    let max = this.times.length;
-                    let headers = ["localTime" , "mediaTime"];
-                    for (const [header, values] of this.stats) {
-                        headers.push(header);
-                        max = Math.max(max, values.length);
-                    }
-                    csv = headers.join(';');
-
-                    // Write CSV
-                    for (let i = 0; i < max; ++i) {
-                        csv += '\n';
-                        const {time, mediaTime} = this.times[i];
-                        csv += (time || '') + ';' + (mediaTime || '') + ';';
-                        for(let [name, stats] of this.stats) {
-                            csv += (stats[i] == null ? '' : parseFloat(stats[i])) + ';';
-                        }
-                    }
-
-                    // Download the csv !
-                    this.download("stats.csv", csv, 'text/csv;charset=utf-8;');
                 },
 
                 dump() {
@@ -1427,8 +1180,14 @@
                         if(options.fixedRate) {
                             path += "&fixedRate";
                         }
+                        if(this.sidePanel) {
+                            path += "&sidePanel";
+                        }
                         if(options.debugoverlay) {
                             path += "&debugoverlay";
+                        }
+                        if(options.events) {
+                            path += "&events";
                         }
                         if(options.host != null) {
                             path += "&host=" + options.host;
