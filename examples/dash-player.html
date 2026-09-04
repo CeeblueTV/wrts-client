@@ -22,16 +22,30 @@
         <link href="./css/fontawesome.css" rel="stylesheet">
         <link href="./css/main.css" rel="stylesheet">
 
-        <script>
-            // Apply theme synchronously to avoid FOUC. Stored value is 'light' | 'dark'.
-            (function() {
-                console.log("localStorage theme:", localStorage.getItem('wrts-theme'));
-                console.log("prefers-color-scheme:", matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        <!-- dash.js control bar: the DASH-IF reference player's own UI. It brings the DVR
+            seekbar (so the stream can be time-shifted), the live indicator, play/pause,
+            volume, playback rate, quality/track/caption menus and fullscreen. Its icons
+            are Bootstrap Icons, which it expects the page to load. -->
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1/font/bootstrap-icons.min.css" rel="stylesheet">
+        <link href="../node_modules/dashjs/contrib/controlbar/controlbar.css" rel="stylesheet">
 
-                var stored = localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-                document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
-            })();
-        </script>
+        <!-- Applies the stored theme before the first paint, must stay a classic script -->
+        <script src="./js/theme.js"></script>
+
+        <style>
+            /* Page-specific only, the rest of the design comes from css/main.css. */
+
+            /* The control bar exposes exactly two theming variables, map them on our tokens. */
+            .cb-controlbar {
+                --cb-accent: var(--accent);
+                --cb-danger: var(--err);
+                font-family: var(--f-body);
+            }
+
+            /* The control bar owns the bottom of the video, so dock the error banner to the
+               top instead of guessing a clearance from the bar's height. */
+            .player-alert { top: 10px; bottom: auto; }
+        </style>
     </head>
     <body>
         <div class="shell" id="main" v-cloak>
@@ -46,29 +60,13 @@
                 </button>
             </header>
 
-            <div>
+            <div class="stage">
 
-                <!-- Video -->
-                <div class="player" ref="player"
-                    @mouseenter="onPlayerActivity()"
-                    @mousemove="onPlayerActivity()"
-                    @mouseleave="onPlayerLeave()"
-                    @touchstart="onPlayerTouch($event)">
+                <!-- Video. No custom overlay here, unlike player.html: the dash.js control bar
+                    injects itself into this container and drives playback, seeking and volume. -->
+                <div class="player" ref="player">
 
                     <video autoplay id="video" ref="video" playsinline></video>
-
-                    <!-- Hover/touch revealed controls (only while playing) -->
-                    <div class="player-ctrls"
-                        :class="{ 'is-active': isPlaying(), 'is-visible': controlsVisible }">
-                        <button class="pc-btn pc-full"
-                            :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
-                            @click="fullscreen()">
-                            <i class="fas" :class="isFullscreen ? 'fa-compress' : 'fa-expand'"></i>
-                        </button>
-                        <button class="pc-btn pc-stop" title="Stop" @click="play()">
-                            <i class="fas fa-stop"></i>
-                        </button>
-                    </div>
 
                     <!-- Stopped → big Play | Starting → spinner -->
                     <button class="player-action" title="Play" @click="play()" v-if="isStopped()">
@@ -86,6 +84,11 @@
                                 <span class="player-alert-name">{{ streamError.name }}</span>
                             </div>
                             <div class="player-alert-detail" v-if="streamError.detail">{{ streamError.detail }}</div>
+                            <div class="player-alert-fields" v-if="streamError.fields.length">
+                                <span class="player-alert-field" v-for="f in streamError.fields" :key="f.label">
+                                    <strong>{{ f.label }}</strong>{{ f.value }}
+                                </span>
+                            </div>
                         </div>
                         <button class="player-alert-x" @click="streamError = null"
                             title="Dismiss" aria-label="Dismiss">
@@ -94,7 +97,8 @@
                     </div>
                 </div>
 
-                <!-- Track selects -->
+                <!-- Track selects. They mirror dash.js, so picking a quality from the control
+                    bar's own menu is reflected here (and the other way round). -->
                 <div class="row2 gap-panel">
                     <div>
                         <span class="lbl">Video track</span>
@@ -123,13 +127,16 @@
                         type="text" v-model="stream" @keyup.enter="isStopped() && play()">
                 </div>
 
-                <!-- Controls -->
-                <div class="ctrl-row gap-panel">
-                    <button class="btn" title="Mute or unmute audio" @click="mute()">
-                        <i class="fas" :class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
-                        {{ muted ? 'Unmute' : 'Mute' }}
+                <!-- Controls. Play/pause, mute and fullscreen belong to the control bar,
+                    only what it has no equivalent for is here. -->
+                <div class="ctrl-row ctrl-row-3 gap-panel">
+                    <button class="btn"
+                        :title="isStopped() ? 'Start playback' : 'Stop playback and release the player'"
+                        @click="play()">
+                        <i class="fas" :class="isStopped() ? 'fa-play' : 'fa-stop'"></i>
+                        {{ isStopped() ? 'Play' : 'Stop' }}
                     </button>
-                    <button class="btn" title="Jump to live position"
+                    <button class="btn" title="Jump back to the live edge"
                         :class="{ 'btn-red': isBehindLive }"
                         :disabled="!isBehindLive"
                         @click="goLive()">
@@ -160,8 +167,8 @@
                     <p class="net-desc" v-html="netDescription"></p>
                 </div>
 
-                <!-- Tabs -->
-                <div>
+                <!-- Panel: graph / messages (docks bottom by default, or right on wide screens) -->
+                <div class="stage-panel">
                     <div class="tab-bar">
                         <button class="tab-btn" :class="{ on: activeBottomTab === 'graph' }"
                             @click="selectBottomTab('graph')">Graph</button>
@@ -169,6 +176,11 @@
                             @click="selectBottomTab('messages')">
                             Messages
                             <span class="tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+                        </button>
+                        <button class="layout-btn" :class="{ on: sidePanel }"
+                            :title="sidePanel ? 'Dock the panel to the bottom' : 'Dock the panel to the right (side-by-side)'"
+                            @click="toggleSidePanel()">
+                            <i class="fas fa-table-columns"></i>
                         </button>
                     </div>
 
@@ -181,9 +193,6 @@
                                     @click="resetMetrics()" src="./assets/reload.png">
                                 <img alt="Download CSV" title="Download metrics as a CSV file"
                                     @click="downloadStats()" src="./assets/download.png">
-                                <img alt="Dump media" title="Dump media as MP4 files"
-                                    @click="dump()" src="./assets/dump.png"
-                                    v-show="audioDump || videoDump">
                             </div>
                         </div>
 
@@ -218,21 +227,28 @@
     </body>
     <script type="module">
         import { utils } from "../dist/wrts-client.bundle.js";
-        import { MediaPlayer } from "../node_modules/dashjs/dist/modern/esm/dash.all.min.js";
+        // Namespace import: the control bar reads the event maps off a `dashjs` global.
+        import * as dashjs from "../node_modules/dashjs/dist/modern/esm/dash.all.min.js";
+        import { ControlBar } from "../node_modules/dashjs/contrib/controlbar/ControlBar.js";
         import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js';
+        // Chrome shared with player.html: theme, tabs/messages, metrics export, layout
+        import {
+            PlayState, themeMixin, messagesMixin, sidePanelMixin, metricsMixin,
+            normalizeError, setupDebugOverlay, logMediaEvents
+        } from "./js/common.js";
         const { EpochTime, Util, NetAddress, LogLevel, log, UIMetrics, ByteRate } = utils;
+
+        window.dashjs = dashjs;
+        const { MediaPlayer } = dashjs;
 
         log.level = LogLevel.INFO;
 
         const options = Util.options();
 
-        const PlayState = {
-            PLAYING: 'PLAYING',
-            STARTING: 'STARTING',
-            STOPPED: 'STOPPED'
-        };
-
-        const THEME_CYCLE = ['light', 'dark'];
+        // On-screen log overlay for on-device debugging. Append `?debugoverlay` to the URL.
+        if (options.debugoverlay) {
+            setupDebugOverlay();
+        }
 
         // Media-time step, in seconds, above which a poll is a discontinuity rather than playback.
         // Matches dash.js streaming.gaps.threshold: it never jumps a gap smaller than that, so
@@ -247,11 +263,11 @@
         const CLIP_MANIFEST_URL = null;
 
         createApp({
+            mixins: [themeMixin, messagesMixin, sidePanelMixin, metricsMixin],
             data() {
                 return {
                     playState: PlayState.STOPPED,
                     stream: '',
-                    muted: false,
                     host: null,
                     player: /** @type {import('dashjs').MediaPlayerClass | null} */ (null),
                     latency: 0,
@@ -259,15 +275,6 @@
                     // Off-screen frame grab, EpochTime decodes the e2e timestamp from its pixels
                     canvas: document.createElement('canvas'),
                     netDescription: "",
-                    activeBottomTab: 'graph',
-                    // No data-message source yet on the DASH side, the panel stays empty
-                    messages: [],
-                    unreadMessages: 0,
-                    stats: new Map(),
-                    uiStats: null,
-                    hasMetrics: false,
-                    // Local and media time of each sample, first two columns of the CSV export
-                    times: [],
                     // Incremental metrics, fed by the player events and reset on each play
                     stalls: 0,
                     // Targets are a latency from the live edge, not a buffer size. The stream is delivered
@@ -307,10 +314,7 @@
                     audioTrack: 'Audio',
                     audioTrackId: undefined,
                     streamError: null,
-                    theme: localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-                    controlsVisible: false,
-                    _controlsTimer: null,
-                    isFullscreen: false,
+                    sidePanel: options.sidePanel ? true : false, // dock the metrics panel to the right (large screens)
                     // Iframe src while the clip modal is open, null when closed: also the open flag
                     clipSrc: null
                 }
@@ -321,18 +325,12 @@
                 this.stream = options.stream || '';
                 this.setLatencyTarget(Number(options.latencyTarget));
 
-                // React to system theme changes
-                this._mql = matchMedia('(prefers-color-scheme: dark)');
-                this._mqlListener = () => { this.applyTheme(true); };
-                this._mql.addEventListener('change', this._mqlListener);
+                const video = this.$refs.video;
 
-                this._fsListener = () => {
-                    this.isFullscreen = Boolean((document.fullscreenElement || document.webkitFullscreenElement));
-                };
-                document.addEventListener('fullscreenchange', this._fsListener);
-                document.addEventListener('webkitfullscreenchange', this._fsListener);
-                this.$refs.video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
-                this.$refs.video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
+                // Debug: log raw <video> media events to diagnose freezes (append ?events to the URL).
+                if (options.events) {
+                    logMediaEvents(video);
+                }
 
                 const drawContext = this.canvas.getContext('2d');
 
@@ -357,23 +355,23 @@
                 let presentedFrames = 0;
                 const countFrame = (_, metadata) => {
                     presentedFrames = metadata.presentedFrames;
-                    this.$refs.video.requestVideoFrameCallback(countFrame);
+                    video.requestVideoFrameCallback(countFrame);
                 };
-                this.$refs.video.requestVideoFrameCallback?.(countFrame);
+                video.requestVideoFrameCallback?.(countFrame);
 
                 this._recvBytes = new ByteRate(2000);
 
                 this._stalling = false;
                 this._userSeek = false;
-                this.$refs.video.addEventListener('waiting', () => {
+                video.addEventListener('waiting', () => {
 
-                    if (this._stalling || this.$refs.video.seeking || !this.isPlaying()) {
+                    if (this._stalling || video.seeking || !this.isPlaying()) {
                         return;
                     }
                     this._stalling = true;
                     ++this.stalls;
                 });
-                this.$refs.video.addEventListener('playing', () => { this._stalling = false; });
+                video.addEventListener('playing', () => { this._stalling = false; });
 
                 setInterval(() => {
                     if (!this.isPlaying()) {
@@ -384,7 +382,6 @@
                         return;
                     }
                     this.hasMetrics = true;
-                    const video = this.$refs.video;
                     const now = performance.now();
                     const elapsedSeconds = previousMeasurementTimestamp === null
                         ? 0
@@ -415,7 +412,6 @@
                     const playbackRate = this.player.getPlaybackRate() || 0;
                     playbackRates.push(playbackRate.toFixed(2));
 
-       
                     const playbackPositionChange = video.currentTime - previousPlaybackPosition;
                     // No delta on the first poll after a (re)start: the whole position would read as a jump
                     const discontinuity = elapsedSeconds ? playbackPositionChange - elapsedSeconds * playbackRate : 0;
@@ -459,7 +455,7 @@
                 },
 
                 // Manifest URL: a full URL typed by the user is used as-is, otherwise build the
-                // Ceeblue CMAF/DASH path '/cmaf/<stream>/index.mpd' on the configured host.
+                // Ceeblue CMAF/DASH path '/wrts/<stream>/index.mpd' on the configured host.
                 manifestURL() {
                     if (!this.stream) {
                         this.stream = 'out+de1e6f7c-e5db-450b-9603-c3644274779b';
@@ -474,7 +470,7 @@
                         const accessToken = (found < 0 ? null : new URLSearchParams(this.stream.substring(found + 1)).get('id'))
                             || options.token || options.id;
                         const url = new URL(NetAddress.fixProtocol('https', this.host.toString()));
-                        url.pathname = '/cmaf/' + streamName + '/index.mpd';
+                        url.pathname = '/wrts/' + streamName + '/index.mpd';
                         if (accessToken) {
                             url.searchParams.set('id', accessToken);
                         }
@@ -483,9 +479,11 @@
                 },
 
                 openClip() {
-                    this._clipMuted = !this.muted;
+                    const video = this.$refs.video;
+                    // Two soundtracks at once is unusable, mute ours while the editor is open
+                    this._clipMuted = !video.muted;
                     if (this._clipMuted) {
-                        this.mute();
+                        this.setMuted(true);
                     }
                     // If CLIP_MANIFEST_URL is null, we fallback to the current stream's manifest URL.
                     this.clipSrc = '/examples/clip-editor.html?url='
@@ -496,13 +494,25 @@
                     this.clipSrc = null;
                     // Only undo the mute if we did it ourselves.
                     if (this._clipMuted) {
-                        this.mute();
+                        this.setMuted(false);
                         this._clipMuted = false;
+                    }
+                },
+
+                // Mute is the control bar's, keep its icon in sync when we drive it ourselves.
+                setMuted(muted) {
+                    this.$refs.video.muted = muted;
+                    if (this.controlBar) {
+                        this.controlBar.setMuted(muted);
                     }
                 },
 
                 play() {
                     if (this.player) {
+                        if (this.controlBar) {
+                            this.controlBar.destroy();
+                            this.controlBar = null;
+                        }
                         this.player.destroy();
                         this.player = null;
                         // Clear the last displayed frame (destroy() only detaches the MediaSource)
@@ -522,7 +532,6 @@
                     this.playState = PlayState.STARTING;
 
                     const video = this.$refs.video;
-                    video.muted = this.muted;
 
                     this.player = MediaPlayer().create();
                     this.player.on(MediaPlayer.events.PLAYBACK_PLAYING, () => { this.playState = PlayState.PLAYING; });
@@ -531,19 +540,29 @@
                         this._recvBytes.addBytes(e.response?.byteLength || e.request?.bytesLoaded || 0);
                     });
                     this.player.on(MediaPlayer.events.QUALITY_CHANGE_RENDERED, e => this.onTrackChange(e.mediaType, e.newRepresentation));
+                    // Every seek voids the media-time deltas, wherever it came from: the Live
+                    // button, the control bar's seekbar, or a dash.js gap jump.
+                    this.player.on(MediaPlayer.events.PLAYBACK_SEEKING, () => { this._userSeek = true; });
                     this.player.on(MediaPlayer.events.ERROR, e => {
                         const error = e.error || {};
-                        this.streamError = {
+                        this.streamError = normalizeError({
                             type: 'Dash',
                             name: error.message || 'Playback error',
-                            detail: typeof error.data === 'object' ? JSON.stringify(error.data) : error.data || null
-                        };
+                            detail: typeof error.data === 'object' ? JSON.stringify(error.data) : error.data || null,
+                            code: error.code
+                        });
                         log('DASH error', error).error();
                     });
                     this.setLatencyTarget();
+
+                    // Time-shifting lives here: the control bar's seekbar spans the whole DVR
+                    // window (player.duration()), not just what is buffered, so a native
+                    // <video controls> scrubber could not reach it.
+                    this.controlBar = new ControlBar(this.player, video);
+                    this.controlBar.init(this.$refs.player);
+
                     this.player.initialize(video, url, true);
                 },
-                // TODO: Stop()
 
                 // dash.js targets a single live delay
                 setLatencyTarget(target) {
@@ -580,67 +599,19 @@
                         : '<br><strong>Target latency read from the manifest</strong>';
                 },
 
-                selectBottomTab(tab) {
-                    this.activeBottomTab = tab;
-                    if (tab === 'messages') {
-                        this.unreadMessages = 0;
-                    }
-                },
-
                 resetMetrics(all = false) {
                     this.uiStats.reset();
                     // reset incremental metrics counters
                     this.stalls = 0;
-                    const displayableCount = all ? 0 : this.uiStats.displayableCount;
-                    for (const [_, values] of this.stats) {
-                        values.splice(0, Math.max(0, values.length - displayableCount));
-                    }
-                    this.times.splice(0, Math.max(0, this.times.length - displayableCount));
+                    this.trimStats(all);
                     if (all) {
                         this.hasMetrics = false;
                         this._recvBytes.clear();
                     }
                 },
 
-                download(name, data, type) {
-                    const url = URL.createObjectURL(new Blob([data], { type }));
-                    const link = document.createElement("a");
-                    link.setAttribute("href", url);
-                    link.setAttribute("download", name);
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                },
-
-                downloadStats() {
-                    // Write headers and compute max values
-                    let max = this.times.length;
-                    const headers = ["localTime", "mediaTime"];
-                    for (const [header, values] of this.stats) {
-                        headers.push(header);
-                        max = Math.max(max, values.length);
-                    }
-                    let csv = headers.join(';');
-
-                    // Write CSV
-                    for (let i = 0; i < max; ++i) {
-                        csv += '\n';
-                        const { time, mediaTime } = this.times[i] ?? {};
-                        csv += (time || '') + ';' + (mediaTime || '') + ';';
-                        for (const [_, values] of this.stats) {
-                            csv += (values[i] == null ? '' : parseFloat(values[i])) + ';';
-                        }
-                    }
-
-                    // Download the csv !
-                    this.download("stats.csv", csv, 'text/csv;charset=utf-8;');
-                },
-
                 goLive() {
                     if (this.player) {
-                        // Our own seeks are the ones the metrics must ignore, unlike dash.js gap jumps
-                        this._userSeek = true;
                         this.player.seekToOriginalLive();
                     }
                 },
@@ -666,6 +637,9 @@
                             this.onTrackChange(type, current);
                         }
                     }
+                    if (this.controlBar) {
+                        this.controlBar.enable();
+                    }
                     log(`onMetadata ${Util.stringify({ video: [...this.videoTracks.values()], audio: [...this.audioTracks.values()] })}`).info();
                 },
 
@@ -684,15 +658,16 @@
                 onTrackChange(type, representation) {
                     const tracks = type === 'video' ? this.videoTracks : this.audioTracks;
                     const label = tracks.get(representation.id);
+                    // dash.js is the source of truth for AUTO: the control bar's quality menu can
+                    // switch ABR off without going through our select.
+                    const id = this.player.getSettings()?.streaming?.abr?.autoSwitchBitrate?.[type] === false
+                        ? representation.id
+                        : undefined;
                     if (type === 'video') {
-                        if (this.videoTrackId != null) {
-                            this.videoTrackId = representation.id;
-                        }
+                        this.videoTrackId = id;
                         this.videoTrack = label;
                     } else {
-                        if (this.audioTrackId != null) {
-                            this.audioTrackId = representation.id;
-                        }
+                        this.audioTrackId = id;
                         this.audioTrack = label;
                     }
                     log(`onTrackChange ${type} ${label}`).info();
@@ -715,80 +690,6 @@
                     this.player.updateSettings({ streaming: { abr: { autoSwitchBitrate: { [type]: id == null } } } });
                     if (id != null) {
                         this.player.setRepresentationForTypeById(type, id);
-                    }
-                },
-
-                mute() {
-                    this.muted = !this.muted;
-                    this.$refs.video.muted = this.muted;
-                },
-
-                // ── Theme ──
-                cycleTheme() {
-                    this.theme = THEME_CYCLE[(THEME_CYCLE.indexOf(this.theme) + 1) % THEME_CYCLE.length];
-                    localStorage.setItem('wrts-theme', this.theme);
-                    this.applyTheme();
-                },
-                applyTheme(systemChange = false) {
-                    const dark = systemChange ? matchMedia('(prefers-color-scheme: dark)').matches : this.theme === 'dark';
-                    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-                },
-                themeIcon() {
-                    return { light: 'fa-sun', dark: 'fa-moon' }[this.theme];
-                },
-                themeTooltip() {
-                    return `Theme: ${this.theme} (click to cycle)`;
-                },
-
-                // ── Player overlay controls (fullscreen / stop on hover or tap) ──
-                onPlayerActivity() {
-                    if (!this.isPlaying()) { return; }
-                    this._scheduleControls();
-                },
-                onPlayerLeave() {
-                    clearTimeout(this._controlsTimer);
-                    this.controlsVisible = false;
-                },
-                onPlayerTouch(event) {
-                    if (!this.isPlaying()) { return; }
-                    // Treat the touch as button-targeted only when controls are *already* visible —
-                    // otherwise the user can't see the button, so any tap there must just mean "reveal".
-                    if (this.controlsVisible && event.target.closest('.pc-btn')) {
-                        this._scheduleControls();
-                        return;
-                    }
-                    event.preventDefault();
-                    if (this.controlsVisible) {
-                        clearTimeout(this._controlsTimer);
-                        this.controlsVisible = false;
-                    } else {
-                        this._scheduleControls();
-                    }
-                },
-                _scheduleControls() {
-                    this.controlsVisible = true;
-                    clearTimeout(this._controlsTimer);
-                    this._controlsTimer = setTimeout(() => { this.controlsVisible = false; }, 3000);
-                },
-                fullscreen() {
-                    const video = this.$refs.video;
-                    const target = this.$refs.player; // fullscreen the container so our overlay stays reachable
-
-                    if (document.fullscreenElement || document.webkitFullscreenElement) {
-                        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-                        return;
-                    }
-                    if (video && video.webkitDisplayingFullscreen) {
-                        video.webkitExitFullscreen && video.webkitExitFullscreen();
-                        return;
-                    }
-                    if (target && target.requestFullscreen) {
-                        target.requestFullscreen();
-                    } else if (target && target.webkitRequestFullscreen) {
-                        target.webkitRequestFullscreen();
-                    } else if (video && video.webkitEnterFullscreen) {
-                        // iOS Safari fallback: native fullscreen on the video element only.
-                        video.webkitEnterFullscreen();
                     }
                 },
 
