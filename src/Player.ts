@@ -13,12 +13,17 @@ import { Metadata } from './media/Metadata';
 import { MediaPlayback, MediaPlaybackError } from './media/MediaPlayback';
 import { HTTPAdaptiveSource } from './sources/HTTPAdaptiveSource';
 import { MediaKeysEngine, MediaKeysEngineError } from './media/keys/MediaKeysEngine';
+import { AdaptiveRetry } from './utils/AdaptiveRetry';
+import { BufferMeasure } from './utils/BufferMeasure';
 
 const PAST_BUFFER = 20; // seconds
-const BUFFER_LIMIT_LOW = 150; // ms
-const BUFFER_LIMIT_HIGH = 550; // ms
+const BUFFER_LIMIT_LOW = 200; // ms
+const BUFFER_LIMIT_HIGH = 1000; // ms
 const TIMEOUT = 14000; // at least superior to max gop duration (10s)
 const BUFFER_CHANGE_STEP = 50; // ms
+
+const BUFFER_AUTO_MIN_WINDOW = 200; // ms
+const BUFFER_AUTO_MIN_TRY_DELAY = 5000; // ms
 
 const PLAYBACK_RATE_MAX = 116; // Default maxRate, 116 means max 16% increase of the playback rate when buffer is full
 const PLAYBACK_RATE_MAX_FLOOR = 108; // Minimum possible value for maxRate, 108 means min 8% increase of the playback rate when buffer is full
@@ -179,7 +184,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @event
      */
     onBufferState(oldState: BufferState) {
-        this.log(`Buffer change from ${oldState} to ${this.bufferState} (bufferAmount=${this.bufferAmount}ms)`).info();
+        this.log(`Buffer change from ${oldState} to ${this.bufferState} (bufferAmount=${this.bufferAmount}ms)`)[
+            this.bufferState === BufferState.LOW ? 'warn' : 'info'
+        ]();
     }
 
     /**
@@ -348,9 +355,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Set the low‐buffer threshold for {@link BufferState.LOW} in milliseconds
      */
     set bufferLimitLow(value: number) {
+        value = Math.round(value);
         this._bufferLimitLow = value;
         // to fix bufferLimitHigh and update _bufferLimitMiddle
-        this.bufferLimitHigh = Math.max(value, this._bufferLimitHigh);
+        this._setBufferLimitHigh(Math.max(value, this._bufferLimitHigh));
     }
 
     /**
@@ -371,11 +379,21 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Set the high-buffer threshold for {@link BufferState.HIGH} in milliseconds
+     *
+     * If set to undefined, the buffer limit will be automatically computed based
+     * on the low-buffer threshold and the network conditions.
+     * It's the default behavior.
      */
-    set bufferLimitHigh(value: number) {
-        this._bufferLimitHigh = value;
-        this._bufferLimitLow = Math.min(value, this._bufferLimitLow);
-        this._bufferLimitMiddle = Math.max(0, this._bufferLimitLow + Math.round((value - this._bufferLimitLow) / 2));
+    set bufferLimitHigh(value: number | undefined) {
+        if (value == null) {
+            this._bufferLimitHighAuto = new AdaptiveRetry('Buffer', { minimumTryDelay: BUFFER_AUTO_MIN_TRY_DELAY });
+            this._bufferMeasure = new BufferMeasure();
+            // to fix bufferLimitHigh and update _bufferLimitMiddle
+            this._setBufferLimitHigh(this._bufferLimitHigh);
+        } else {
+            this._bufferLimitHighAuto = undefined;
+            this._setBufferLimitHigh(value);
+        }
     }
 
     /**
@@ -649,6 +667,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _timeout?: { id: NodeJS.Timeout; value: number };
     private _bufferLimitLow: number;
     private _bufferLimitHigh: number;
+    private _bufferLimitHighAuto?: AdaptiveRetry;
+    private _bufferMeasure: BufferMeasure = new BufferMeasure();
     private _bufferLimitMiddle: number;
     private _bufferState: BufferState;
     private _controller: AbortController;
@@ -691,7 +711,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._playbackSpeed = new ByteRate();
         this._bufferLimitMiddle = 0;
         this._bufferLimitLow = BUFFER_LIMIT_LOW;
-        this.bufferLimitHigh = this._bufferLimitHigh = BUFFER_LIMIT_HIGH; // update _bufferLimitMiddle, see bufferLimitHigh setter
+        this._bufferLimitHigh = BUFFER_LIMIT_HIGH;
+        this.bufferLimitHigh = undefined; // init automatic mode
         // Set buffer as OK at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
@@ -807,6 +828,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 this._playback.videoEnabled = videoTrack >= 0;
                 this.onTrackChange(audioTrack, videoTrack, dataTrack);
             };
+            this._source.onVideoChange = (videoTrack: number, videoTrackOld?: number) => {
+                if (this._playback && videoTrackOld != null && this._bufferLimitHighAuto) {
+                    // Reset buffer-auto metrics and rearm attempts
+                    this._bufferLimitHighAuto.rearm();
+                    this._bufferMeasure = new BufferMeasure();
+                }
+            };
             this._source.onMetadata = (metadata: Metadata) => {
                 this._metadata = metadata;
 
@@ -872,7 +900,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 }
             };
             this._playback.onClose = error => this.stop(error);
-
+            this._bufferMeasure.starting = true;
             this.onStart();
         };
 
@@ -1014,6 +1042,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     this._source.onVideo = Util.EMPTY_FUNCTION;
                     this._source.onData = Util.EMPTY_FUNCTION;
                     this._source.onTrackChange = Util.EMPTY_FUNCTION;
+                    this._source.onVideoChange = Util.EMPTY_FUNCTION;
+                    this._source.onAudioChange = Util.EMPTY_FUNCTION;
                 }
 
                 // close media playback
@@ -1043,6 +1073,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         // Reset values
+        this._bufferLimitHighAuto?.reset();
+        this._bufferMeasure = new BufferMeasure();
         this._passthroughCMAF = undefined;
         this._buffering = false;
         this._paused = false;
@@ -1151,12 +1183,63 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
     }
 
+    private _setBufferLimitHigh(value: number) {
+        value = Math.round(value);
+        this._bufferLimitLow = Math.min(value, this._bufferLimitLow);
+        if (this._bufferLimitHighAuto) {
+            value = Math.max(this._bufferLimitLow + BUFFER_AUTO_MIN_WINDOW, value);
+        }
+        this._bufferLimitHigh = value;
+        this._bufferLimitMiddle = Math.max(0, this._bufferLimitLow + Math.round((value - this._bufferLimitLow) / 2));
+    }
+
+    private _adjustBufferLimitHigh(forceIncrease = false) {
+        let highLimit = Math.round(this._bufferLimitLow + this._bufferMeasure.lowHighRange);
+
+        if (highLimit > this._bufferLimitHigh) {
+            // Buffer augmentation
+            // amortize to avoid too much variation
+            highLimit = Math.min(highLimit, this._bufferLimitHigh * 2);
+        } else {
+            // Buffer diminution
+            if (forceIncrease) {
+                // congestion => force an increasement
+                highLimit = this._bufferLimitHigh * 1.5;
+            } else if (highLimit < this._bufferLimitHigh) {
+                // amortize the diminution
+                highLimit = Math.max(
+                    // 50% amortization to target new value
+                    Math.floor(this._bufferLimitHigh - (this._bufferLimitHigh - highLimit) / 2),
+                    // minumum acceptable relative to low buffer
+                    this._bufferLimitLow + BUFFER_AUTO_MIN_WINDOW
+                );
+            }
+        }
+
+        if (highLimit === this._bufferLimitHigh) {
+            // no change
+            return;
+        }
+
+        if (highLimit > this._bufferLimitHigh) {
+            this.log(`Increase bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).info();
+            this._bufferLimitHighAuto?.fail();
+        } else {
+            this.log(`Decrease bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).info();
+        }
+        this._setBufferLimitHigh(highLimit);
+    }
+
     private _setBufferState(state: BufferState) {
         const oldState = this._bufferState;
-        if (oldState !== state) {
-            this._bufferState = state;
-            this.onBufferState(oldState);
+        if (oldState === state) {
+            return;
         }
+        this._bufferState = state;
+        if (this._bufferLimitHighAuto && state === BufferState.LOW) {
+            this._adjustBufferLimitHigh(true);
+        }
+        this.onBufferState(oldState);
     }
 
     private _newMediaSource(): MediaSource | undefined {
@@ -1258,6 +1341,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
         const bufferAmount = this.bufferAmount;
 
+        this._bufferMeasure.set(bufferAmount, this.playbackSpeed);
+
         // Playing progress => check buffering!
         if (bufferAmount > this._bufferLimitLow) {
             // OK or HIGH
@@ -1280,6 +1365,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             }
         } else {
             this._setBufferState(BufferState.LOW);
+        }
+
+        // Automatic max buffer?
+        if (this._bufferLimitHighAuto?.try()) {
+            // Try to optimize automatically the buffer for low latency
+            this._adjustBufferLimitHigh();
+            if (this._bufferLimitHighAuto.success) {
+                // decrease try period if all is ok
+                this._bufferLimitHighAuto.decrease(this._bufferMeasure.lowHighDuration);
+            }
+            this._bufferMeasure = new BufferMeasure();
         }
 
         // Buffer change detection

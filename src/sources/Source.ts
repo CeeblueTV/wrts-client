@@ -107,6 +107,24 @@ export abstract class Source extends EventEmitter implements ICMCD {
     onTrackChange(audioTrack: number, videoTrack: number, dataTrack: Set<number>) {}
 
     /**
+     * @event
+     * Fire on a video change
+     *
+     * @param videoTrack
+     * @param videoTrackOld
+     */
+    onVideoChange(videoTrack: number, videoTrackOld?: number) {}
+
+    /**
+     * @event
+     * Fire on a audio change
+     *
+     * @param audioTrack
+     * @param audioTrackOld
+     */
+    onAudioChange(audioTrack: number, audioTrackOld?: number) {}
+
+    /**
      * Event fired when metadata is available in the stream.
      *
      * On the first occurrence, the optional return value allows specifying which track to use when starting the stream.
@@ -581,6 +599,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
             return;
         }
         // set the change
+        const oldTracks = this._tracks;
         this._tracks = { ...tracks };
         // displays tracks disabled
         if (tracks.audio < 0) {
@@ -590,6 +609,18 @@ export abstract class Source extends EventEmitter implements ICMCD {
             this.log(`Track video disabled`).info();
         }
         // inform user
+        if (tracks.video !== oldTracks.video) {
+            this.onVideoChange(tracks.video ?? -1, oldTracks.video);
+            if (this.closed) {
+                return;
+            }
+        }
+        if (tracks.audio !== oldTracks.audio) {
+            this.onAudioChange(tracks.audio ?? -1, oldTracks.audio);
+            if (this.closed) {
+                return;
+            }
+        }
         this.onTrackChange(tracks.audio, tracks.video, tracks.data);
     }
 
