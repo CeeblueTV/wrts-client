@@ -486,22 +486,29 @@ export class CMAFReader extends Reader {
                 }
                 // InitTracks
                 if (this._initTracks) {
-                    for (const [id, track] of this._tracks) {
-                        if (track.type === Media.Type.AUDIO) {
-                            if (this._initTracks.audio == null) {
-                                this._initTracks.audio = id;
-                            } else {
-                                this.log('Multiple Audio tracks unsupported, track ' + id + ' will be ignored').error();
-                            }
-                        } else if (track.type === Media.Type.VIDEO) {
-                            if (this._initTracks.video == null) {
-                                this._initTracks.video = id;
-                            } else {
-                                this.log('Multiple Video tracks unsupported, track ' + id + ' will be ignored').error();
+                    if (this.onInitTracks !== Reader.prototype.onInitTracks && this.onInitTracks !== Util.EMPTY_FUNCTION) {
+                        // Build the legacy single-track initialization only when onInitTracks is overridden.
+                        for (const [id, track] of this._tracks) {
+                            if (track.type === Media.Type.AUDIO) {
+                                if (this._initTracks.audio == null) {
+                                    this._initTracks.audio = id;
+                                } else {
+                                    this.log(
+                                        `onInitTracks only supports one audio track; track ${id} is omitted from the event`
+                                    ).warn();
+                                }
+                            } else if (track.type === Media.Type.VIDEO) {
+                                if (this._initTracks.video == null) {
+                                    this._initTracks.video = id;
+                                } else {
+                                    this.log(
+                                        `onInitTracks only supports one video track; track ${id} is omitted from the event`
+                                    ).warn();
+                                }
                             }
                         }
+                        this.onInitTracks(this._initTracks);
                     }
-                    this.onInitTracks(this._initTracks);
                     this._initTracks = undefined;
                 }
 
