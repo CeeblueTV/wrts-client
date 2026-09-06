@@ -589,6 +589,8 @@
                     let reader = this._readers.get(mediaType);
                     if (!reader) {
                         reader = new CMAFReader();
+                        // Disable unused track-initialization events.
+                        reader.onInitAllTracks = Util.EMPTY_FUNCTION;
                         // A media segment before its init segment has no track to attach to. That is
                         // expected while recovering from an abandoned download, so warn rather than
                         // surfacing it as a stream error.
