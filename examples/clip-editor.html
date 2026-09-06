@@ -238,6 +238,12 @@
 
                         if (written) {
                             downloadDialog.close();
+                            // Embedded in a player's iframe: the clip is on disk and the editor has
+                            // nothing left to offer, so tell the host it can close us and hand the
+                            // page back. Same-origin, which is how the players embed this page.
+                            if (window.parent !== window) {
+                                window.parent.postMessage({ type: "clip-editor:downloaded" }, location.origin);
+                            }
                         } else {
                             downloadStatus.textContent = "";
                         }
