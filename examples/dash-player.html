@@ -260,7 +260,8 @@
                     <button class="clip-x" title="Close the clip editor" @click="closeClip()">
                         <i class="fas fa-times"></i>
                     </button>
-                    <iframe class="clip-frame" title="Clip editor" allow="fullscreen" :src="clipSrc"></iframe>
+                    <iframe class="clip-frame" title="Clip editor" allow="fullscreen" ref="clipFrame"
+                        :src="clipSrc"></iframe>
                 </div>
             </div>
 
@@ -543,12 +544,25 @@
                         this.setMuted(true);
                     }
                     // If CLIP_MANIFEST_URL is null, we fallback to the current stream's manifest URL.
-                    this.clipSrc = '/examples/clip-editor.html?url='
+                    this.clipSrc = './clip-editor.html?url='
                         + encodeURIComponent(CLIP_MANIFEST_URL ?? this.manifestURL());
+                    // The editor signals us once the clip is written to disk: the user is done with
+                    // it, so close the modal and hand the page back to the live player. $refs is
+                    // read at message time, by when the iframe the v-if creates does exist.
+                    this._clipDownloaded = event => {
+                        if (event.origin === location.origin
+                            && event.source === this.$refs.clipFrame?.contentWindow
+                            && event.data?.type === 'clip-editor:downloaded') {
+                            this.closeClip();
+                        }
+                    };
+                    window.addEventListener('message', this._clipDownloaded);
                 },
 
                 closeClip() {
                     this.clipSrc = null;
+                    window.removeEventListener('message', this._clipDownloaded);
+                    this._clipDownloaded = null;
                     // Only undo the mute if we did it ourselves.
                     if (this._clipMuted) {
                         this.setMuted(false);
