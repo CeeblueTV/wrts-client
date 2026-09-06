@@ -58,6 +58,36 @@ export class CMAFReader extends Reader {
         this.log(`Uncaught message ${Util.stringify({ name, time, duration, data })}`).warn();
     }
 
+    /**
+     * Event fired with all initialized audio and video tracks.
+     *
+     * The default handler bridges to the legacy single-track onInitTracks event.
+     * Assigning another handler replaces that behavior, while on('initAllTracks', ...)
+     * adds a subscriber without replacing it.
+     * @param tracks
+     * @event
+     */
+    onInitAllTracks(tracks: { audios: number[]; videos: number[] }): void {
+        if (!this._initTracks) {
+            // nothing to announce
+            return;
+        }
+        // Warn the legacy single-track initialization
+        const ignoredAudios = tracks.audios.filter(track => track !== this._initTracks?.audio);
+        const ignoredVideos = tracks.videos.filter(track => track !== this._initTracks?.video);
+        if (ignoredAudios.length) {
+            this.log(
+                `onInitTracks only supports one audio track; tracks ${tracks.audios.join('-')} are omitted from the event`
+            ).warn();
+        }
+        if (ignoredVideos.length) {
+            this.log(
+                `onInitTracks only supports one video track; tracks ${tracks.videos.join('-')} are omitted from the event`
+            ).warn();
+        }
+        this.onInitTracks(this._initTracks);
+    }
+
     private _tracks: Map<number, Track>;
     private _initTracks?: Media.Tracks;
     private _track?: Track;
@@ -486,29 +516,18 @@ export class CMAFReader extends Reader {
                 }
                 // InitTracks
                 if (this._initTracks) {
-                    if (this.onInitTracks !== Reader.prototype.onInitTracks && this.onInitTracks !== Util.EMPTY_FUNCTION) {
-                        // Build the legacy single-track initialization only when onInitTracks is overridden.
-                        for (const [id, track] of this._tracks) {
-                            if (track.type === Media.Type.AUDIO) {
-                                if (this._initTracks.audio == null) {
-                                    this._initTracks.audio = id;
-                                } else {
-                                    this.log(
-                                        `onInitTracks only supports one audio track; track ${id} is omitted from the event`
-                                    ).warn();
-                                }
-                            } else if (track.type === Media.Type.VIDEO) {
-                                if (this._initTracks.video == null) {
-                                    this._initTracks.video = id;
-                                } else {
-                                    this.log(
-                                        `onInitTracks only supports one video track; track ${id} is omitted from the event`
-                                    ).warn();
-                                }
-                            }
+                    const videos: number[] = [];
+                    const audios: number[] = [];
+                    for (const [id, track] of this._tracks) {
+                        if (track.type === Media.Type.AUDIO) {
+                            this._initTracks.audio ??= id;
+                            audios.push(id);
+                        } else if (track.type === Media.Type.VIDEO) {
+                            this._initTracks.video ??= id;
+                            videos.push(id);
                         }
-                        this.onInitTracks(this._initTracks);
                     }
+                    this.onInitAllTracks({ audios, videos });
                     this._initTracks = undefined;
                 }
 
