@@ -514,7 +514,7 @@
 
                 // Manifest URL: a full URL typed by the user is used as-is, otherwise build the
                 // Ceeblue CMAF/DASH path '/wrts/<stream>/index.mpd' on the configured host.
-                manifestURL() {
+                manifestURL(vod=false) {
                     if (!this.stream) {
                         this.stream = 'out+de1e6f7c-e5db-450b-9603-c3644274779b';
                         log(`Set default Bunny stream ${this.stream}`).warn();
@@ -528,7 +528,7 @@
                         const accessToken = (found < 0 ? null : new URLSearchParams(this.stream.substring(found + 1)).get('id'))
                             || options.token || options.id;
                         const url = new URL(NetAddress.fixProtocol('https', this.host.toString()));
-                        url.pathname = '/wrts/' + streamName + '/index.mpd';
+                        url.pathname = (vod ? '/vod/' : '/wrts/') + streamName + '/index.mpd';
                         if (accessToken) {
                             url.searchParams.set('id', accessToken);
                         }
@@ -545,7 +545,7 @@
                     }
                     // If CLIP_MANIFEST_URL is null, we fallback to the current stream's manifest URL.
                     this.clipSrc = './clip-editor.html?url='
-                        + encodeURIComponent(CLIP_MANIFEST_URL ?? this.manifestURL());
+                        + encodeURIComponent(CLIP_MANIFEST_URL ?? this.manifestURL(true));
                     // The editor signals us once the clip is written to disk: the user is done with
                     // it, so close the modal and hand the page back to the live player. $refs is
                     // read at message time, by when the iframe the v-if creates does exist.
