@@ -168,6 +168,9 @@ player.onBufferChange = () => {
 To help you get started, we provide the following examples:
 
 - [/examples/player.html](./examples/player.html) - Play a stream
+- [/examples/dash-player.html](./examples/dash-player.html) - Play a DASH stream with latency, buffer, playback-rate and stall metrics
+
+> The DASH example follows the manifest by default and includes experimental 750 ms and 500 ms targets; its reception timeline shows when samples reach the parser, not individual frame network-arrival times.
 
 > [!TIP]
 > 

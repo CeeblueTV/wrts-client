@@ -224,7 +224,8 @@
                                 </button>
                                 <div class="tl-seg" title="Choose the time axis: stream timestamps (DTS) to spot desync, or wall-clock reception to spot late/slow tracks">
                                     <button :class="{ on: tlAxis === 'media' }" @click="setTimelineAxis('media')">Media DTS</button>
-                                    <button :class="{ on: tlAxis === 'reception' }" @click="setTimelineAxis('reception')">Reception</button>
+                                    <button :class="{ on: tlAxis === 'reception' }" @click="setTimelineAxis('reception')"
+                                        title="When dash.js supplies samples to the parser. Samples delivered together share a timestamp; these are not individual network arrival times.">Reception</button>
                                 </div>
                                 <div class="tl-seg" title="Visible time window">
                                     <button v-for="w in tlWindows" :class="{ on: tlWindow === w }"
@@ -327,17 +328,23 @@
                     netDescription: "",
                     // Incremental metrics, fed by the player events and reset on each play
                     stalls: 0,
-                    // Targets are a latency from the live edge, not a buffer size. The stream is delivered
-                    // progressively (availabilityTimeComplete="false"), so media arrives continuously and
-                    // the floor is set by delivery jitter, not by the segment duration: 1000ms holds on a
-                    // good network, each step adds margin for a longer hiccup. Without progressive
-                    // delivery the floor rises to a full segment and 'manifest target' is the safe choice.
+                    // Targets are seconds behind live expressed in ms, not guaranteed e2e latency.
+                    // Sub-second targets require progressively flushed CMAF chunks and an MPD with
+                    // availabilityTimeComplete="false" and an appropriate availabilityTimeOffset.
                     netProfiles: new Map([
                         ['-manual-', [
                             "Manually configure a latency target high enough to absorb the variations caused by network fluctuations.",
                         ]],
                         ['manifest target', [
-                            "Follow the latency target advertised by the manifest (ServiceDescription/@suggestedPresentationDelay), like the dash.js reference player.",
+                            "Follow the manifest's ServiceDescription latency or suggestedPresentationDelay, using dash.js default buffering and catch-up settings.",
+                        ]],
+                        ['experimental', [
+                            "Push toward 500ms on a very clean connection. Expect more stalls or catch-up seeks if chunks arrive late.",
+                            500
+                        ]],
+                        ['ultra low latency', [
+                            "Aggressive 750ms target with fast catch-up and a small buffer margin. Increase the target if playback stalls.",
+                            750
                         ]],
                         ['ideal', [
                             "Ideal network conditions for low latency: streamer and player are geographically close with minimal intermediary hops.",
@@ -579,8 +586,9 @@
                 // stream, so both are fed: in low-latency chunked delivery dash.js emits each
                 // box-aligned chunk on FRAGMENT_LOADING_PROGRESS and only the tail on COMPLETED,
                 // while a whole-segment download reports nothing until COMPLETED. Feeding chunk by
-                // chunk is what keeps the reception axis honest — one timestamp per segment would
-                // otherwise flatten every sequence onto its arrival instant.
+                // chunk timestamps when samples become available to this parser, not their exact
+                // network arrival time. XHR delivers the entire segment at once; Fetch can deliver
+                // multiple frames together too. Do not interpret these as per-frame network timings.
                 _feedTimeline(request, bytes) {
                     const mediaType = request && request.mediaType;
                     if (!bytes || !bytes.byteLength || (mediaType !== 'video' && mediaType !== 'audio')) {
@@ -690,7 +698,8 @@
                 // dash.js targets a single live delay
                 setLatencyTarget(target) {
                     let profile;
-                    if(!isNaN(target)) {
+                    const numericTarget = Number(target);
+                    if(target !== undefined && target !== '' && Number.isFinite(numericTarget) && numericTarget >= 0) {
                         // manual mode
                         profile = this.netProfiles.entries().next().value;
                         this.netProfile = profile[0];
@@ -698,7 +707,7 @@
 
                         // Store it in the profile too: play() and the profile <select> call setLatencyTarget()
                         // with no argument, and that path re-reads the target from the profile entry.
-                        profile[1] = this.latencyTarget = Number(target);
+                        profile[1] = this.latencyTarget = numericTarget;
                     } else {
                         // Manifest or predefined target
                         profile = this.netProfiles.get(this.netProfile);
@@ -706,10 +715,34 @@
                     }
 
                     if (this.player) {
-                        // 0 => NaN => no override: dash.js uses the manifest's ServiceDescription/@suggestedPresentationDelay.
-                        // Forcing a target below the manifest's advertised minimum pins the catch-up rate at its
-                        // maximum forever, which drains the buffer and stalls instead of stabilising it.
-                        this.player.updateSettings({ streaming: { delay: { liveDelay: this.latencyTarget / 1000 || NaN } } });
+                        const liveDelay = this.latencyTarget / 1000 || NaN;
+                        const manualDelay = Number.isFinite(liveDelay);
+                        // dash.js 5.2.1 detects LL delivery from the MPD; lowLatencyEnabled is no
+                        // longer a setting. Its Fetch loader appends complete CMAF chunks without
+                        // requiring Content-Length. MOOF_PARSING is already its throughput default.
+                        // Keep the LoL+ slowdown threshold below the target so sub-second playback
+                        // can catch up. Also lower the default 300ms synthetic-stall threshold.
+                        // Reset every override when returning to the manifest target (or manual 0).
+                        this.player.updateSettings({
+                            streaming: {
+                                delay: { liveDelay },
+                                buffer: {
+                                    lowLatencyStallThreshold: manualDelay ? Math.min(0.3, liveDelay / 10) : 0.3
+                                },
+                                liveCatchup: {
+                                    enabled: manualDelay ? true : null,
+                                    maxDrift: manualDelay ? Math.max(0.3, Math.min(1.5, liveDelay)) : NaN,
+                                    playbackRate: {
+                                        min: manualDelay ? -0.05 : NaN,
+                                        max: manualDelay ? (liveDelay < 1 ? 0.35 : 0.15) : NaN
+                                    },
+                                    playbackBufferMin: manualDelay ? Math.min(0.5, liveDelay / 3) : 0.5,
+                                    mode: manualDelay
+                                        ? dashjs.Constants.LIVE_CATCHUP_MODE_LOLP
+                                        : dashjs.Constants.LIVE_CATCHUP_MODE_DEFAULT
+                                }
+                            }
+                        });
                         if (!this.latencyTarget) {
                             this.latencyTarget = this.manifestTarget();
                         }
