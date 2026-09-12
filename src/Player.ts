@@ -22,14 +22,17 @@ const BUFFER_LIMIT_HIGH = 1000; // ms
 const TIMEOUT = 14000; // at least superior to max gop duration (10s)
 const BUFFER_CHANGE_STEP = 50; // ms
 
-const BUFFER_AUTO_MIN_WINDOW = 200; // ms
+const BUFFER_AUTO_MIN_WINDOW = 200; // ms, absolute floor, the measured rate change impact widens it when larger
 const BUFFER_AUTO_MIN_TRY_DELAY = 5000; // ms
 
 const PLAYBACK_RATE_MAX = 116; // Default maxRate, 116 means max 16% increase of the playback rate when buffer is full
-const PLAYBACK_RATE_MAX_FLOOR = 108; // Minimum possible value for maxRate, 108 means min 8% increase of the playback rate when buffer is full
-
-const PLAYBACK_RATE_MIN_CEIL = 92; // Maximum possible value for minRate 92 means min 8% decrease of the playback rate when buffer is low
 const PLAYBACK_RATE_MIN = 84; // Default minRate, 84 means max 16% decrease of the playback rate when buffer is low
+const RATE_SETTLE_MS = 1500; // How long a rate change is observed: long enough to see the decoder hiccup it causes
+
+const FREEZE_CHECK_MS = 250; // Freeze-detection timer period, independent of the 'timeupdate' event
+const FREEZE_RATIO = 0.1; // Below 10% of the expected progress in one tick counts as a frozen tick
+const FREEZE_CONFIRM_TICKS = 2; // Consecutive frozen ticks (500ms) required to confirm a freeze
+const FREEZE_RECOVER_MS = 2000; // Hold at 1x this long after a confirmed freeze before accelerating again
 
 const root = typeof window !== 'undefined' ? window : global;
 
@@ -196,6 +199,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     onStall() {
         this.log('Playback stall').warn();
+    }
+
+    /**
+     * Event fired when a silent freeze is detected: `currentTime` stops advancing despite a healthy
+     * buffer and no native `waiting` event (typically Safari or PlayReady choking on a playbackRate change)
+     * @event
+     */
+    onFreeze(bufferMs: number) {
+        this.log(`Playback freeze detected (buffer=${bufferMs}ms)`).warn();
     }
 
     /**
@@ -450,6 +462,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * Number of silent freezes detected since the last {@link Player.start}, see {@link Player.onFreeze}
+     */
+    get freezeCount(): number {
+        return this._freezeCount;
+    }
+
+    /**
      * Gets an estimation of playback latency in milliseconds,
      * Computed as the difference between the estimated live time and the current playback time.
      */
@@ -669,6 +688,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _bufferLimitHigh: number;
     private _bufferLimitHighAuto?: AdaptiveRetry;
     private _bufferMeasure: BufferMeasure = new BufferMeasure();
+    private _rateChangeBuffer: number = 0;
+    private _rateChangeImpact: number = 0;
     private _bufferLimitMiddle: number;
     private _bufferState: BufferState;
     private _controller: AbortController;
@@ -682,6 +703,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _passthroughCMAF?: boolean;
     private _previousBufferAmount: number;
     private _stallCount: number = 0;
+    private _freezeTimer?: NodeJS.Timeout;
+    private _freezePrevTime?: number;
+    private _freezeTicks: number = 0;
+    private _rateSettleUntil: number = 0;
+    private _freezeRecoverUntil: number = 0;
+    private _freezeCount: number = 0;
 
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
@@ -945,6 +972,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         };
         const onSeeking = () => {
             this._playbackPrevTime = undefined;
+            this._freezePrevTime = undefined;
         };
         const onSeeked = () => {
             if (!this.reliable && this.bufferAmount > this.bufferLimitHigh) {
@@ -967,6 +995,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._video.addEventListener('pause', onPause);
         this._video.addEventListener('timeupdate', onTimeUpdate);
 
+        // Independent timer to catch silent freezes even when 'timeupdate' stops firing
+        this._freezeTimer = setInterval(() => this._checkFreeze(), FREEZE_CHECK_MS);
+
         this._controller.signal.addEventListener(
             'abort',
             () => {
@@ -977,6 +1008,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 this._video.removeEventListener('seeked', onSeeked);
                 this._video.removeEventListener('pause', onPause);
                 this._video.removeEventListener('timeupdate', onTimeUpdate);
+                clearInterval(this._freezeTimer);
+                this._freezeTimer = undefined;
             },
             { once: true }
         );
@@ -1085,6 +1118,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._playbackSpeed.clear();
         this._playbackPrevTime = undefined;
         this._stallCount = 0;
+        this._freezePrevTime = undefined;
+        this._freezeTicks = 0;
+        this._rateSettleUntil = 0;
+        this._freezeRecoverUntil = 0;
+        this._freezeCount = 0;
+        this._rateChangeBuffer = 0;
+        this._rateChangeImpact = 0;
         this._previousBufferAmount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
@@ -1132,54 +1172,69 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * Adjust playback rate according to buffer state to avoid buffer overrun or underrun
      *
-     * The minimum increase playback rate is 108% (1.08x), you can disable increase by setting maxRate to 100 or less,
-     * and the maximum decrease playback rate is 92% (0.92x), you can disable decrease by setting minRate to 100 or more.
+     * The rate is held at a fixed level and changed only on a buffer-state transition, not ramped
+     * continuously: some decoders (Safari, PlayReady) briefly hiccup on every `playbackRate` change,
+     * so changing it rarely avoids causing the very stalls this is meant to prevent.
      *
      * Disabling increase can be useful with hardware decoding issues but note that this affects the ability of the player to catch up the live point after a congestion.
      * Be careful when disabling decrease because it can increase the risk of stall when the network condition worsen.
      *
      * Note: Intended to be called from {@link onBufferChange}
      *
-     * @param minRate minimum playback rate in percentage, default to 84 (0.84x), if more than 92 it will be forced to 92
-     * @param maxRate maximum playback rate in percentage, default to 116 (1.16x), if less than 108 it will be forced to 108
+     * @param minRate minimum playback rate in percentage, default to 84 (0.84x), disable decrease by setting it to 100 or more
+     * @param maxRate maximum playback rate in percentage, default to 116 (1.16x), disable increase by setting it to 100 or less
      */
     adjustPlaybackRate(minRate = PLAYBACK_RATE_MIN, maxRate = PLAYBACK_RATE_MAX) {
-        // We save the playbackRate before to change it to be able to log only if there is a real change
-        // Indeed when assiging video.playbackRate sometimes the value is not really changed because the browser can decide to ignore it
-        const playbackRate = this._video.playbackRate;
-        if (this.bufferState === BufferState.HIGH && maxRate > 100) {
-            if (maxRate < PLAYBACK_RATE_MAX_FLOOR) {
-                // Force maxRate to respect the minimum threshold to avoid too small increase that can cause more harm than good
-                maxRate = PLAYBACK_RATE_MAX_FLOOR;
-            }
-            // Increase playback rate linearly (by default between [1.08,1.16]),
-            // reaches the max when bufferAmount > bufferLimitHigh + (bufferLimitHigh - bufferLimitMiddle)
-            const ratio =
-                Math.max(0, this.bufferAmount - this.bufferLimitHigh) /
-                Math.max(1, 2 * (this.bufferLimitHigh - this.bufferLimitMiddle));
-            this._video.playbackRate = Math.max(
-                this._video.playbackRate,
-                Math.round(PLAYBACK_RATE_MAX_FLOOR + (maxRate - PLAYBACK_RATE_MAX_FLOOR) * Math.min(ratio, 1)) / 100
-            );
+        let rate = 1;
+        if (this.bufferState === BufferState.HIGH && maxRate > 100 && Util.time() >= this._freezeRecoverUntil) {
+            rate = maxRate / 100;
         } else if (this.bufferState === BufferState.LOW && minRate < 100) {
-            if (minRate > PLAYBACK_RATE_MIN_CEIL) {
-                // Force minRate to respect the maximum threshold to avoid too small decrease that can cause more harm than good
-                minRate = PLAYBACK_RATE_MIN_CEIL;
-            }
-            // Decrease playback rate linearly (by default between [0.92,0.84]),
-            // reaches the min when bufferAmount < bufferLimitLow - (bufferLimitMiddle - bufferLimitLow)
-            const ratio =
-                Math.max(0, this.bufferLimitMiddle - this.bufferAmount) /
-                Math.max(1, 2 * (this.bufferLimitMiddle - this.bufferLimitLow));
-            this._video.playbackRate = Math.min(
-                Math.round(PLAYBACK_RATE_MIN_CEIL - (PLAYBACK_RATE_MIN_CEIL - minRate) * Math.min(ratio, 1)) / 100,
-                this._video.playbackRate
-            );
-        } else {
-            this._video.playbackRate = 1;
+            rate = minRate / 100;
         }
-        if (playbackRate !== this._video.playbackRate) {
-            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
+        this._setRate(rate);
+    }
+
+    private _setRate(rate: number) {
+        rate = Math.round(rate * 100) / 100;
+        // Assigning video.playbackRate is not always effective, the browser can decide to ignore it
+        if (Math.abs(this._video.playbackRate - rate) < 0.001) {
+            return;
+        }
+        this._video.playbackRate = rate;
+        // Open the observation window on the hiccup this change is about to cause: the freeze detector must
+        // not count it, and how much buffer it adds is what {@link _setBufferLimitHigh} has to stay clear of
+        this._rateSettleUntil = Util.time() + RATE_SETTLE_MS;
+        this._rateChangeBuffer = this.bufferAmount;
+        this.log(`Adapt playback rate to ${rate}`).info();
+    }
+
+    private _checkFreeze() {
+        const now = Util.time();
+        if (!this.running || this._paused || this._buffering || now < this._rateSettleUntil) {
+            this._freezePrevTime = this._buffering ? undefined : this.currentTime;
+            this._freezeTicks = 0;
+            return;
+        }
+        const time = this.currentTime;
+        const prevTime = this._freezePrevTime;
+        this._freezePrevTime = time;
+        if (prevTime == null) {
+            return;
+        }
+        if ((time - prevTime) * 1000 >= FREEZE_CHECK_MS * FREEZE_RATIO) {
+            this._freezeTicks = 0;
+            return;
+        }
+        // Use === so one contiguous freeze fires onFreeze/recovery exactly once
+        if (++this._freezeTicks === FREEZE_CONFIRM_TICKS) {
+            ++this._freezeCount;
+            this._freezeRecoverUntil = now + FREEZE_RECOVER_MS;
+            this._setRate(1);
+            if (this._bufferLimitHighAuto) {
+                // A freeze can happen even with a buffer that looks fine, force the auto-buffer to grow too
+                this._adjustBufferLimitHigh(true);
+            }
+            this.onFreeze(this.bufferAmount);
         }
     }
 
@@ -1187,10 +1242,21 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         value = Math.round(value);
         this._bufferLimitLow = Math.min(value, this._bufferLimitLow);
         if (this._bufferLimitHighAuto) {
-            value = Math.max(this._bufferLimitLow + BUFFER_AUTO_MIN_WINDOW, value);
+            value = Math.max(this._bufferLimitLow + this._bufferMinWindow, value);
         }
         this._bufferLimitHigh = value;
         this._bufferLimitMiddle = Math.max(0, this._bufferLimitLow + Math.round((value - this._bufferLimitLow) / 2));
+    }
+
+    /**
+     * Narrowest [low, high] window the automatic mode may use.
+     *
+     * A rate change makes the decoder hiccup, which inflates the buffer by {@link _rateChangeImpact}. The
+     * middle threshold sits halfway, so a window narrower than twice that impact lets a rate change push the
+     * buffer from middle back over high on its own, and every correction then triggers the opposite one.
+     */
+    private get _bufferMinWindow(): number {
+        return Math.max(BUFFER_AUTO_MIN_WINDOW, 2 * this._rateChangeImpact);
     }
 
     private _adjustBufferLimitHigh(forceIncrease = false) {
@@ -1200,20 +1266,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             // Buffer augmentation
             // amortize to avoid too much variation
             highLimit = Math.min(highLimit, this._bufferLimitHigh * 2);
-        } else {
-            // Buffer diminution
-            if (forceIncrease) {
-                // congestion => force an increasement
-                highLimit = this._bufferLimitHigh * 1.5;
-            } else if (highLimit < this._bufferLimitHigh) {
-                // amortize the diminution
-                highLimit = Math.max(
-                    // 50% amortization to target new value
-                    Math.floor(this._bufferLimitHigh - (this._bufferLimitHigh - highLimit) / 2),
-                    // minumum acceptable relative to low buffer
-                    this._bufferLimitLow + BUFFER_AUTO_MIN_WINDOW
-                );
-            }
+        } else if (forceIncrease) {
+            // congestion => force an increasement
+            highLimit = this._bufferLimitHigh * 1.5;
+        } else if (highLimit < this._bufferLimitHigh) {
+            // amortize the diminution
+            highLimit = Math.max(
+                // 50% amortization to target new value
+                Math.floor(this._bufferLimitHigh - (this._bufferLimitHigh - highLimit) / 2),
+                // minumum acceptable relative to low buffer
+                this._bufferLimitLow + this._bufferMinWindow
+            );
         }
 
         if (highLimit === this._bufferLimitHigh) {
@@ -1240,6 +1303,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._adjustBufferLimitHigh(true);
         }
         this.onBufferState(oldState);
+        // A state transition must always be able to re-evaluate the rate, even if bufferAmount
+        // happens to settle within BUFFER_CHANGE_STEP of its last onBufferChange right after transitioning
+        this.onBufferChange();
     }
 
     private _newMediaSource(): MediaSource | undefined {
@@ -1365,6 +1431,14 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             }
         } else {
             this._setBufferState(BufferState.LOW);
+        }
+
+        // How much buffer the hiccup of the last rate change has added, the window must stay wider than this
+        if (Util.time() < this._rateSettleUntil && bufferAmount - this._rateChangeBuffer > this._rateChangeImpact) {
+            this._rateChangeImpact = bufferAmount - this._rateChangeBuffer;
+            this.log(`Playback rate change impacts the buffer of ${this._rateChangeImpact}ms`).info();
+            // re-apply the widened minimum to the current limits
+            this._setBufferLimitHigh(this._bufferLimitHigh);
         }
 
         // Automatic max buffer?
