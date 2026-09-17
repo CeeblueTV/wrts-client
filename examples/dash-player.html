@@ -707,6 +707,15 @@
                     this.controlBar = new ControlBar(this.player, video);
                     this.controlBar.init(this.$refs.player);
 
+                    // The control bar has no stop equivalent (its play/pause button only pauses),
+                    // so add one ourselves, matching its own button markup and styling.
+                    const stopBtn = document.createElement('button');
+                    stopBtn.className = 'cb-btn';
+                    stopBtn.title = 'Stop';
+                    stopBtn.innerHTML = '<i class="bi bi-stop-fill"></i>';
+                    stopBtn.addEventListener('click', () => this.play());
+                    this.controlBar.playPauseBtn.before(stopBtn);
+
                     this.player.initialize(video, url, true);
                 },
 
