@@ -1407,7 +1407,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
         const bufferAmount = this.bufferAmount;
 
-        this._bufferMeasure.set(bufferAmount, this.playbackSpeed);
+        this._bufferMeasure.set(bufferAmount, this.playbackRate);
 
         // Playing progress => check buffering!
         if (bufferAmount > this._bufferLimitLow) {
