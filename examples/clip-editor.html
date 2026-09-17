@@ -85,6 +85,42 @@
             .theme-icon::before { content: "\263E"; }
             html[data-theme="dark"] .theme-icon::before { content: "\2600"; }
 
+            .shortcuts-legend {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                width: calc(100% - 30px);
+                max-width: calc(60vh * 16 / 9);
+                margin: 10px auto 0;
+                padding: 0;
+                list-style: none;
+                gap: 6px 18px;
+                color: var(--txt-m);
+                font-size: 11px;
+            }
+
+            .shortcuts-legend li {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+            }
+
+            .shortcuts-legend kbd {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 20px;
+                height: 20px;
+                padding: 0 5px;
+                border: 1px solid var(--border-s);
+                border-radius: var(--r-sm);
+                background: var(--bg-e);
+                color: var(--txt-2);
+                font: inherit;
+                font-size: 10px;
+                font-weight: 600;
+            }
+
             .download-actions { width: calc(100% - 30px); margin: 44px auto 0; text-align: center; }
             .download-actions img { width: 27px; height: 27px; }
 
@@ -261,7 +297,61 @@
 
                 openDownloadDialogButton.disabled = false;
 
+                setupKeyboardShortcuts(video, timeline, player, downloadDialog);
+
                 await timeline.startResponsiveThumbnailGeneration(media.video);
+            }
+
+            const FALLBACK_FRAME_RATE = 30;
+
+            function setupKeyboardShortcuts(video, timeline, player, downloadDialog) {
+                const stepFrame = (direction) => {
+                    video.pause();
+                    const frameDurationS = 1 / (player.getFrameRate() ?? FALLBACK_FRAME_RATE);
+                    player.seek(player.getCurrentTime() + direction * frameDurationS);
+                };
+
+                window.addEventListener("keydown", (event) => {
+                    if (downloadDialog.open) {
+                        return;
+                    }
+                    const target = event.target;
+                    if (target instanceof HTMLElement && ["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(target.tagName)) {
+                        return;
+                    }
+                    // A focused selection handle already reacts to arrow keys on its own.
+                    if (timeline.shadowRoot?.activeElement) {
+                        return;
+                    }
+
+                    switch (event.key) {
+                        case "i":
+                            timeline.setSelectionStart(player.getCurrentTime());
+                            break;
+                        case "o":
+                            timeline.setSelectionEnd(player.getCurrentTime());
+                            break;
+                        case "ArrowLeft":
+                            stepFrame(-1);
+                            break;
+                        case "ArrowRight":
+                            stepFrame(1);
+                            break;
+                        case " ":
+                            video.paused ? video.play() : video.pause();
+                            break;
+                        case "Home":
+                            player.seek(timeline.selection.start);
+                            break;
+                        case "End":
+                            player.seek(timeline.selection.end);
+                            break;
+                        default:
+                            return;
+                    }
+
+                    event.preventDefault();
+                });
             }
 
             main().catch(error => {
@@ -299,6 +389,25 @@
                     <video id="video-preview" controls playsinline></video>
                 </div>
                 <dash-timeline></dash-timeline>
+                <ul class="shortcuts-legend" aria-label="Keyboard shortcuts">
+                    <li>
+                        <kbd>I</kbd> Set in
+                    </li>
+                    <li>
+                        <kbd>O</kbd> Set out
+                    </li>
+                    <li>
+                        <kbd>←</kbd>
+                        <kbd>→</kbd> Step one frame
+                    </li>
+                    <li>
+                        <kbd>Space</kbd> Play / pause
+                    </li>
+                    <li>
+                        <kbd>Home</kbd>
+                        <kbd>End</kbd> Jump to in / out
+                    </li>
+                </ul>
                 <div class="download-actions">
                     <button class="btn btn-primary" id="open-download-dialog" type="button" disabled>
                         <img src="./assets/download.png" alt="">
