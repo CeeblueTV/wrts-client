@@ -427,6 +427,33 @@ select option { background: var(--bg); color: var(--txt); }
 /* Stream input takes full width; controls row holds the rest */
 .stream-row .inp { width: 100%; }
 
+/* Collapsible settings panel — shared by player.html and dash-player.html */
+.settings-panel { margin-top: 14px; }
+.controls-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 5px 2px 7px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    background: none;
+    color: var(--txt-m);
+    font-family: var(--f-body);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color var(--t), border-color var(--t);
+}
+.controls-toggle:hover { color: var(--txt-2); border-color: var(--border-s); }
+.controls-toggle .fa-sliders { color: var(--accent); font-size: 11px; }
+.controls-toggle span { flex: 1; text-align: left; }
+.controls-toggle .fa-chevron-down { font-size: 10px; transition: transform var(--t); }
+.settings-panel.collapsed .controls-toggle { border-bottom-color: transparent; }
+.settings-panel.collapsed .controls-toggle .fa-chevron-down { transform: rotate(-90deg); }
+
 .ctrl-row {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));

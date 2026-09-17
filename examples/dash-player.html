@@ -101,74 +101,88 @@
                     </div>
                 </div>
 
-                <!-- Track selects. They mirror dash.js, so picking a quality from the control
-                    bar's own menu is reflected here (and the other way round). -->
-                <div class="row2 gap-panel">
-                    <div>
-                        <span class="lbl">Video track</span>
-                        <select class="sel" id="video-track-selection"
-                            :disabled="!isPlaying()"
-                            v-model="videoTrackId" @change="onVideoTrackChange()">
-                            <option :value="undefined" :key="videoTrack">AUTO — {{ videoTrack }}</option>
-                            <option v-for="[id, track] of videoTracks" :value="id">{{ track }}</option>
-                        </select>
-                    </div>
-                    <div>
-                        <span class="lbl">Audio track</span>
-                        <select class="sel" id="audio-track-selection"
-                            :disabled="!isPlaying()"
-                            v-model="audioTrackId" @change="onAudioTrackChange()">
-                            <option :value="undefined" :key="audioTrack">AUTO — {{ audioTrack }}</option>
-                            <option v-for="[id, track] of audioTracks" :value="id">{{ track }}</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Stream name (full width) -->
-                <div class="stream-row gap-panel">
-                    <input class="inp" :disabled="!isStopped()"
-                        placeholder="StreamName(?id=accessToken) or manifest URL"
-                        type="text" v-model="stream" @keyup.enter="isStopped() && play()">
-                </div>
-
-                <!-- Controls. Play/pause, mute and fullscreen belong to the control bar,
-                    only what it has no equivalent for is here. -->
-                <div class="ctrl-row ctrl-row-3 gap-panel">
-                    <button class="btn"
-                        :title="isStopped() ? 'Start playback' : 'Stop playback and release the player'"
-                        @click="play()">
-                        <i class="fas" :class="isStopped() ? 'fa-play' : 'fa-stop'"></i>
-                        {{ isStopped() ? 'Play' : 'Stop' }}
+                <!-- Settings: track selects, stream input, playback controls, network profile -->
+                <div class="settings-panel" :class="{ collapsed: controlsHidden }">
+                    <button class="controls-toggle"
+                        :title="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
+                        :aria-label="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
+                        :aria-expanded="!controlsHidden"
+                        @click="controlsHidden = !controlsHidden">
+                        <i class="fas fa-sliders"></i>
+                        <span>Stream settings</span>
+                        <i class="fas fa-chevron-down"></i>
                     </button>
-                    <button class="btn" title="Jump back to the live edge"
-                        :class="{ 'btn-red': isBehindLive }"
-                        :disabled="!isBehindLive"
-                        @click="goLive()">
-                        <i class="fas fa-rocket"></i>
-                        Live
-                    </button>
-                    <button class="btn" title="Clip and download a part of this stream"
-                        @click="openClip()">
-                        <i class="fas fa-scissors"></i>
-                        Clip
-                    </button>
-                </div>
+                    <div v-show="!controlsHidden">
+                        <!-- Track selects. They mirror dash.js, so picking a quality from the control
+                            bar's own menu is reflected here (and the other way round). -->
+                        <div class="row2 gap-panel">
+                            <div>
+                                <span class="lbl">Video track</span>
+                                <select class="sel" id="video-track-selection"
+                                    :disabled="!isPlaying()"
+                                    v-model="videoTrackId" @change="onVideoTrackChange()">
+                                    <option :value="undefined" :key="videoTrack">AUTO — {{ videoTrack }}</option>
+                                    <option v-for="[id, track] of videoTracks" :value="id">{{ track }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <span class="lbl">Audio track</span>
+                                <select class="sel" id="audio-track-selection"
+                                    :disabled="!isPlaying()"
+                                    v-model="audioTrackId" @change="onAudioTrackChange()">
+                                    <option :value="undefined" :key="audioTrack">AUTO — {{ audioTrack }}</option>
+                                    <option v-for="[id, track] of audioTracks" :value="id">{{ track }}</option>
+                                </select>
+                            </div>
+                        </div>
 
-                <!-- Network profile + latency target (single compact row). -->
-                <div class="net-row net-latency gap-panel">
-                    <div class="net-prof">
-                        <span class="lbl">Network profile</span>
-                        <select class="sel" v-model="netProfile" @change="setLatencyTarget()">
-                            <option :value="profil" v-for="[profil, _] of netProfiles">{{ profil }}</option>
-                        </select>
+                        <!-- Stream name (full width) -->
+                        <div class="stream-row gap-panel">
+                            <input class="inp" :disabled="!isStopped()"
+                                placeholder="StreamName(?id=accessToken) or manifest URL"
+                                type="text" v-model="stream" @keyup.enter="isStopped() && play()">
+                        </div>
+
+                        <!-- Controls. Play/pause, mute and fullscreen belong to the control bar,
+                            only what it has no equivalent for is here. -->
+                        <div class="ctrl-row ctrl-row-3 gap-panel">
+                            <button class="btn"
+                                :title="isStopped() ? 'Start playback' : 'Stop playback and release the player'"
+                                @click="play()">
+                                <i class="fas" :class="isStopped() ? 'fa-play' : 'fa-stop'"></i>
+                                {{ isStopped() ? 'Play' : 'Stop' }}
+                            </button>
+                            <button class="btn" title="Jump back to the live edge"
+                                :class="{ 'btn-red': isBehindLive }"
+                                :disabled="!isBehindLive"
+                                @click="goLive()">
+                                <i class="fas fa-rocket"></i>
+                                Live
+                            </button>
+                            <button class="btn" title="Clip and download a part of this stream"
+                                @click="openClip()">
+                                <i class="fas fa-scissors"></i>
+                                Clip
+                            </button>
+                        </div>
+
+                        <!-- Network profile + latency target (single compact row). -->
+                        <div class="net-row net-latency gap-panel">
+                            <div class="net-prof">
+                                <span class="lbl">Network profile</span>
+                                <select class="sel" v-model="netProfile" @change="setLatencyTarget()">
+                                    <option :value="profil" v-for="[profil, _] of netProfiles">{{ profil }}</option>
+                                </select>
+                            </div>
+                            <div class="latency-target">
+                                <span class="lbl">Target latency (ms)</span>
+                                <input class="inp" type="number" min="0"
+                                    required oninput="validity.valid||(value='');"
+                                    v-model="latencyTarget" @change="setLatencyTarget(this.latencyTarget)">
+                            </div>
+                            <p class="net-desc" v-html="netDescription"></p>
+                        </div>
                     </div>
-                    <div class="latency-target">
-                        <span class="lbl">Target latency (ms)</span>
-                        <input class="inp" type="number" min="0"
-                            required oninput="validity.valid||(value='');"
-                            v-model="latencyTarget" @change="setLatencyTarget(this.latencyTarget)">
-                    </div>
-                    <p class="net-desc" v-html="netDescription"></p>
                 </div>
 
                 <!-- Panel: graph / messages (docks bottom by default, or right on wide screens) -->
@@ -372,6 +386,7 @@
                     audioTrackId: undefined,
                     streamError: null,
                     sidePanel: options.sidePanel ? true : false, // dock the metrics panel to the right (large screens)
+                    controlsHidden: false,
                     // Iframe src while the clip modal is open, null when closed: also the open flag
                     clipSrc: null
                 }
