@@ -893,8 +893,7 @@
                 }
             },
             watch: {
-                // Bootstrap JS is not loaded here, so toggle `modal-open` on <body> manually so the
-                // page behind the dialog stops scrolling while the settings modal is visible.
+                // Stop the page behind the dialog from scrolling while the settings modal is visible.
                 showSettings(value) {
                     document.body.classList.toggle('modal-open', value);
                 },

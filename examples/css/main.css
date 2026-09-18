@@ -645,6 +645,9 @@ select option { background: var(--bg); color: var(--txt); }
 }
 
 /* ── Modal ── */
+/* Set while a modal is open: the dialog scrolls on its own, the page behind must not */
+body.modal-open { overflow: hidden; }
+
 .modal-back {
     position: fixed; inset: 0;
     background: var(--modal-back);
