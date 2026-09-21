@@ -460,8 +460,15 @@ select option { background: var(--bg); color: var(--txt); }
 }
 .ctrl-row .btn, .ctrl-row .tog { width: 100%; justify-content: center; }
 
-/* Network profile + buffer min/max on a single compact line.
-   Grid-template-areas keep the description glued under the profile on mobile. */
+/* Legend for the AFS* toggle. */
+.ctrl-note {
+    font-size: 11px;
+    color: var(--txt-m);
+    margin-top: 6px;
+}
+
+/* Network preset + buffer min/max on a single compact line.
+   Grid-template-areas keep the description glued under the preset on mobile. */
 .net-row {
     display: grid;
     gap: 8px;

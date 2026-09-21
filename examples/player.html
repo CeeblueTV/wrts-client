@@ -103,7 +103,7 @@
                     </div>
                 </div>
 
-                <!-- Settings: track selects, stream input, playback controls, network profile -->
+                <!-- Settings: track selects, stream input, playback controls, network preset -->
                 <div class="settings-panel" :class="{ collapsed: controlsHidden }">
                     <button class="controls-toggle"
                         :title="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
@@ -144,7 +144,7 @@
                                 type="text" v-model="stream">
                         </div>
 
-                        <!-- Controls: mute / live / frame-skip / protection -->
+                        <!-- Controls: mute / live / AFS / protection -->
                         <div class="ctrl-row gap-panel">
                             <button class="btn" title="Mute or unmute audio" v-on:click="mute">
                                 <i class="fas" :class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
@@ -163,7 +163,7 @@
                                 <input type="checkbox" :disabled="!mutableReliability()"
                                     v-model="adaptiveFrameSkipping" @change="onReliable()">
                                 <span class="tog-track"></span>
-                                <span>Frame Skip</span>
+                                <span>AFS*</span>
                             </label>
 
                             <button class="btn" :class="{ 'btn-cyan': keySystem }"
@@ -174,15 +174,16 @@
                                 {{ activeDrmLabel() }}
                             </button>
                         </div>
+                        <p class="ctrl-note">* Adaptive Frame Skipping — drops frames to stay at the live edge</p>
 
-                        <!-- Network profile + buffer min/max (single compact row).
+                        <!-- Network preset + buffer min/max (single compact row).
                             Description is grid-positioned inside the row so it sits next to the
-                            profile select on mobile (instead of floating below the buffer inputs). -->
+                            preset select on mobile (instead of floating below the buffer inputs). -->
                         <div class="net-row gap-panel">
                             <div class="net-prof">
-                                <span class="lbl">Network profile</span>
-                                <select class="sel" v-model="netProfile" @change="setBuffer()">
-                                    <option :value="profil" v-for="[profil, _] of netProfiles">{{ profil }}</option>
+                                <span class="lbl">Network preset</span>
+                                <select class="sel" v-model="netPreset" @change="setBuffer()">
+                                    <option :value="preset" v-for="[preset, _] of netPresets">{{ preset }}</option>
                                 </select>
                             </div>
                             <div class="buf-min">
@@ -750,7 +751,7 @@
 
                     player: null,
                     latencies: [],
-                    netProfiles: new Map([
+                    netPresets: new Map([
                         ['-manual-', [
                             "Manually configure a buffer window large enough to compensate for variations caused by network fluctuations.",
                         ]],
@@ -771,7 +772,7 @@
                             2000, 4000 // 3 seconds
                         ]],
                     ]),
-                    netProfile: 'normal'
+                    netPreset: 'normal'
                 }
             },
             mounted() {
@@ -1544,23 +1545,23 @@
                     }
                 },
                 setBuffer(min, max) {
-                    let profile;
+                    let preset;
                     if(!isNaN(min) || !isNaN(max)) {
                         // manual mode
-                        profile = this.netProfiles.entries().next().value;
-                        this.netProfile = profile[0];
-                        profile = profile[1];
+                        preset = this.netPresets.entries().next().value;
+                        this.netPreset = preset[0];
+                        preset = preset[1];
 
                         this.bufferMin = Math.min(min || max, max || min);
                         this.bufferMax = Math.max(min || max, max || min);
                     } else {
                         // auto mode
-                        profile = this.netProfiles.get(this.netProfile);
-                        if(profile[1]) {
-                            this.bufferMin = profile[1];
+                        preset = this.netPresets.get(this.netPreset);
+                        if(preset[1]) {
+                            this.bufferMin = preset[1];
                         }
-                        if(profile[2]) {
-                            this.bufferMax = profile[2];
+                        if(preset[2]) {
+                            this.bufferMax = preset[2];
                         }
                     }
 
@@ -1572,7 +1573,7 @@
                     }
 
                     // Display user description
-                    this.netDescription = profile[0];
+                    this.netDescription = preset[0];
                     this.netDescription += '<br><strong>Expected buffering ≈ ' + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + 'ms</strong>';
 
                     this.updateURL();
