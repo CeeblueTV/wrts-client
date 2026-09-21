@@ -174,13 +174,21 @@ export class HTTPAdaptiveSource extends Source {
         // propagate Metadata
         this.readMetadata(metadata);
 
+        let low = false;
         playing.on(
             'BufferState',
             async () => {
+                low = false;
                 if (playing.bufferState === BufferState.LOW) {
-                    // Stop up emulation if is running !
-                    this._upController?.abort();
+                    if (this._upController) {
+                        // Stop up emulation if is running !
+                        this._upController.abort();
+                    } else {
+                        low = true;
+                    }
                 }
+                // Just rearm the UP emulation on every buffer instability
+                upRetry.rearm();
             },
             { signal: playing.signal }
         );
@@ -216,10 +224,9 @@ export class HTTPAdaptiveSource extends Source {
                 const bandwidthMeasure = this.recvByteRate.value();
                 let up = false;
                 const aborted = this._cancelableController.signal.aborted || this._alterableController.signal.aborted;
-                const low = playing.bufferState === BufferState.LOW && !this._upController;
                 if (
                     aborted || // we have aborted a sequence because of a stall or a low buffer
-                    low // we are low in buffer without UP emulation perturbation
+                    low // we reach low in buffer without UP emulation perturbation
                 ) {
                     // We have to down one level
                     if (!this._upController && !upRetry.failed) {

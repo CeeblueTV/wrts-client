@@ -1179,7 +1179,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._bufferLimitMiddle = Math.max(0, this._bufferLimitLow + Math.round((value - this._bufferLimitLow) / 2));
     }
 
-    private _adjustBufferLimitHigh(forceIncrease = false) {
+    private _adjustBufferLimitHigh(shouldIncrease = false) {
         let highLimit = Math.round(this._bufferLimitLow + this._bufferMeasure.lowHighRange);
 
         if (highLimit > this._bufferLimitHigh) {
@@ -1188,10 +1188,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             highLimit = Math.min(highLimit, this._bufferLimitHigh * 2);
         } else {
             // Buffer diminution
-            if (forceIncrease) {
-                // congestion => force an increasement
-                highLimit = this._bufferLimitHigh * 1.5;
-            } else if (highLimit < this._bufferLimitHigh) {
+            if (shouldIncrease) {
+                // wait end of measure
+                return;
+            }
+            if (highLimit < this._bufferLimitHigh) {
                 // amortize the diminution
                 highLimit = Math.max(
                     // 50% amortization to target new value
@@ -1217,14 +1218,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     private _setBufferState(state: BufferState) {
+        // always try to increase bufferLimitHigh when buffer is low
+        if (this._bufferLimitHighAuto && state === BufferState.LOW) {
+            this._adjustBufferLimitHigh(true);
+        }
+        // check if we have a difference
         const oldState = this._bufferState;
         if (oldState === state) {
             return;
         }
         this._bufferState = state;
-        if (this._bufferLimitHighAuto && state === BufferState.LOW) {
-            this._adjustBufferLimitHigh(true);
-        }
         this.onBufferState(oldState);
     }
 
