@@ -57,9 +57,9 @@ export class MediaTrack {
      */
     contentProtection?: string;
     /**
-     * Playback smooth supported by the browser
+     * Whether smooth playback support is limited by the browser.
      */
-    supported?: boolean;
+    limitedSupport?: boolean;
 
     up?: MediaTrack; // track up by ascending MAXBPS
     down?: MediaTrack; // track down by ascending MAXBPS
@@ -88,9 +88,12 @@ export class MediaTrack {
         return name;
     }
 
-    async computeSupport() {
+    /**
+     * Detect limited playback support.
+     */
+    async detectSupportLimit(): Promise<boolean | undefined> {
         if (typeof navigator === 'undefined' || !navigator.mediaCapabilities?.decodingInfo) {
-            return (this.supported = true);
+            return (this.limitedSupport = undefined);
         }
 
         const type = Media.typeToString(this.type);
@@ -112,11 +115,11 @@ export class MediaTrack {
         }
         try {
             const result = await navigator.mediaCapabilities.decodingInfo(configuration);
-            this.supported = result.supported && result.smooth;
+            this.limitedSupport = !result.supported || !result.smooth;
         } catch {
             // Preserve playback when Media Capabilities cannot evaluate this configuration.
-            this.supported = true;
+            this.limitedSupport = undefined;
         }
-        return this.supported;
+        return this.limitedSupport;
     }
 }

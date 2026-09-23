@@ -225,13 +225,15 @@ export class HTTPAdaptiveSource extends Source {
                 let up = false;
                 const aborted = this._cancelableController.signal.aborted || this._alterableController.signal.aborted;
                 if (
+                    videoTrack.limitedSupport || // the current rendition is not smoothly supported
                     aborted || // we have aborted a sequence because of a stall or a low buffer
                     low // we reach low in buffer without UP emulation perturbation
                 ) {
                     // We have to down one level
-                    if (!this._upController && !upRetry.failed) {
-                        // was no emulation, and no a consecutive fail
-                        // so we have to down at least of one level
+                    if (videoTrack.limitedSupport || (!this._upController && !upRetry.failed)) {
+                        // Not supported correctly
+                        // OR was no emulation, and no a consecutive fail
+                        // => we have to down at least of one level
                         videoTrack = videoTrack.down ?? videoTrack;
                     }
                     // Compute the best rendition to play according to the bandwidth measure
@@ -263,9 +265,10 @@ export class HTTPAdaptiveSource extends Source {
                     tracks.video = videoTrack.id;
                 }
 
+                // compute current and UP support on each sequence, because it can change
+                videoTrack.detectSupportLimit();
                 if (videoTrack.up) {
-                    // compute UP support on each sequence, because it can change
-                    videoTrack.up.computeSupport();
+                    videoTrack.up.detectSupportLimit();
                 }
             } else {
                 // if no video track selected or no video metadata => reset
@@ -416,7 +419,7 @@ export class HTTPAdaptiveSource extends Source {
                 if (
                     videoTrack.up && // there is a UP option
                     !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution) && // this option is compatible with screen
-                    videoTrack.up.supported
+                    !videoTrack.up.limitedSupport // if unknown, we assume it is supported
                 ) {
                     // this option is supported by the browser
                     const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
