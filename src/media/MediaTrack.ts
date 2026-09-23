@@ -56,6 +56,10 @@ export class MediaTrack {
      * Content Protection
      */
     contentProtection?: string;
+    /**
+     * Playback smooth supported by the browser
+     */
+    supported?: boolean;
 
     up?: MediaTrack; // track up by ascending MAXBPS
     down?: MediaTrack; // track down by ascending MAXBPS
@@ -82,5 +86,37 @@ export class MediaTrack {
         name += ' ' + this.rate.toFixed() + (this.type === Media.Type.VIDEO ? 'fps' : 'hz');
         name += ' ' + ((this.bandwidth * 8) / 1000).toFixed() + 'kbps';
         return name;
+    }
+
+    async computeSupport() {
+        if (typeof navigator === 'undefined' || !navigator.mediaCapabilities?.decodingInfo) {
+            return (this.supported = true);
+        }
+
+        const type = Media.typeToString(this.type);
+        const configuration = {
+            type: 'media-source',
+            [type]: {
+                contentType: `video/mp4; codecs="${this.codecString}"`,
+                bitrate: this.bandwidth * 8 // convert to bps
+            }
+        } as MediaDecodingConfiguration;
+        if (configuration.audio) {
+            configuration.audio.samplerate = this.rate;
+        } else if (configuration.video) {
+            Object.assign(configuration.video, {
+                framerate: this.rate,
+                width: this.resolution.width,
+                height: this.resolution.height
+            });
+        }
+        try {
+            const result = await navigator.mediaCapabilities.decodingInfo(configuration);
+            this.supported = result.supported && result.smooth;
+        } catch {
+            // Preserve playback when Media Capabilities cannot evaluate this configuration.
+            this.supported = true;
+        }
+        return this.supported;
     }
 }

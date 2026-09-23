@@ -262,6 +262,11 @@ export class HTTPAdaptiveSource extends Source {
                     this.log(log)[up ? 'info' : 'warn']();
                     tracks.video = videoTrack.id;
                 }
+
+                if (videoTrack.up) {
+                    // compute UP support on each sequence, because it can change
+                    videoTrack.up.computeSupport();
+                }
             } else {
                 // if no video track selected or no video metadata => reset
                 upRetry.reset();
@@ -408,7 +413,12 @@ export class HTTPAdaptiveSource extends Source {
                 this._lastSequenceWasLive && // just if we are on live edge, any delay means a possible bandwidth issue
                 upRetry.try()
             ) {
-                if (videoTrack.up && !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution)) {
+                if (
+                    videoTrack.up && // there is a UP option
+                    !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution) && // this option is compatible with screen
+                    videoTrack.up.supported
+                ) {
+                    // this option is supported by the browser
                     const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
                     this._upController = new AbortController();
                     if (extraByteRateRequired > 0) {
