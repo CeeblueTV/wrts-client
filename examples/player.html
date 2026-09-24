@@ -787,9 +787,13 @@
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
                 this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
 
-                // Follow the OS theme while the page is open (the initial paint is done in <head>).
+                // An OS theme change overrides the stored choice (the initial paint is done in <head>).
                 this._themeQuery = matchMedia('(prefers-color-scheme: dark)');
-                this._themeListener = () => this.applyTheme(true);
+                this._themeListener = (e) => {
+                    this.theme = e.matches ? 'dark' : 'light';
+                    localStorage.removeItem(THEME_KEY);
+                    this.applyTheme();
+                };
                 this._themeQuery.addEventListener('change', this._themeListener);
 
                 // The watcher below only fires on a change, apply whatever the page defaulted to.
@@ -916,9 +920,8 @@
                     localStorage.setItem(THEME_KEY, this.theme);
                     this.applyTheme();
                 },
-                applyTheme(systemChange = false) {
-                    const dark = systemChange ? matchMedia('(prefers-color-scheme: dark)').matches : this.theme === 'dark';
-                    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+                applyTheme() {
+                    document.documentElement.dataset.theme = this.theme === 'dark' ? 'dark' : 'light';
                 },
                 themeIcon() {
                     return { light: 'fa-sun', dark: 'fa-moon' }[this.theme];
