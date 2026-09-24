@@ -289,7 +289,7 @@ export class UITimeline {
         for (const { row, s } of all) {
             lines.push(
                 [
-                    row.type,
+                    Media.typeToString(row.type),
                     row.id,
                     s.n,
                     s.frames,
@@ -772,7 +772,7 @@ export class UITimeline {
         const medSpan = s.dtsEnd - s.dtsStart;
         const recvSpan = s.recvEnd - s.recvStart;
         this._tip.innerHTML =
-            `<b>${r.type} #${r.id}</b> &middot; seq ${s.n}${s.key ? ' &middot; key' : ''}<br>` +
+            `<b>${Media.typeToString(r.type)} #${r.id}</b> &middot; seq ${s.n}${s.key ? ' &middot; key' : ''}<br>` +
             `frames ${s.frames} &middot; size ${(s.bytes / 1024).toFixed(1)} KiB<br>` +
             `DTS ${(s.dtsStart / 1000).toFixed(3)}&rarr;${(s.dtsEnd / 1000).toFixed(3)}s (${medSpan}ms)<br>` +
             `recv +${(s.recvStart - this._t0).toFixed(0)}&rarr;+${(s.recvEnd - this._t0).toFixed(0)}ms (${recvSpan.toFixed(0)}ms)`;
