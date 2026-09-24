@@ -84,7 +84,7 @@
         "access": "public"
     },
     "dependencies": {
-        "@ceeblue/web-utils": "^7.9.0",
+        "@ceeblue/web-utils": "^7.9.1",
         "abortcontroller-polyfill": "^1.7.8"
     }
 }

@@ -434,7 +434,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * {@inheritDoc IPlaying.playbackSpeed}
      */
     get playbackSpeed(): number {
-        return Math.ceil(this._playbackSpeed.exact()) / 100;
+        this._computePlaybackSpeed();
+        return Math.round(this._playbackSpeed.exact()) / 100;
     }
 
     /**
@@ -696,7 +697,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._paused = false;
         this._buffering = false;
         this._metadata = new Metadata();
-        this._playbackSpeed = new ByteRate();
+        this._playbackSpeed = new ByteRate(200); // 200ms of amortization
         this._bufferLimitMiddle = 0;
         this._bufferLimitLow = BUFFER_LIMIT_LOW;
         this._bufferLimitHigh = BUFFER_LIMIT_HIGH;
@@ -716,6 +717,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // Go to the middle buffer position to avoid MBR change, and in a valid range superior or equals to startTime
         const prevCurrentTime = this._video.currentTime;
         const currentTime = (this._video.currentTime = Math.max(this.startTime, this.endTime - this._bufferLimitMiddle / 1000));
+        if (prevCurrentTime !== currentTime) {
+            // After the seek, give the value
+            this._playbackPrevTime = currentTime;
+        }
         reason = reason ? ' ' + reason.trim() : '';
         this.log(
             `goLive${reason} from ${prevCurrentTime.toFixed(3)}s to ${currentTime.toFixed(3)}s (${currentTime >= prevCurrentTime ? '+' : ''}${(currentTime - prevCurrentTime).toFixed(3)}s)`
@@ -930,6 +935,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             clearTimeout(this._timeout?.id);
         };
         const onSeeking = () => {
+            // recompute playback speed on seeking
             this._playbackPrevTime = undefined;
         };
         const onSeeked = () => {
@@ -943,7 +949,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         const onPause = () => {
             this.log('Playback paused')[this._paused ? 'info' : 'warn']();
         };
-        const onTimeUpdate = this._onTimeUpdate.bind(this);
+        const onTimeUpdate = () => {
+            this._computePlaybackSpeed();
+            this._onPlayerProgress();
+        };
 
         this._video.addEventListener('waiting', onWaiting);
         this._video.addEventListener('canplay', onCanPlay);
@@ -1271,6 +1280,22 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
     }
 
+    private _computePlaybackSpeed() {
+        if (this._video.seeking) {
+            // recompute playback speed on seeking
+            this._playbackPrevTime = undefined;
+            return;
+        }
+        const currentTime = this._video.currentTime;
+        if (this._playbackPrevTime != null && currentTime > this._playbackPrevTime) {
+            this._playbackSpeed.addBytes((currentTime - this._playbackPrevTime) * 100);
+        } else if (!this._playbackSpeed.value()) {
+            // When no value, reset to avoid long amortization while starting
+            this._playbackSpeed.clear();
+        }
+        this._playbackPrevTime = currentTime;
+    }
+
     private _onPlaybackProgress() {
         if (!this._playback) {
             return;
@@ -1303,20 +1328,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.goLive(this.currentTime ? 'repairing' : 'starting');
         }
 
-        this._onTimeUpdate();
+        this._onPlayerProgress();
     }
 
-    private _onTimeUpdate() {
+    private _onPlayerProgress() {
         if (!this._playback || !this._source) {
             // 'timeupdate' event can happen BEFORE source ready, wait a real information coming from source
             // Fix a false high value for playbackSpeed
             return;
         }
-        const currentTime = this.currentTime;
-        if (this._playbackPrevTime != null) {
-            this._playbackSpeed.addBytes((currentTime - this._playbackPrevTime) * 100);
-        }
-        this._playbackPrevTime = currentTime;
 
         if (this._bufferState === BufferState.NONE && this._buffering) {
             // Wait end of the first buffering before to update buffer state!
@@ -1324,6 +1344,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         // Remove obsolete buffer if need
+        const currentTime = this.currentTime;
         if (currentTime > this._playback.startTime + PAST_BUFFER) {
             this._playback.startTime = currentTime - PAST_BUFFER;
         }
