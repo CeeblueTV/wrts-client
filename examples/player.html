@@ -815,6 +815,7 @@
                 // Stats to be displayed in the UI
                 const bandwidths = []; this.stats.set("Bandwidth", bandwidths);
                 const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
+                const avOffsets = []; this.stats.set("A/V offset", avOffsets);
                 const latencies = this.latencies; this.stats.set("Latency", latencies);
                 const e2eLatencies = []; this.stats.set("Latency e2e", e2eLatencies);
                 const playbackRates = []; this.stats.set("Playback rate", playbackRates);
@@ -852,6 +853,11 @@
                             bufferAmounts.push((stats.bufferAmount || 0)+"ms");
                         }
                         this.bufferAmount = stats.bufferAmount || 0;
+                        // Received audio end minus video end, positive when audio is ahead
+                        if(avOffsets.length || (this._audioEnd != null && this._videoEnd != null)) {
+                            const offset = (this._audioEnd ?? 0) - (this._videoEnd ?? 0);
+                            avOffsets.push((offset > 0 ? '+' : '') + offset + "ms");
+                        }
                         if(latencies.length || (options.latency && stats.latency)) {
                             latencies.push((stats.latency || 0) +"ms");
                         }
@@ -1211,9 +1217,16 @@
 
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
-                    // Per-sample reception feed for the Timeline widget
-                    this.player.onVideo = (track, sample) => this.uiTimeline.pushVideo(track, sample);
-                    this.player.onAudio = (track, sample) => this.uiTimeline.pushAudio(track, sample);
+                    // Per-sample reception feed for the Timeline widget and the A/V offset metric
+                    this._audioEnd = this._videoEnd = undefined;
+                    this.player.onVideo = (track, sample) => {
+                        this._videoEnd = sample.time + sample.duration;
+                        this.uiTimeline.pushVideo(track, sample);
+                    };
+                    this.player.onAudio = (track, sample) => {
+                        this._audioEnd = sample.time + sample.duration;
+                        this.uiTimeline.pushAudio(track, sample);
+                    };
                     this.player.onData = (track, time, duration, data) => {
                         this.pushMessage(track, data);
                         this.uiTimeline.pushData(track, { time, duration, data });
