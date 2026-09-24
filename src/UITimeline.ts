@@ -29,6 +29,8 @@ const NAV_LINGER = 1400;
 /** Height (px) of the overview minimap band at the bottom of the canvas. */
 const OV_H = 16;
 const OV_GAP = 6;
+/** No-video fallback GOP (ms): group audio/data-only tracks into fixed media-time buckets, like the server. */
+const FALLBACK_GOP = 2000;
 
 /** Time axis used to position sequences. */
 export type UITimelineAxis = 'media' | 'reception';
@@ -39,7 +41,8 @@ export type UITimelineAxis = 'media' | 'reception';
  * A video sequence is a GOP, delimited by keyframes. Audio/data sequences inherit the number of the
  * video sequence current at reception time, so they line up vertically under the matching video
  * sequence (GOP alignment is NOT assumed: an audio sequence can start/end past its video sequence).
- * When there is no video track, audio/data fall back to reception-gap grouping with their own counter.
+ * When there is no video track, audio/data fall back to fixed media-time buckets (a 2s fallback GOP,
+ * like the server) with their own counter.
  */
 type Sequence = {
     /** Sequence number (the current video sequence number, shared across tracks). */
@@ -64,8 +67,6 @@ type Row = {
     color: string;
     seqs: Sequence[];
     cur?: Sequence;
-    lastRecv: number;
-    avgDelta: number;
     seqCounter: number;
 };
 
@@ -331,8 +332,6 @@ export class UITimeline {
                 type,
                 color: PALETTE[this._rows.size % PALETTE.length],
                 seqs: [],
-                lastRecv: 0,
-                avgDelta: 0,
                 seqCounter: 0
             };
             this._rows.set(track, row);
@@ -354,13 +353,10 @@ export class UITimeline {
             n = this._videoSeq < 0 ? 0 : this._videoSeq;
             boundary = !row.cur || row.cur.n !== n;
         } else {
-            // No video track to reference yet: detect sequences from reception gaps (each WebRTS
-            // sequence is a distinct request/burst), adapting the threshold to the track's cadence.
-            const dt = row.lastRecv ? now - row.lastRecv : 0;
-            boundary = !row.cur || (row.lastRecv > 0 && dt > Math.max(12, (row.avgDelta || 10) * 3));
-            if (!boundary && row.lastRecv) {
-                row.avgDelta = row.avgDelta ? row.avgDelta * 0.8 + dt * 0.2 : dt;
-            }
+            // No video track to reference: fall back to fixed media-time buckets (like the server's
+            // fallback GOP), so a steady audio/data-only cadence still groups into regular sequences
+            // instead of one sliver per sample.
+            boundary = !row.cur || Math.floor(sample.time / FALLBACK_GOP) !== Math.floor(row.cur.dtsStart / FALLBACK_GOP);
             n = boundary ? row.seqCounter++ : (row.cur as Sequence).n;
         }
 
@@ -386,7 +382,6 @@ export class UITimeline {
         s.bytes += sample.data ? sample.data.byteLength : 0;
         s.dtsEnd = sample.time + dur;
         s.recvEnd = now;
-        row.lastRecv = now;
         this._hasData = true;
     }
 
