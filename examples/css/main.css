@@ -544,18 +544,15 @@ select option { background: var(--bg); color: var(--txt); }
 @media (min-width: 1200px) {
     .layout-btn { display: inline-flex; align-items: center; }
     html.layout-side .shell { max-width: 1600px; }
+    /* Top-aligned flex columns: each keeps its content height (a spanning grid item overgrew the page) */
     html.layout-side .stage {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        column-gap: 18px;
-        align-items: start;
+        display: flex;
+        align-items: flex-start;
+        gap: 18px;
     }
-    /* video + controls stack in the left column; the panel fills the right one */
-    html.layout-side .stage > * { grid-column: 1; }
-    html.layout-side .stage > .stage-panel {
-        grid-column: 2;
-        grid-row: 1 / span 20;
-        align-self: stretch;
+    html.layout-side .stage-main,
+    html.layout-side .stage-panel {
+        flex: 1 1 0;
         min-width: 0;
     }
 }

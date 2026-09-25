@@ -46,159 +46,162 @@
 
             <div class="stage">
 
-                <!-- Video -->
-                <div class="player" ref="player"
-                    @mouseenter="onPlayerActivity()"
-                    @mousemove="onPlayerActivity()"
-                    @mouseleave="onPlayerLeave()"
-                    @touchstart="onPlayerTouch($event)"
-                    @contextmenu="onPlayerContextMenu($event)">
+                <!-- Video + settings: left column in side-by-side mode -->
+                <div class="stage-main">
+                    <!-- Video -->
+                    <div class="player" ref="player"
+                        @mouseenter="onPlayerActivity()"
+                        @mousemove="onPlayerActivity()"
+                        @mouseleave="onPlayerLeave()"
+                        @touchstart="onPlayerTouch($event)"
+                        @contextmenu="onPlayerContextMenu($event)">
 
-                    <video autoplay id="video" ref="video" playsinline></video>
+                        <video autoplay id="video" ref="video" playsinline></video>
 
-                    <!-- Hover/touch revealed controls (only while playing) -->
-                    <div class="player-ctrls"
-                        :class="{ 'is-active': isPlaying(), 'is-visible': controlsVisible }">
-                        <button class="pc-btn pc-full"
-                            :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
-                            @click="fullscreen()">
-                            <i class="fas" :class="isFullscreen ? 'fa-compress' : 'fa-expand'"></i>
-                        </button>
-                        <button class="pc-btn pc-stop" title="Stop" @click="play()">
-                            <i class="fas fa-stop"></i>
-                        </button>
-                    </div>
-
-                    <!-- Stopped → big Play | Starting → spinner | Mid-stream pause → resume -->
-                    <button class="player-action" title="Play" @click="play()" v-if="isStopped()">
-                        <i class="fas fa-play"></i>
-                    </button>
-                    <div class="player-action is-loading" v-else-if="isStarting()">
-                        <div class="ring"></div>
-                    </div>
-                    <button class="player-action is-resume" title="Resume"
-                        @click="player.paused = false"
-                        v-else-if="player && player.paused">
-                        <i class="fas fa-play"></i>
-                    </button>
-
-                    <div class="player-alert" v-if="streamError">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <div class="player-alert-body">
-                            <div class="player-alert-title">
-                                <span class="player-alert-type" v-if="streamError.type">{{ streamError.type }}</span>
-                                <span class="player-alert-name">{{ streamError.name }}</span>
-                            </div>
-                            <div class="player-alert-detail" v-if="streamError.detail">{{ streamError.detail }}</div>
-                            <div class="player-alert-fields" v-if="streamError.fields.length">
-                                <span class="player-alert-field" v-for="f in streamError.fields" :key="f.label">
-                                    <strong>{{ f.label }}</strong>{{ f.value }}
-                                </span>
-                            </div>
-                        </div>
-                        <button class="player-alert-x" @click="setStreamError(null)"
-                            title="Dismiss" aria-label="Dismiss">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Settings: track selects, stream input, playback controls, network preset -->
-                <div class="settings-panel" :class="{ collapsed: controlsHidden }">
-                    <button class="controls-toggle"
-                        :title="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
-                        :aria-label="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
-                        :aria-expanded="!controlsHidden"
-                        @click="controlsHidden = !controlsHidden">
-                        <i class="fas fa-sliders"></i>
-                        <span>Stream settings</span>
-                        <i class="fas fa-chevron-down"></i>
-                    </button>
-                    <div v-show="!controlsHidden">
-                        <!-- Track selects -->
-                        <div class="row2 gap-panel">
-                            <div>
-                                <span class="lbl">Video track</span>
-                                <select class="sel" id="video-track-selection"
-                                    :disabled="!player || !player.trackSelectable"
-                                    v-model="videoTrackId" @change="onVideoTrackChange()">
-                                    <option :value="undefined" :key="videoTrack">AUTO — {{ videoTrack }}</option>
-                                    <option v-for="[idx, track] of videoTracks" :value="idx">{{ track }}</option>
-                                </select>
-                            </div>
-                            <div>
-                                <span class="lbl">Audio track</span>
-                                <select class="sel" id="audio-track-selection"
-                                    :disabled="!player || !player.trackSelectable"
-                                    v-model="audioTrackId" @change="onAudioTrackChange()">
-                                    <option :value="undefined" :key="audioTrack">AUTO — {{ audioTrack }}</option>
-                                    <option v-for="[idx, track] of audioTracks" :value="idx">{{ track }}</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Stream name (full width) -->
-                        <div class="stream-row gap-panel">
-                            <input class="inp" :disabled="isPlaying()"
-                                placeholder="StreamName(?id=accessToken) or URL"
-                                type="text" v-model="stream">
-                        </div>
-
-                        <!-- Controls: mute / live / AFS / protection -->
-                        <div class="ctrl-row gap-panel">
-                            <button class="btn" title="Mute or unmute audio" v-on:click="mute">
-                                <i class="fas" :class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
-                                {{ muted ? 'Unmute' : 'Mute' }}
+                        <!-- Hover/touch revealed controls (only while playing) -->
+                        <div class="player-ctrls"
+                            :class="{ 'is-active': isPlaying(), 'is-visible': controlsVisible }">
+                            <button class="pc-btn pc-full"
+                                :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+                                @click="fullscreen()">
+                                <i class="fas" :class="isFullscreen ? 'fa-compress' : 'fa-expand'"></i>
                             </button>
-
-                            <button class="btn" title="Jump to live position"
-                                :class="{ 'btn-red': player && bufferAmount > player.bufferLimitMiddle }"
-                                :disabled="!player || bufferAmount <= player.bufferLimitMiddle"
-                                @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
-                                <i class="fas fa-rocket"></i>
-                                Live
-                            </button>
-
-                            <label title="Enable or disable adaptive frame skipping" class="tog" :class="{ on: adaptiveFrameSkipping, off: !mutableReliability() }">
-                                <input type="checkbox" :disabled="!mutableReliability()"
-                                    v-model="adaptiveFrameSkipping" @change="onReliable()">
-                                <span class="tog-track"></span>
-                                <span>AFS*</span>
-                            </label>
-
-                            <button class="btn" :class="{ 'btn-cyan': keySystem }"
-                                :style="{ display: isPlaying() && !keySystem ? 'none' : '' }"
-                                :disabled="isPlaying()"
-                                title="Content protection settings" @click="showSettings = true">
-                                <i class="fas fa-shield-alt"></i>
-                                {{ activeDrmLabel() }}
+                            <button class="pc-btn pc-stop" title="Stop" @click="play()">
+                                <i class="fas fa-stop"></i>
                             </button>
                         </div>
-                        <p class="ctrl-note">* Adaptive Frame Skipping — drops frames to stay at the live edge</p>
 
-                        <!-- Network preset + buffer min/max (single compact row).
-                            Description is grid-positioned inside the row so it sits next to the
-                            preset select on mobile (instead of floating below the buffer inputs). -->
-                        <div class="net-row gap-panel">
-                            <div class="net-prof">
-                                <span class="lbl">Network preset</span>
-                                <select class="sel" v-model="netPreset" @change="setBuffer()">
-                                    <option :value="preset" v-for="[preset, _] of netPresets">{{ preset }}</option>
-                                </select>
+                        <!-- Stopped → big Play | Starting → spinner | Mid-stream pause → resume -->
+                        <button class="player-action" title="Play" @click="play()" v-if="isStopped()">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="player-action is-loading" v-else-if="isStarting()">
+                            <div class="ring"></div>
+                        </div>
+                        <button class="player-action is-resume" title="Resume"
+                            @click="player.paused = false"
+                            v-else-if="player && player.paused">
+                            <i class="fas fa-play"></i>
+                        </button>
+
+                        <div class="player-alert" v-if="streamError">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <div class="player-alert-body">
+                                <div class="player-alert-title">
+                                    <span class="player-alert-type" v-if="streamError.type">{{ streamError.type }}</span>
+                                    <span class="player-alert-name">{{ streamError.name }}</span>
+                                </div>
+                                <div class="player-alert-detail" v-if="streamError.detail">{{ streamError.detail }}</div>
+                                <div class="player-alert-fields" v-if="streamError.fields.length">
+                                    <span class="player-alert-field" v-for="f in streamError.fields" :key="f.label">
+                                        <strong>{{ f.label }}</strong>{{ f.value }}
+                                    </span>
+                                </div>
                             </div>
-                            <div class="buf-min">
-                                <span class="lbl">Buffer min (ms)</span>
-                                <input class="inp" type="number" min="0"
-                                    required oninput="validity.valid||(value='');"
-                                    v-model="bufferMin" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                            <button class="player-alert-x" @click="setStreamError(null)"
+                                title="Dismiss" aria-label="Dismiss">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Settings: track selects, stream input, playback controls, network preset -->
+                    <div class="settings-panel" :class="{ collapsed: controlsHidden }">
+                        <button class="controls-toggle"
+                            :title="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
+                            :aria-label="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
+                            :aria-expanded="!controlsHidden"
+                            @click="controlsHidden = !controlsHidden">
+                            <i class="fas fa-sliders"></i>
+                            <span>Stream settings</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <div v-show="!controlsHidden">
+                            <!-- Track selects -->
+                            <div class="row2 gap-panel">
+                                <div>
+                                    <span class="lbl">Video track</span>
+                                    <select class="sel" id="video-track-selection"
+                                        :disabled="!player || !player.trackSelectable"
+                                        v-model="videoTrackId" @change="onVideoTrackChange()">
+                                        <option :value="undefined" :key="videoTrack">AUTO — {{ videoTrack }}</option>
+                                        <option v-for="[idx, track] of videoTracks" :value="idx">{{ track }}</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <span class="lbl">Audio track</span>
+                                    <select class="sel" id="audio-track-selection"
+                                        :disabled="!player || !player.trackSelectable"
+                                        v-model="audioTrackId" @change="onAudioTrackChange()">
+                                        <option :value="undefined" :key="audioTrack">AUTO — {{ audioTrack }}</option>
+                                        <option v-for="[idx, track] of audioTracks" :value="idx">{{ track }}</option>
+                                    </select>
+                                </div>
                             </div>
-                            <div class="buf-max">
-                                <span class="lbl">Buffer max (ms)</span>
-                                <input class="inp" type="number" min="0"
-                                    required oninput="validity.valid||(value='');"
-                                    v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
+
+                            <!-- Stream name (full width) -->
+                            <div class="stream-row gap-panel">
+                                <input class="inp" :disabled="isPlaying()"
+                                    placeholder="StreamName(?id=accessToken) or URL"
+                                    type="text" v-model="stream">
                             </div>
-                            <p class="net-desc" v-html="netDescription"></p>
+
+                            <!-- Controls: mute / live / AFS / protection -->
+                            <div class="ctrl-row gap-panel">
+                                <button class="btn" title="Mute or unmute audio" v-on:click="mute">
+                                    <i class="fas" :class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
+                                    {{ muted ? 'Unmute' : 'Mute' }}
+                                </button>
+
+                                <button class="btn" title="Jump to live position"
+                                    :class="{ 'btn-red': player && bufferAmount > player.bufferLimitMiddle }"
+                                    :disabled="!player || bufferAmount <= player.bufferLimitMiddle"
+                                    @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
+                                    <i class="fas fa-rocket"></i>
+                                    Live
+                                </button>
+
+                                <label title="Enable or disable adaptive frame skipping" class="tog" :class="{ on: adaptiveFrameSkipping, off: !mutableReliability() }">
+                                    <input type="checkbox" :disabled="!mutableReliability()"
+                                        v-model="adaptiveFrameSkipping" @change="onReliable()">
+                                    <span class="tog-track"></span>
+                                    <span>AFS*</span>
+                                </label>
+
+                                <button class="btn" :class="{ 'btn-cyan': keySystem }"
+                                    :style="{ display: isPlaying() && !keySystem ? 'none' : '' }"
+                                    :disabled="isPlaying()"
+                                    title="Content protection settings" @click="showSettings = true">
+                                    <i class="fas fa-shield-alt"></i>
+                                    {{ activeDrmLabel() }}
+                                </button>
+                            </div>
+                            <p class="ctrl-note">* Adaptive Frame Skipping — drops frames to stay at the live edge</p>
+
+                            <!-- Network preset + buffer min/max (single compact row).
+                                Description is grid-positioned inside the row so it sits next to the
+                                preset select on mobile (instead of floating below the buffer inputs). -->
+                            <div class="net-row gap-panel">
+                                <div class="net-prof">
+                                    <span class="lbl">Network preset</span>
+                                    <select class="sel" v-model="netPreset" @change="setBuffer()">
+                                        <option :value="preset" v-for="[preset, _] of netPresets">{{ preset }}</option>
+                                    </select>
+                                </div>
+                                <div class="buf-min">
+                                    <span class="lbl">Buffer min (ms)</span>
+                                    <input class="inp" type="number" min="0"
+                                        required oninput="validity.valid||(value='');"
+                                        v-model="bufferMin" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                                </div>
+                                <div class="buf-max">
+                                    <span class="lbl">Buffer max (ms)</span>
+                                    <input class="inp" type="number" min="0"
+                                        required oninput="validity.valid||(value='');"
+                                        v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                                </div>
+                                <p class="net-desc" v-html="netDescription"></p>
+                            </div>
                         </div>
                     </div>
                 </div>
