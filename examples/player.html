@@ -6,401 +6,391 @@
 -->
 <html lang="en">
     <head>
-        <title>Ceeblue WebRTS Player Example</title>
+        <title>Ceeblue WebRTS Player</title>
         <meta charset="utf-8">
-        <meta content="width=device-width, initial-scale=1.0" name="viewport">
+        <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport">
+        <meta name="color-scheme" content="light dark">
 
         <link rel="icon" href="./assets/ceeblue-logo-32x32.png" sizes="32x32">
         <link rel="icon" href="./assets/ceeblue-logo-192x192.png" sizes="192x192">
 
-        <link href="./css/bootstrap.css" rel="stylesheet">
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
         <link href="./css/solid.css" rel="stylesheet">
         <link href="./css/fontawesome.css" rel="stylesheet">
+        <link href="./css/main.css" rel="stylesheet">
 
-        <style>
-            body {
-                margin-top: 1em;
-                margin-bottom: 3em;
-                background-color: #EDF0F3;
-            }
-
-            /* Force every .btn to fill its column so the controls row aligns nicely;
-               use the Bootstrap `w-auto` utility on buttons that shouldn't stretch. */
-            .btn {
-                width: 100%;
-            }
-
-            video {
-                background-color: #333333;
-                max-width: 100%;
-                max-height: 60vh;
-            }
-            video::-webkit-media-controls,
-            video::-webkit-media-controls-start-playback-button {
-                display: none !important;
-            }
-
-            /* Big circular play overlay shown when the <video> is paused mid-stream. */
-            .play-btn {
-                margin: 0;
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                width: 100px;
-                transform: translate(-50%, -50%);
-            }
-            .play-btn__svg {
-                fill: #ffffff;
-                opacity: 0.9;
-                transition: 400ms;
-            }
-            .play-btn:hover .play-btn__svg {
-                fill: #00ff0d;
-            }
-
-            /* Tab panel (Graph / Messages) at the bottom of the page. */
-            .tab-panel .nav-tabs {
-                border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-            }
-            .tab-panel .nav-link {
-                cursor: pointer;
-            }
-            .nav .nav-item .nav-link {
-                padding: 0.5rem 0.8rem;
-            }
-            .tab-panel-content {
-                position: relative;
-                min-height: 18rem;
-                padding-top: 0.75rem;
-            }
-            .tab-panel-pane {
-                width: 100%;
-            }
-            .tab-panel-pane.is-hidden {
-                visibility: hidden;
-                pointer-events: none;
-            }
-            .tab-panel-pane--overlay {
-                position: absolute;
-                inset: 0;
-                padding-top: 0.75rem;
-            }
-            .tab-panel-pane--overlay.is-hidden {
-                display: block;
-            }
-
-            /* Messages list inside the tab panel. */
-            .messages-panel {
-                background-color: #ffffff;
-                border: 1px solid rgba(0, 0, 0, 0.08);
-                border-radius: 0.25rem;
-                padding: 0.25rem 0;
-                height: calc(14 * 2rem);
-                overflow: auto;
-            }
-            .messages-list {
-                margin: 0;
-                padding: 0;
-                list-style: none;
-                font-family: monospace;
-                font-size: 0.9rem;
-            }
-            .messages-list li {
-                padding: 0.35rem 0.75rem;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-                white-space: pre;
-                min-width: max-content;
-                line-height: 1.3rem;
-            }
-            .messages-empty {
-                color: #6c757d;
-                font-style: italic;
-                padding: 1rem 0.75rem;
-            }
-
-            /* Settings modal: cap body height so the footer stays visible without page scroll. */
-            .modal-body {
-                max-height: calc(100vh - 12rem);
-                overflow-y: auto;
-            }
-
-            [v-cloak] {
-                display: none;
-            }
-        </style>
+        <script>
+            // Applies the stored theme before the first paint, to avoid a flash of the wrong one.
+            // Classic script on purpose: a `type="module"` one is deferred and would paint first.
+            (function () {
+                var stored = localStorage.getItem('wrts-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.dataset.theme = stored === 'dark' ? 'dark' : 'light';
+            })();
+        </script>
     </head>
-    <body class="container">
-        <div class="row">
-            <div class="col-md-12">
-                <img alt="CEEBLUE Media Services" class="rounded mx-auto d-block" src="./assets/ceeblue-logo.png">
-                <h3 class="text-center">Web Real Time Streaming - Player Example</h3>
-            </div>
+    <body>
+        <div class="shell" id="main" v-cloak>
 
-            <div class="col-md-12" id="main" v-cloak>
+            <header class="hdr">
+                <img alt="Ceeblue" src="./assets/ceeblue-logo.png">
+                <h1>
+                    WebRTS <em>Player</em>
+                </h1>
+                <button class="theme-btn" :title="themeTooltip()" @click="cycleTheme()">
+                    <i class="fas" :class="themeIcon()"></i>
+                </button>
+            </header>
 
-                <div class="card text-center border-0 bg-transparent">
-                    <div class="card-body">
-                        <div class="alert alert-warning" role="alert" v-if="streamErrorMessage">
-                            {{ streamErrorMessage }}
+            <div class="stage">
+
+                <!-- Video + settings: left column in side-by-side mode -->
+                <div class="stage-main">
+                    <!-- Video -->
+                    <div class="player" ref="player"
+                        @mouseenter="onPlayerActivity()"
+                        @mousemove="onPlayerActivity()"
+                        @mouseleave="onPlayerLeave()"
+                        @touchstart="onPlayerTouch($event)"
+                        @contextmenu="onPlayerContextMenu($event)">
+
+                        <video autoplay id="video" ref="video" playsinline></video>
+
+                        <!-- Hover/touch revealed controls (only while playing) -->
+                        <div class="player-ctrls"
+                            :class="{ 'is-active': isPlaying(), 'is-visible': controlsVisible }">
+                            <button class="pc-btn pc-full"
+                                :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+                                @click="fullscreen()">
+                                <i class="fas" :class="isFullscreen ? 'fa-compress' : 'fa-expand'"></i>
+                            </button>
+                            <button class="pc-btn pc-stop" title="Stop" @click="play()">
+                                <i class="fas fa-stop"></i>
+                            </button>
                         </div>
 
-                        <video autoplay id="video" ref="video" @click="fullscreen()" playsinline></video>
-                        <div ref="play-btn" class="play-btn" @click="player.paused = false" v-show="player && player.paused">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26">
-                                <polygon class="play-btn__svg" points="9.33 6.69 9.33 19.39 19.3 13.04 9.33 6.69"></polygon>
-                                <path class="play-btn__svg" d="M26,13A13,13,0,1,1,13,0,13,13,0,0,1,26,13ZM13,2.18A10.89,10.89,0,1,0,23.84,13.06,10.89,10.89,0,0,0,13,2.18Z"></path>
-                            </svg>
+                        <!-- Stopped → big Play | Starting → spinner | Mid-stream pause → resume -->
+                        <button class="player-action" title="Play" @click="play()" v-if="isStopped()">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <div class="player-action is-loading" v-else-if="isStarting()">
+                            <div class="ring"></div>
                         </div>
-                    </div>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group col-sm">
-                        <select id="video-track-selection" class="custom-select text-center"
-                            :disabled="!player || !player.trackSelectable" v-model="videoTrackId" @change="onVideoTrackChange()">
-                            <option :value="undefined" :key="videoTrack">AUTO - {{videoTrack}}</option>
-                            <option v-for="[idx, track] of videoTracks" v-bind:value="idx">
-                                {{ track }}
-                            </option>
-                        </select>
-                    </div>
-
-                    <div class="form-group col-sm">
-                        <select id="audio-track-selection" class="custom-select text-center"
-                            :disabled="!player || !player.trackSelectable" v-model="audioTrackId" @change="onAudioTrackChange()">
-                            <option :value="undefined" :key="audioTrack">AUTO - {{audioTrack}}</option>
-                            <option v-for="[idx, track] of audioTracks" v-bind:value="idx">
-                                {{ track }}
-                            </option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group col-12">
-                        <input :disabled="isPlaying()" class="form-control text-center"
-                            placeholder="StreamName(?id=accessToken) or URL" type="text"
-                            v-model="stream">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group col-2">
-                        <button class="btn btn-light" title="Mute or unmute audio" type="button" v-on:click="mute">
-                            <i class="fas" v-bind:class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
-                            <span class="d-none d-md-inline">
-                                sound
-                            </span>
+                        <button class="player-action is-resume" title="Resume"
+                            @click="player.paused = false"
+                            v-else-if="player && player.paused">
+                            <i class="fas fa-play"></i>
                         </button>
-                    </div>
 
-                    <div class="form-group col-2">
-                        <button class="btn btn-light" title="Jump to live position" type="button" @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
-                            <i class="fa-solid fa-rocket"></i>
-                            <span class="d-none d-md-inline">
-                                live
-                            </span>
-                        </button>
-                    </div>
-
-                    <div class="form-group col-3">
-                        <button class="btn" type="button"
-                            v-bind:class="{ 'btn-danger': isPlaying(), 'btn-success': isStopped(), 'btn-secondary': isStarting() }"
-                            v-on:click="play">
-                            <span>{{ playButtonCaption() }}</span>
-                        </button>
-                    </div>
-
-                    <div class="form-group col-5 col-md-3 text-center d-flex align-items-center justify-content-center">
-                        <div class="custom-control custom-switch d-inline-block text-left">
-                            <input type="checkbox" class="custom-control-input" id="adaptive-frame-skipping"
-                                :disabled="!mutableReliability()" v-model="adaptiveFrameSkipping" @change="onReliable()">
-                            <label class="custom-control-label" for="adaptive-frame-skipping">
-                                <span class="small d-md-none">Adaptive Frame</span>
-                                <span class="d-none d-md-inline">Adaptive Frame-Skipping</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="form-group col-12 col-md-2">
-                        <button :disabled="isPlaying()" class="btn btn-light" :class="{ 'd-none': isPlaying() && !keySystem }"
-                            title="Content protection settings" type="button" @click="showSettings = true">
-                            <i class="fas fa-shield-alt"></i>
-                            <span class="ml-1">
-                                {{ activeDrmLabel() }}
-                            </span>
-                        </button>
-                    </div>
-
-                </div>
-
-                <div class="form-row align-items-center">
-                    <div class="form-group col-2 text-right">
-                        network <br class="d-md-none">profiles
-                    </div>
-                    <div class="form-group col-3 p-0">
-                        <select class="custom-select text-center" v-model="netProfile" @change="setBuffer()">
-                            <option v-bind:value="profil" v-for="[profil, _] of netProfiles">
-                                {{ profil }}
-                            </option>
-                        </select>
-                    </div>
-
-                    <div class="form-group col-3 text-right">
-                        buffer min<br class="d-md-none"> max in ms 
-                    </div>
-                    <div class="form-group col-2 p-0">
-                        <input class="form-control text-center"
-                            type="number" min="0" required oninput="validity.valid||(value='');"
-                            v-model="bufferMin" @change="setBuffer(this.bufferMin, this.bufferMax)">
-                    </div>
-                    <div class="form-group col-2 p-0">
-                        <input class="form-control text-center"
-                            type="number" min="0" required oninput="validity.valid||(value='');"
-                            v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
-                    </div>
-
-      
-                </div>
-
-                <p class="text-center font-weight-light font-italic" v-html="netDescription"></p>
-
-                <div class="tab-panel">
-                    <ul class="nav nav-tabs">
-                        <li class="nav-item">
-                            <a class="nav-link" :class="{ active: activeBottomTab === 'graph' }" @click="selectBottomTab('graph')">
-                                Graph
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" :class="{ active: activeBottomTab === 'messages' }" @click="selectBottomTab('messages')">
-                                Messages
-                                <span class="badge badge-primary ml-2" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
-                            </a>
-                        </li>
-                    </ul>
-                    <div class="tab-panel-content">
-                        <div class="tab-panel-pane" :class="{ 'is-hidden': activeBottomTab !== 'graph' }">
-                            <div class="form-row">
-                                <ul class="list-group list-group-flush w-100" ref="stats">
-                                </ul>
+                        <div class="player-alert" v-if="streamError">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <div class="player-alert-body">
+                                <div class="player-alert-title">
+                                    <span class="player-alert-type" v-if="streamError.type">{{ streamError.type }}</span>
+                                    <span class="player-alert-name">{{ streamError.name }}</span>
+                                </div>
+                                <div class="player-alert-detail" v-if="streamError.detail">{{ streamError.detail }}</div>
+                                <div class="player-alert-fields" v-if="streamError.fields.length">
+                                    <span class="player-alert-field" v-for="f in streamError.fields" :key="f.label">
+                                        <strong>{{ f.label }}</strong>{{ f.value }}
+                                    </span>
+                                </div>
                             </div>
-                            <div class="form-row" v-show="hasMetrics">
-                                <div class="form-group mx-auto">
-                                    <img class="m-1" alt="Reset metrics view" title="Reset incremental metrics and rescale the chart" type="button" @click="resetMetrics()" src="./assets/reload.png" height="32">
-                                    <img class="m-1" alt="Download metrics" title="Download metrics as a CSV file" type="button" @click="downloadStats()" src="./assets/download.png" height="32">
-                                    <img class="m-1" alt="Dump media" title="Dump media as MP4 files" type="button" @click="dump()" src="./assets/dump.png" height="32" v-show="audioDump || videoDump">
+                            <button class="player-alert-x" @click="setStreamError(null)"
+                                title="Dismiss" aria-label="Dismiss">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Settings: track selects, stream input, playback controls, network preset -->
+                    <div class="settings-panel" :class="{ collapsed: controlsHidden }">
+                        <button class="controls-toggle"
+                            :title="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
+                            :aria-label="controlsHidden ? 'Show stream settings' : 'Hide stream settings'"
+                            :aria-expanded="!controlsHidden"
+                            @click="controlsHidden = !controlsHidden">
+                            <i class="fas fa-sliders"></i>
+                            <span>Stream settings</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <div v-show="!controlsHidden">
+                            <!-- Track selects -->
+                            <div class="row2 gap-panel">
+                                <div>
+                                    <span class="lbl">Video track</span>
+                                    <select class="sel" id="video-track-selection"
+                                        :disabled="!player || !player.trackSelectable"
+                                        v-model="videoTrackId" @change="onVideoTrackChange()">
+                                        <option :value="undefined" :key="videoTrack">AUTO — {{ videoTrack }}</option>
+                                        <option v-for="[idx, track] of videoTracks" :value="idx">{{ track }}</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <span class="lbl">Audio track</span>
+                                    <select class="sel" id="audio-track-selection"
+                                        :disabled="!player || !player.trackSelectable"
+                                        v-model="audioTrackId" @change="onAudioTrackChange()">
+                                        <option :value="undefined" :key="audioTrack">AUTO — {{ audioTrack }}</option>
+                                        <option v-for="[idx, track] of audioTracks" :value="idx">{{ track }}</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Stream name (full width) -->
+                            <div class="stream-row gap-panel">
+                                <input class="inp" :disabled="isPlaying()"
+                                    placeholder="StreamName(?id=accessToken) or URL"
+                                    type="text" v-model="stream">
+                            </div>
+
+                            <!-- Controls: mute / live / AFS / protection -->
+                            <div class="ctrl-row gap-panel">
+                                <button class="btn" title="Mute or unmute audio" v-on:click="mute">
+                                    <i class="fas" :class="{ 'fa-volume-up': !muted, 'fa-volume-xmark': muted }"></i>
+                                    {{ muted ? 'Unmute' : 'Mute' }}
+                                </button>
+
+                                <button class="btn" title="Jump to live position"
+                                    :class="{ 'btn-red': player && bufferAmount > player.bufferLimitMiddle }"
+                                    :disabled="!player || bufferAmount <= player.bufferLimitMiddle"
+                                    @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
+                                    <i class="fas fa-rocket"></i>
+                                    Live
+                                </button>
+
+                                <label title="Enable or disable adaptive frame skipping" class="tog" :class="{ on: adaptiveFrameSkipping, off: !mutableReliability() }">
+                                    <input type="checkbox" :disabled="!mutableReliability()"
+                                        v-model="adaptiveFrameSkipping" @change="onReliable()">
+                                    <span class="tog-track"></span>
+                                    <span>AFS*</span>
+                                </label>
+
+                                <button class="btn" :class="{ 'btn-cyan': keySystem }"
+                                    :style="{ display: isPlaying() && !keySystem ? 'none' : '' }"
+                                    :disabled="isPlaying()"
+                                    title="Content protection settings" @click="showSettings = true">
+                                    <i class="fas fa-shield-alt"></i>
+                                    {{ activeDrmLabel() }}
+                                </button>
+                            </div>
+                            <p class="ctrl-note">* Adaptive Frame Skipping — drops frames to stay at the live edge</p>
+
+                            <!-- Network preset + buffer min/max (single compact row).
+                                Description is grid-positioned inside the row so it sits next to the
+                                preset select on mobile (instead of floating below the buffer inputs). -->
+                            <div class="net-row gap-panel">
+                                <div class="net-prof">
+                                    <span class="lbl">Network preset</span>
+                                    <select class="sel" v-model="netPreset" @change="setBuffer()">
+                                        <option :value="preset" v-for="[preset, _] of netPresets">{{ preset }}</option>
+                                    </select>
+                                </div>
+                                <div class="buf-min">
+                                    <span class="lbl">Buffer min (ms)</span>
+                                    <input class="inp" type="number" min="0"
+                                        required oninput="validity.valid||(value='');"
+                                        v-model="bufferMin" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                                </div>
+                                <div class="buf-max">
+                                    <span class="lbl">Buffer max (ms)</span>
+                                    <input class="inp" type="number" min="0"
+                                        required oninput="validity.valid||(value='');"
+                                        v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
+                                </div>
+                                <p class="net-desc" v-html="netDescription"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel: graph / messages / timeline (docks bottom by default, or right on wide screens) -->
+                <div class="stage-panel">
+                    <div class="tab-bar">
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'graph' }"
+                            @click="selectBottomTab('graph')">Graph</button>
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'messages' }"
+                            @click="selectBottomTab('messages')">
+                            Messages
+                            <span class="tab-badge" v-if="unreadMessages > 0">{{ unreadMessages }}</span>
+                        </button>
+                        <button class="tab-btn" :class="{ on: activeBottomTab === 'timeline' }"
+                            @click="selectBottomTab('timeline')">Timeline</button>
+                        <button class="layout-btn" :class="{ on: sidePanel }"
+                            :title="sidePanel ? 'Dock the panel to the bottom' : 'Dock the panel to the right (side-by-side)'"
+                            @click="toggleSidePanel()">
+                            <i class="fas fa-table-columns"></i>
+                        </button>
+                    </div>
+
+                    <div class="tab-body">
+                        <!-- Graph -->
+                        <div v-show="activeBottomTab === 'graph'">
+                            <ul class="stats-list" ref="stats"></ul>
+                            <div class="stats-actions" v-show="hasMetrics">
+                                <img alt="Reset" title="Reset incremental metrics and rescale the chart"
+                                    @click="resetMetrics()" src="./assets/reload.png">
+                                <img alt="Download CSV" title="Download metrics as a CSV file"
+                                    @click="downloadStats()" src="./assets/download.png">
+                                <img alt="Dump media" title="Dump media as MP4 files"
+                                    @click="dump()" src="./assets/dump.png"
+                                    v-show="audioDump || videoDump">
+                            </div>
+                        </div>
+
+                        <!-- Messages -->
+                        <div v-show="activeBottomTab === 'messages'">
+                            <div class="msg-box" ref="messagesPanel">
+                                <div class="msg-empty" v-if="messages.length === 0">No data messages received yet.</div>
+                                <div v-for="(message, idx) in messages" :key="idx" class="msg-row">
+                                    <span class="msg-track">[{{ message.track }}]</span>
+                                    <span class="msg-time"> {{ message.receivedAt }} </span>{{ message.text }}
                                 </div>
                             </div>
                         </div>
-                        <div class="tab-panel-pane tab-panel-pane--overlay" :class="{ 'is-hidden': activeBottomTab !== 'messages' }">
-                            <div class="messages-panel" ref="messagesPanel">
-                                <div class="messages-empty" v-if="messages.length === 0">No data messages received yet.</div>
-                                <ul class="messages-list" v-else>
-                                    <li v-for="(message, idx) in messages" :key="idx">[{{ message.track }}] {{ message.receivedAt }} : {{ message.text }}</li>
-                                </ul>
+
+                        <!-- Timeline (rendered by the UITimeline library widget into tl-box) -->
+                        <div v-show="activeBottomTab === 'timeline'">
+                            <div class="tl-toolbar">
+                                <button class="btn tl-followbtn" :class="tlFollowing ? 'on' : 'off'"
+                                    :title="tlFollowing ? 'Following the latest data — click to freeze, then drag the timeline to inspect the past' : 'Frozen — click to follow the latest data'"
+                                    @click="toggleTimelineFollow()">
+                                    <i class="fas" :class="tlFollowing ? 'fa-angles-right' : 'fa-lock'"></i>
+                                    <span>{{ tlFollowing ? 'Follow' : 'Frozen' }}</span>
+                                </button>
+                                <div class="tl-seg" title="Choose the time axis: stream timestamps (DTS) to spot desync, or wall-clock reception to spot late/slow tracks">
+                                    <button :class="{ on: tlAxis === 'media' }" @click="setTimelineAxis('media')">Media DTS</button>
+                                    <button :class="{ on: tlAxis === 'reception' }" @click="setTimelineAxis('reception')">Reception</button>
+                                </div>
+                                <div class="tl-seg" title="Visible time window">
+                                    <button v-for="w in tlWindows" :class="{ on: tlWindow === w }"
+                                        @click="setTimelineWindow(w)">{{ w }}s</button>
+                                </div>
+                                <button class="btn btn-icon" title="Download sequences as a CSV file"
+                                    @click="downloadTimeline()">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                                <div class="tl-spacer"></div>
+                                <div class="tl-legend" title="Reception health: ratio of reception duration to media duration of each sequence">
+                                    <span>
+                                        <i class="dot" style="background:var(--ok)"></i>on time
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--warn)"></i>slow
+                                    </span>
+                                    <span>
+                                        <i class="dot" style="background:var(--err)"></i>congested
+                                    </span>
+                                </div>
                             </div>
+                            <div class="tl-box" ref="timelineBox"></div>
                         </div>
                     </div>
                 </div>
 
-                <div v-if="showSettings" class="modal-backdrop fade show"></div>
-                <div v-if="showSettings" class="modal fade show d-block" tabindex="-1" role="dialog" @click.self="closeSettings()">
-                    <div class="modal-dialog modal-lg" role="document">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">Content Protection</h5>
-                                <button type="button" class="close" aria-label="Close" @click="closeSettings()">
-                                    <span aria-hidden="true">&times;</span>
+                <!-- DRM Modal -->
+                <template v-if="showSettings">
+                    <div class="modal-back" @click="closeSettings()"></div>
+                    <div class="modal-wrap">
+                        <div class="modal-box" @click.stop>
+                            <div class="modal-hd">
+                                <i class="fas fa-shield-alt"></i>
+                                <h5>Content Protection</h5>
+                                <button class="modal-x" @click="closeSettings()" aria-label="Close">
+                                    <i class="fas fa-times"></i>
                                 </button>
                             </div>
-                            <div class="modal-body">
-                                <p class="text-muted small">
-                                    License URLs are not pre-filled; paste your own to test against a real key server.
-                                    A DRM is included in the playback request only when it is enabled <em>and</em> its license URL is set.
+
+                            <div class="modal-bd">
+                                <p class="modal-hint">
+                                    License URLs are not pre-filled. A DRM is included only when enabled
+                                    <em>and</em> its license URL is set.
                                 </p>
-                                <div v-for="drm in contentProtection" :key="drm.id" class="border-bottom mb-3 pb-3">
-                                    <div class="form-row align-items-center mb-2">
-                                        <div class="col-auto pr-2">
+
+                                <div v-for="drm in contentProtection" :key="drm.id"
+                                    class="drm-card"
+                                    :class="{ enabled: drm.enabled, active: isDrmActive(drm) }">
+
+                                    <div class="drm-hd">
+                                        <label class="tog" :class="{ on: drm.enabled }"
+                                            style="border:none; background:none; padding:0;"
+                                            @click.stop>
                                             <input :id="'drm-' + drm.id + '-enabled'" type="checkbox"
-                                                class="form-check-input position-static m-0"
                                                 :disabled="isPlaying()" v-model="drm.enabled">
-                                        </div>
-                                        <div class="col">
-                                            <label :for="'drm-' + drm.id + '-enabled'" class="h6 mb-0">
-                                                <i class="fas fa-shield-alt"></i> {{ drm.label }}
-                                            </label>
-                                            <span class="badge badge-success ml-2" v-if="isDrmActive(drm)">Active</span>
-                                        </div>
+                                            <span class="tog-track"></span>
+                                        </label>
+                                        <span class="drm-name">{{ drm.label }}</span>
+                                        <span class="badge-active" v-if="isDrmActive(drm)">Active</span>
                                     </div>
 
-                                    <div :class="{ 'pl-4': true, 'text-muted': !drm.enabled }">
-                                        <div class="form-group mb-2">
-                                            <label class="small mb-1">License URL</label>
-                                            <input class="form-control form-control-sm" type="text"
+                                    <div class="drm-bd" v-if="drm.enabled">
+                                        <div class="drm-field">
+                                            <span class="lbl">License URL</span>
+                                            <input class="inp" type="text"
                                                 :disabled="!drm.enabled || isPlaying()"
                                                 v-model="drm.license" placeholder="https://...">
                                         </div>
 
-                                        <div class="form-group mb-2" v-if="drm.id === 'fairplay'">
-                                            <label class="small mb-1">Certificate URL</label>
-                                            <input class="form-control form-control-sm" type="text"
+                                        <div class="drm-field" v-if="drm.id === 'fairplay'">
+                                            <span class="lbl">Certificate URL</span>
+                                            <input class="inp" type="text"
                                                 :disabled="!drm.enabled || isPlaying()"
                                                 v-model="drm.certificate" placeholder="https://...">
                                         </div>
 
-                                        <div class="form-group mb-2">
-                                            <div class="d-flex justify-content-between align-items-center mb-1">
-                                                <label class="small mb-0">HTTP headers</label>
-                                                <button type="button" class="btn btn-link btn-sm p-0 w-auto"
+                                        <div class="drm-field">
+                                            <span class="lbl">
+                                                HTTP headers
+                                                <button class="btn-link"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     @click="addHeader(drm)">
                                                     <i class="fas fa-plus"></i> Add header
                                                 </button>
-                                            </div>
-                                            <div v-if="drm.headers.length === 0" class="small text-muted font-italic">
-                                                No headers
-                                            </div>
-                                            <div v-for="(header, idx) in drm.headers" :key="idx" class="form-row align-items-center mb-1">
-                                                <div class="col">
-                                                    <input class="form-control form-control-sm" type="text"
+                                            </span>
+                                            <div class="hdr-list">
+                                                <div v-if="drm.headers.length === 0"
+                                                    style="font-size:11.5px; color:var(--txt-m); font-style:italic;">
+                                                    No headers
+                                                </div>
+                                                <div v-for="(header, idx) in drm.headers" :key="idx" class="hdr-row">
+                                                    <input class="inp" type="text"
                                                         :disabled="!drm.enabled || isPlaying()"
                                                         v-model="header.name" placeholder="Header name">
-                                                </div>
-                                                <div class="col">
-                                                    <input class="form-control form-control-sm" type="text"
+                                                    <input class="inp" type="text"
                                                         :disabled="!drm.enabled || isPlaying()"
-                                                        v-model="header.value" placeholder="Header value">
-                                                </div>
-                                                <div class="col-auto">
-                                                    <button type="button" class="btn btn-light btn-sm w-auto"
+                                                        v-model="header.value" placeholder="Value">
+                                                    <button class="btn-rm"
                                                         :disabled="!drm.enabled || isPlaying()"
-                                                        @click="removeHeader(drm, idx)" title="Remove header">
+                                                        @click="removeHeader(drm, idx)"
+                                                        title="Remove header">
                                                         <i class="fas fa-times"></i>
                                                     </button>
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <div class="form-row">
-                                            <div class="form-group col mb-0">
-                                                <label class="small mb-1">Audio robustness</label>
-                                                <select v-if="drm.id === 'widevine'" class="custom-select custom-select-sm"
+                                        <div class="rob-row">
+                                            <div class="drm-field">
+                                                <span class="lbl">Audio robustness</span>
+                                                <select v-if="drm.id === 'widevine'" class="sel"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     v-model="drm.audioRobustness">
                                                     <option v-for="[label, value] in audioRobustnesses" :value="value">{{ label }}</option>
                                                 </select>
-                                                <input v-else class="form-control form-control-sm" type="text"
+                                                <input v-else class="inp" type="text"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     v-model="drm.audioRobustness" placeholder="comma-separated">
                                             </div>
-                                            <div class="form-group col mb-0">
-                                                <label class="small mb-1">Video robustness</label>
-                                                <select v-if="drm.id === 'widevine'" class="custom-select custom-select-sm"
+                                            <div class="drm-field">
+                                                <span class="lbl">Video robustness</span>
+                                                <select v-if="drm.id === 'widevine'" class="sel"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     v-model="drm.videoRobustness">
                                                     <option v-for="[label, value] in videoRobustnesses" :value="value">{{ label }}</option>
                                                 </select>
-                                                <input v-else class="form-control form-control-sm" type="text"
+                                                <input v-else class="inp" type="text"
                                                     :disabled="!drm.enabled || isPlaying()"
                                                     v-model="drm.videoRobustness" placeholder="comma-separated">
                                             </div>
@@ -408,20 +398,21 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-primary w-auto" @click="closeSettings()">Done</button>
+
+                            <div class="modal-ft">
+                                <button class="btn btn-primary" @click="closeSettings()">Done</button>
                             </div>
                         </div>
                     </div>
-                </div>
+                </template>
+
             </div>
-
-
+            <!-- #main -->
         </div>
-
+        <!-- .shell -->
     </body>
     <script type="module">
-        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, VERSION, utils } from "../dist/wrts-client.bundle.js";
+        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, UITimeline, VERSION, utils } from "../dist/wrts-client.bundle.js";
         // development version, includes helpful console warnings
         // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
         // production version, optimized for size and speed
@@ -431,16 +422,42 @@
         // displays logs ERROR, WARN & INFO logs,
         // can be even more detailed with LogLevel.DEBUG
         log.level = LogLevel.INFO;
-        log('wrts-client version:', VERSION).info();
-        log('web-utils version:', utils.VERSION).info();
 
         const options = Util.options();
+
+        // On-screen log overlay for on-device debugging (e.g. Android with no working
+        // chrome://inspect). Append `?debugoverlay` to the URL to enable.
+        if (options.debugoverlay) {
+            setupDebugOverlay();
+        }
+
+        log('wrts-client version:', VERSION).info();
+        log('web-utils version:', utils.VERSION).info();
 
         const PlayState = {
             PLAYING: 'PLAYING',
             STARTING: 'STARTING',
             STOPPED: 'STOPPED'
         };
+
+        const THEME_KEY = 'wrts-theme';
+        const THEME_CYCLE = ['light', 'dark'];
+
+        // Beyond that the oldest rows are dropped, the messages panel is a tail not an archive.
+        const MAX_MESSAGES = 200;
+
+        // HTMLMediaElement.error.code → MediaError constant name. Surfaced in the alert when the
+        // native video element fires `onerror` (the Player usually wraps this in a richer
+        // 'Playback error' via onStop, but we render the raw code in case it doesn't).
+        const MEDIA_ERROR_NAMES = {
+            1: 'MEDIA_ERR_ABORTED',
+            2: 'MEDIA_ERR_NETWORK',
+            3: 'MEDIA_ERR_DECODE',
+            4: 'MEDIA_ERR_SRC_NOT_SUPPORTED'
+        };
+
+        // Keys the .player-alert renders itself, everything else on the error object becomes a chip.
+        const ALERT_RESERVED_KEYS = new Set(['type', 'name', 'detail']);
 
         // URL-safe base64 round-trip for UTF-8 strings: `+` and `/` are remapped to `-` and `_`
         // and padding is stripped, so the encoded value can sit directly in a query parameter
@@ -463,23 +480,215 @@
             return new TextDecoder().decode(bytes);
         }
 
+        /**
+         * Normalizes any error shape (a Player onStop union member, a synthesized video onerror, an
+         * input-validation error) into what .player-alert renders:
+         * `{ type, name, detail, fields: [{ label, value }] }`. Unknown own-properties become
+         * key/value chips, so subsystem context (mimeType, track, url, reason, code, ...) stays
+         * visible without a UI variant per error type.
+         */
+        function normalizeError(error) {
+            if (!error) {
+                return null;
+            }
+            const fields = [];
+            for (const key of Object.keys(error)) {
+                if (ALERT_RESERVED_KEYS.has(key)) {
+                    continue;
+                }
+                const value = error[key];
+                if (value == null || value === '') {
+                    continue;
+                }
+                let display;
+                if (typeof value === 'object') {
+                    // JSON rather than String(), which would render '[object Object]'
+                    try {
+                        display = JSON.stringify(value);
+                    } catch {
+                        display = String(value);
+                    }
+                } else {
+                    display = String(value);
+                }
+                fields.push({ label: key, value: display });
+            }
+            return {
+                // Strip the redundant 'Error' suffix from union discriminants, so the badge
+                // reads 'SOURCE' rather than 'SOURCEERROR'.
+                type: (error.type || '').replace(/Error$/, '') || null,
+                name: error.name || 'Unknown error',
+                detail: error.detail || null,
+                fields
+            };
+        }
+
+        /**
+         * Builds a fixed, collapsible on-screen panel mirroring every `log()` line (newest at the
+         * end), so logs can be read and copied on a device with no working chrome://inspect.
+         * Hooks `log.on` non-destructively, the default console output still runs.
+         */
+        function setupDebugOverlay() {
+            const PANEL_VH = 40; // expanded height
+            const MAX_ROWS = 500; // cap retained rows to avoid unbounded DOM/memory growth
+            // Container: header bar (always visible) + scrollable log box.
+            const panel = document.createElement('div');
+            panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;background:rgba(0,0,0,.85);font:11px/1.35 monospace;';
+            const header = document.createElement('div');
+            header.style.cssText =
+                'display:flex;gap:8px;align-items:center;padding:3px 6px;' +
+                'background:#111;color:#ccc;border-top:1px solid #333;cursor:pointer;user-select:none';
+            const title = document.createElement('span');
+            title.textContent = '▾ debug logs';
+            title.style.flex = '1';
+            const copyBtn = document.createElement('button');
+            copyBtn.textContent = 'copy';
+            copyBtn.style.cssText = 'font:11px monospace';
+            const clearBtn = document.createElement('button');
+            clearBtn.textContent = 'clear';
+            clearBtn.style.cssText = 'font:11px monospace';
+            const box = document.createElement('div');
+            box.style.cssText =
+                'overflow:auto;color:#9f9;padding:4px 6px;white-space:pre-wrap;word-break:break-word;' + 'height:' + PANEL_VH + 'vh';
+            header.append(title, copyBtn, clearBtn);
+            panel.append(header, box);
+
+            let collapsed = false;
+            const apply = () => {
+                box.style.display = collapsed ? 'none' : 'block';
+                title.textContent = (collapsed ? '▸' : '▾') + ' debug logs';
+                // Reserve page space so the panel never permanently hides page content
+                // (e.g. the bottom of the metrics graph). Collapsed → just the header bar.
+                document.body.style.paddingBottom = collapsed ? '26px' : 'calc(' + PANEL_VH + 'vh + 26px)';
+            };
+            header.onclick = e => {
+                if (e.target === clearBtn || e.target === copyBtn) {
+                    return;
+                }
+                collapsed = !collapsed;
+                apply();
+            };
+            clearBtn.onclick = () => {
+                box.textContent = '';
+            };
+            copyBtn.onclick = () => {
+                // Rows are oldest-on-top (chronological), copy as-is.
+                const text = Array.from(box.children)
+                    .map(r => r.textContent)
+                    .join('\n');
+                const done = ok => {
+                    copyBtn.textContent = ok ? 'copied!' : 'copy failed';
+                    setTimeout(() => {
+                        copyBtn.textContent = 'copy';
+                    }, 1500);
+                };
+                // navigator.clipboard needs a secure context (https/localhost); fall back to
+                // a temporary textarea + execCommand for plain-http LAN access from the phone.
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).then(
+                        () => done(true),
+                        () => done(false)
+                    );
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    let ok = false;
+                    try {
+                        ok = document.execCommand('copy');
+                    } catch {}
+                    document.body.removeChild(ta);
+                    done(ok);
+                }
+            };
+
+            const ready = () => {
+                document.body.appendChild(panel);
+                apply();
+            };
+            document.readyState === 'loading' ? addEventListener('DOMContentLoaded', ready) : ready();
+            log.on = (level, args) => {
+                const line = args.map(a => (typeof a === 'object' && a !== null ? Util.stringify(a) : String(a))).join(' ');
+                const row = document.createElement('div');
+                row.style.color = level === 'error' ? '#f55' : level === 'warn' ? '#fd5' : '#9f9';
+                const d = new Date();
+                const ts =
+                    String(d.getHours()).padStart(2, '0') + ':' +
+                    String(d.getMinutes()).padStart(2, '0') + ':' +
+                    String(d.getSeconds()).padStart(2, '0') + '.' +
+                    String(d.getMilliseconds()).padStart(3, '0');
+                row.textContent = `${ts} [${level}] ${line}`;
+                // Stick to the end only when the user is already at the bottom and isn't
+                // selecting text inside the box (so manual scroll-up / text selection is preserved).
+                const slack = 4; // px tolerance for "at bottom"
+                const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - slack;
+                const selection = window.getSelection();
+                const selecting = selection && !selection.isCollapsed && box.contains(selection.anchorNode);
+                box.appendChild(row); // newest at the end
+                // Trim oldest rows (top) to keep DOM/memory bounded on long sessions
+                while (box.childElementCount > MAX_ROWS) {
+                    box.removeChild(box.firstChild);
+                }
+                if (wasAtBottom && !selecting) {
+                    box.scrollTop = box.scrollHeight;
+                }
+            };
+        }
+
+        // Raw <video> media events worth logging when diagnosing a freeze. 'timeupdate' is left out
+        // (too noisy), and so are 'durationchange'/'progress' which flood on Safari (one per append).
+        const MEDIA_EVENTS = [
+            'play', 'playing', 'pause', 'waiting', 'stalled', 'suspend', 'emptied', 'ended',
+            'seeking', 'seeked', 'ratechange', 'canplay', 'canplaythrough', 'loadeddata', 'loadedmetadata'
+        ];
+
+        /** Logs the raw media events of a <video> element. Enabled by the `?events` query parameter. */
+        function logMediaEvents(video, extra) {
+            for (const name of MEDIA_EVENTS) {
+                video.addEventListener(name, () =>
+                    log(
+                        '[event]',
+                        name,
+                        't=' + video.currentTime.toFixed(3),
+                        'paused=' + video.paused,
+                        'readyState=' + video.readyState,
+                        'rate=' + video.playbackRate,
+                        extra ? extra() : ''
+                    ).info()
+                );
+            }
+        }
+
         createApp({
             data() {
                 return {
                     PlayState: PlayState,
                     playState: PlayState.STOPPED,
 
+                    theme: localStorage.getItem(THEME_KEY) || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+
                     stream: '',
                     muted: false,
                     host: null,
                     bufferMin: 0,
                     bufferMax: 0,
+                    bufferAmount: 0,
 
                     audioDump: options.dump ? new BinaryWriter() : undefined,
                     videoDump: options.dump ? new BinaryWriter() : undefined,
 
                     keySystem: null,
                     showSettings: false,
+
+                    sidePanel: options.sidePanel ? true : false, // dock the metrics panel to the right (large screens)
+                    controlsHidden: false,
+                    controlsVisible: false,
+                    _controlsTimer: null,
+                    isFullscreen: false,
+
                     // Widevine-only robustness presets. Keyed by display label, the value is the
                     // comma-joined robustness string stored on `contentProtection[*].*Robustness`.
                     videoRobustnesses: new Map([
@@ -511,27 +720,41 @@
 
                     startTime: 0,
                     adaptiveFrameSkipping: true,
+                    fixedPlaybackRate: options.fixedRate ? true : false,
                     streamMetadata: null,
                     netDescription: "",
                     videoTracks: new Map(),
                     videoTrack: 'Video',
                     videoTrackId: undefined,
-                    activeBottomTab: 'graph',
-                    messages: [],
-                    unreadMessages: 0,
                     sourceType: undefined,
                     audioTracks: new Map(),
                     audioTrack: 'Audio',
                     audioTrackId: undefined,
-                    streamErrorMessage: null,
+                    streamError: null,
+
+                    // Bottom panel
+                    activeBottomTab: 'graph',
+                    messages: [],
+                    unreadMessages: 0,
+
+                    // Timeline toolbar, mirroring the UITimeline widget state
+                    tlAxis: 'reception', // 'media' (DTS) | 'reception' (wall-clock)
+                    tlFollowing: true, // pinned to live | frozen for inspection
+                    tlWindow: 10, // visible window in seconds
+                    tlWindows: [5, 10, 30, 60],
+
+                    // Display label => array of samples, one per poll. Values are strings with their
+                    // unit ('850kbps'), UIMetrics parses the number out and keeps the unit as a suffix.
                     stats: new Map(),
-                    times: new Array(),
-                    hasMetrics:false,
-                    deltaStats: {},
+                    // Local and media time of each sample, the first two columns of the CSV export
+                    times: [],
+                    hasMetrics: false,
                     uiStats: null,
+                    deltaStats: {},
+
                     player: null,
                     latencies: [],
-                    netProfiles: new Map([
+                    netPresets: new Map([
                         ['-manual-', [
                             "Manually configure a buffer window large enough to compensate for variations caused by network fluctuations.",
                         ]],
@@ -546,17 +769,17 @@
                         ['distant', [
                             "Streamer and player are significantly distant and/or the connection involves multiple intermediaries (e.g., VPNs, CDN providers).",
                             1000, 2000 // 1.5 seconds
-                        ]], 
+                        ]],
                         ['unstable', [
                             "A resilient configuration designed for maximum stability even on challenging networks, prioritizing robustness over low latency.",
                             2000, 4000 // 3 seconds
                         ]],
                     ]),
-                    netProfile: 'normal'
+                    netPreset: 'normal'
                 }
             },
             mounted() {
-                this.controls = false;    
+                this.controls = false;
 
                 // init values
                 this.loadContentProtectionFromOptions();
@@ -567,11 +790,39 @@
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
                 this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
 
+                // An OS theme change overrides the stored choice (the initial paint is done in <head>).
+                this._themeQuery = matchMedia('(prefers-color-scheme: dark)');
+                this._themeListener = (e) => {
+                    this.theme = e.matches ? 'dark' : 'light';
+                    localStorage.removeItem(THEME_KEY);
+                    this.applyTheme();
+                };
+                this._themeQuery.addEventListener('change', this._themeListener);
+
+                // The watcher below only fires on a change, apply whatever the page defaulted to.
+                document.documentElement.classList.toggle('layout-side', this.sidePanel);
+
+                // Track fullscreen state so the overlay button can flip between expand/compress icons.
+                // iOS Safari uses native video fullscreen (webkit*fullscreen events on the video).
+                this._fsListener = () => {
+                    this.isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+                };
+                document.addEventListener('fullscreenchange', this._fsListener);
+                document.addEventListener('webkitfullscreenchange', this._fsListener);
+                this.$refs.video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
+                this.$refs.video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
+
+                // Debug: log raw <video> media events to diagnose freezes (append ?events to the URL).
+                if (options.events) {
+                    logMediaEvents(this.$refs.video, () => (this.player ? 'speed=' + (this.player.playbackSpeed || 0).toFixed(2) : ''));
+                }
+
                 const drawContext = this.canvas.getContext('2d');
 
                 // Stats to be displayed in the UI
                 const bandwidths = []; this.stats.set("Bandwidth", bandwidths);
                 const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
+                const avOffsets = []; this.stats.set("A/V offset", avOffsets);
                 const latencies = this.latencies; this.stats.set("Latency", latencies);
                 const e2eLatencies = []; this.stats.set("Latency e2e", e2eLatencies);
                 const playbackRates = []; this.stats.set("Playback rate", playbackRates);
@@ -582,17 +833,19 @@
                 const skippedAudio = []; this.stats.set("Skipped audio", skippedAudio);
                 const skippedVideo = []; this.stats.set("Skipped video", skippedVideo);
                 const stalls = []; this.stats.set("Stalls", stalls);
-                
+
                 this.uiStats = new UIMetrics(this.$refs.stats);
 
-                // Debug purpose : click right = dump & pause
-                this.$refs.video.addEventListener('contextmenu', (event) => {
-                    event.preventDefault();
-                    this.dump();
-                    this.player.paused = true;
-                });
-                
-         
+                // Timeline widget: owns its canvas/tooltip and render loop, fed per sample below.
+                // Grabbing its overview auto-freezes it, so the follow button must follow.
+                this.uiTimeline = new UITimeline(this.$refs.timelineBox);
+                this.uiTimeline.axis = this.tlAxis;
+                this.uiTimeline.windowDuration = this.tlWindow;
+                this.uiTimeline.getMediaTime = () => (this.player ? this.player.currentTime * 1000 : undefined);
+                this.uiTimeline.onFollowingChange = following => {
+                    this.tlFollowing = following;
+                };
+
                 setInterval(() => {
                     const player = this.player;
                     if(player) {
@@ -606,10 +859,16 @@
                         if(bufferAmounts.length || stats.bufferAmount) {
                             bufferAmounts.push((stats.bufferAmount || 0)+"ms");
                         }
+                        this.bufferAmount = stats.bufferAmount || 0;
+                        // Received audio end minus video end, positive when audio is ahead
+                        if(avOffsets.length || (this._audioEnd != null && this._videoEnd != null)) {
+                            const offset = (this._audioEnd ?? 0) - (this._videoEnd ?? 0);
+                            avOffsets.push((offset > 0 ? '+' : '') + offset + "ms");
+                        }
                         if(latencies.length || (options.latency && stats.latency)) {
                             latencies.push((stats.latency || 0) +"ms");
                         }
-                      
+
                         playbackRates.push((stats.playbackRate || 0).toFixed(2));
                         playbackSpeeds.push((stats.playbackSpeed || 0).toFixed(2));
                         fps.push((stats.videoPerSecond || 0).toFixed(2));
@@ -634,14 +893,98 @@
                     this.uiStats.display(this.stats);
                 }, 700);
             },
+            beforeUnmount() {
+                if (this._themeQuery) {
+                    this._themeQuery.removeEventListener('change', this._themeListener);
+                }
+                if (this._fsListener) {
+                    document.removeEventListener('fullscreenchange', this._fsListener);
+                    document.removeEventListener('webkitfullscreenchange', this._fsListener);
+                }
+                if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                if (this.uiTimeline) {
+                    this.uiTimeline.destroy();
+                }
+            },
             watch: {
-                // Bootstrap JS is not loaded here, so toggle `modal-open` on <body> manually so the
-                // page behind the dialog stops scrolling while the settings modal is visible.
+                // Stop the page behind the dialog from scrolling while the settings modal is visible.
                 showSettings(value) {
                     document.body.classList.toggle('modal-open', value);
+                },
+                // Only flags <html>, the CSS gates the split on wide screens.
+                sidePanel(value) {
+                    document.documentElement.classList.toggle('layout-side', value);
                 }
             },
             methods: {
+                // ── Theme ──
+                cycleTheme() {
+                    this.theme = THEME_CYCLE[(THEME_CYCLE.indexOf(this.theme) + 1) % THEME_CYCLE.length];
+                    localStorage.setItem(THEME_KEY, this.theme);
+                    this.applyTheme();
+                },
+                applyTheme() {
+                    document.documentElement.dataset.theme = this.theme === 'dark' ? 'dark' : 'light';
+                },
+                themeIcon() {
+                    return { light: 'fa-sun', dark: 'fa-moon' }[this.theme];
+                },
+                themeTooltip() {
+                    return `Theme: ${this.theme} (click to cycle)`;
+                },
+
+                setStreamError(error) {
+                    this.streamError = normalizeError(error);
+                },
+
+                // ── Player overlay controls (fullscreen / stop on hover or tap) ──
+                onPlayerActivity(isTouch = false) {
+                    if (!this.isPlaying()) return;
+                    this._scheduleControls(isTouch);
+                },
+                onPlayerLeave() {
+                    if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                    this.controlsVisible = false;
+                },
+                onPlayerTouch(event) {
+                    if (!this.isPlaying()) return;
+                    // Treat the touch as button-targeted only when controls are *already* visible —
+                    // otherwise the user can't see the button, so any tap there must just mean "reveal".
+                    const onButton = this.controlsVisible && event.target.closest('.pc-btn');
+                    if (onButton) {
+                        // Let the synthetic click reach the button; just refresh the auto-hide timer.
+                        this._scheduleControls(true);
+                        return;
+                    }
+                    // Suppress the synthetic click on the player surface so a single tap can't
+                    // accidentally hit a button that wasn't visible yet (first-tap-reveals).
+                    event.preventDefault();
+                    if (this.controlsVisible) {
+                        // Tap on the video while controls are visible → dismiss immediately.
+                        if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                        this.controlsVisible = false;
+                    } else {
+                        this._scheduleControls(true);
+                    }
+                },
+                _scheduleControls(/* isTouch */) {
+                    this.controlsVisible = true;
+                    if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                    // 3s for both touch and desktop. Tap outside / mouseleave hides immediately.
+                    this._controlsTimer = setTimeout(() => {
+                        this.controlsVisible = false;
+                    }, 3000);
+                },
+                onPlayerContextMenu(event) {
+                    // Hidden debug shortcut: right-click on the player → dump current buffers and pause.
+                    // (Listener lives on the .player container so the overlay can't swallow it.)
+                    event.preventDefault();
+                    this.dump();
+                    if (this.player) {
+                        this.player.paused = true;
+                    }
+                },
+
                 buildStream() {
                     if(!this.stream) {
                         this.stream  = 'out+de1e6f7c-e5db-450b-9603-c3644274779b';
@@ -802,7 +1145,7 @@
                     }
                 },
 
-                
+
                 play() {
                     this.startTime = Util.time();
                     log('Play stream', this.stream, 'with options', options).info();
@@ -811,10 +1154,12 @@
                         return;
                     }
                     // reset error
-                    this.streamErrorMessage = null; 
+                    this._lastMediaError = null;
+                    this.setStreamError(null);
                     // reset stats!
                     this.resetMetrics(true);
                     this.resetMessages();
+                    this.resetTimeline();
                     // reset dump if activated
                     if(this.audioDump) {
                         this.audioDump.clear();
@@ -826,7 +1171,11 @@
                     // build params
                     const params = this.buildConnectParams();
                     if(!params.streamName) {
-                        this.streamErrorMessage = "Enter a non-empty stream name or URL to play";
+                        this.setStreamError({
+                            type: 'Input',
+                            name: 'Missing stream',
+                            detail: 'Enter a non-empty stream name or URL to play.'
+                        });
                         return;
                     }
 
@@ -837,11 +1186,31 @@
                     videoElement.autoplay = true;
                     videoElement.onloadeddata = () => {
                         log('TTFF :', Util.time()-this.startTime).info();
+                        this.playState = PlayState.PLAYING;
                     };
                     videoElement.onerror = () => {
                         const mediaError = videoElement.error;
                         if (mediaError) {
-                            log('Media error code:', mediaError.code, 'Details:', mediaError.message).error();
+                            // Capture it: the Player resets the video element before calling onStop,
+                            // which clears videoElement.error. We read this snapshot in onStop so the
+                            // real root cause survives instead of being overwritten by the symptom.
+                            this._lastMediaError = { code: mediaError.code, message: mediaError.message };
+                            log(
+                                '>>> VIDEO MediaError:',
+                                MEDIA_ERROR_NAMES[mediaError.code] || mediaError.code,
+                                '(code ' + mediaError.code + ')',
+                                'message:',
+                                mediaError.message || '(empty)'
+                            ).error();
+                            // The Player will usually emit a richer 'Playback error' via onStop right after,
+                            // which will overwrite this. But surface the native MediaError immediately in
+                            // case onStop doesn't fire (e.g. error happens before the player is wired up).
+                            this.setStreamError({
+                                type: 'Video',
+                                name: MEDIA_ERROR_NAMES[mediaError.code] || 'Media playback error',
+                                detail: mediaError.message || undefined,
+                                code: mediaError.code
+                            });
                         }
                     };
 
@@ -851,11 +1220,22 @@
                     this.player.onStop = this.onStop.bind(this);
                     this.player.onTrackChange = this.onTrackChange.bind(this);
                     this.player.onMetadata = this.onMetadata.bind(this);
-                   
+
                     this.player.onAudioAppended = data => this.audioDump && this.audioDump.write(data);
                     this.player.onVideoAppended = data => this.videoDump && this.videoDump.write(data);
+                    // Per-sample reception feed for the Timeline widget and the A/V offset metric
+                    this._audioEnd = this._videoEnd = undefined;
+                    this.player.onVideo = (track, sample) => {
+                        this._videoEnd = sample.time + sample.duration;
+                        this.uiTimeline.pushVideo(track, sample);
+                    };
+                    this.player.onAudio = (track, sample) => {
+                        this._audioEnd = sample.time + sample.duration;
+                        this.uiTimeline.pushAudio(track, sample);
+                    };
                     this.player.onData = (track, time, duration, data) => {
-                        this.pushMessage(track, time, data);
+                        this.pushMessage(track, data);
+                        this.uiTimeline.pushData(track, { time, duration, data });
                         const codec = this.player.metadata.tracks.get(track)?.codecString;
                         log(
                             `Data reception ${Util.stringify({track,  ...(codec && {codec}), time, duration, data })}`
@@ -866,13 +1246,21 @@
                         // Update enabled DRM based on the active key system
                         this.keySystem = mediaKeysEngine? mediaKeysEngine.keySystem : null;
                     }
-              
+                    this.player.onBufferChange = () => {
+                        if (this.fixedPlaybackRate) {
+                            if (videoElement.playbackRate !== 1) {
+                                videoElement.playbackRate = 1;
+                            }
+                        } else {
+                            this.player.adjustPlaybackRate();
+                        }
+                    };
+
                     this.setBuffer(); // to set buffer size!
                     this.player.start(params, options.timeout);
                 },
                 onStart() {
                     log('onStart').info();
-                    this.playState = PlayState.PLAYING;
                     this.player.reliable = !this.adaptiveFrameSkipping;
                     if(options.combinable != null) {
                         this.player.tracksCombinable = options.combinable ? true : false;
@@ -882,13 +1270,42 @@
                     this.player.cmcdSid = options.cmcdSid;
                 },
                 onStop(error) {
+                    const videoElement = this.$refs.video;
                     if(error) {
                         log('onStop', error).error();
-                        this.streamErrorMessage = error.name;
+                        // Surface the native MediaError: an "Append buffer issue" with
+                        // "HTMLMediaElement.error attribute is not null" is a *secondary* symptom — the
+                        // <video> element failed first. Prefer the snapshot captured by onerror because
+                        // the Player resets the video element before this fires, clearing videoElement.error;
+                        // fall back to a live read in case onerror never ran.
+                        const mediaError = this._lastMediaError || videoElement.error;
+                        if (mediaError) {
+                            log(
+                                '>>> ROOT CAUSE VIDEO MediaError:',
+                                MEDIA_ERROR_NAMES[mediaError.code] || mediaError.code,
+                                '(code ' + mediaError.code + ')',
+                                'message:',
+                                mediaError.message || '(empty)'
+                            ).error();
+                        }
+                        // Prefer the native MediaError for the on-screen alert: when the <video>
+                        // element has failed (e.g. PIPELINE_ERROR_DECODE), the Player's onStop error
+                        // is usually a downstream symptom ("Append buffer issue"). Show the root cause
+                        // and keep the player error as an extra field for context.
+                        if (mediaError) {
+                            this.setStreamError({
+                                type: 'Video',
+                                name: MEDIA_ERROR_NAMES[mediaError.code] || 'Media playback error',
+                                detail: mediaError.message || undefined,
+                                code: mediaError.code,
+                                cause: error.name
+                            });
+                        } else {
+                            this.setStreamError(error);
+                        }
                     } else {
                         log('onStop').info();
                     }
-                    const videoElement = this.$refs.video;
                     videoElement.muted = this.muted;
                     videoElement.autoplay = true;
                     videoElement.onloadeddata = null;
@@ -905,6 +1322,8 @@
                     this.player = null;
                     this.playState = PlayState.STOPPED;
                     this.keySystem = null;
+                    this.controlsVisible = false;
+                    if (this._controlsTimer) { clearTimeout(this._controlsTimer); this._controlsTimer = null; }
                 },
                 onTrackChange(audioTrack, videoTrack, dataTrack) {
                     log(`onTrackChange ${Util.stringify({audioTrack, videoTrack, dataTrack})}`).info();
@@ -925,7 +1344,7 @@
                     this.videoTracks = new Map();
 
                     for (const [id, track] of metadata.tracks) {
-                
+
                         if (track.type === Media.Type.VIDEO) {
                             this.videoTracks.set(id, track.toString());
                         } else if (track.type === Media.Type.AUDIO) {
@@ -933,9 +1352,11 @@
                         }
                     }
                 },
+
+                // ── Bottom panel: tabs and data messages ──
                 selectBottomTab(tab) {
                     this.activeBottomTab = tab;
-                    if(tab === 'messages') {
+                    if (tab === 'messages') {
                         this.unreadMessages = 0;
                         this.scrollMessagesToBottom();
                     }
@@ -955,26 +1376,53 @@
                 scrollMessagesToBottom() {
                     nextTick(() => {
                         const panel = this.$refs.messagesPanel;
-                        if(panel) {
+                        if (panel) {
                             panel.scrollTop = panel.scrollHeight;
                         }
                     });
                 },
-                pushMessage(track, time, data) {
-                    const message = Util.stringify(data);
+                pushMessage(track, data) {
                     this.messages.push({
                         track,
                         receivedAt: this.formatReceptionTime(),
-                        text: message.replace(/[\r\n]+/g, ' ')
+                        // One row per message: newlines would break the fixed-height monospace layout
+                        text: Util.stringify(data).replace(/[\r\n]+/g, ' ')
                     });
-                    if(this.messages.length > 200) {
-                        this.messages.splice(0, this.messages.length - 200);
+                    if (this.messages.length > MAX_MESSAGES) {
+                        this.messages.splice(0, this.messages.length - MAX_MESSAGES);
                     }
-                    if(this.activeBottomTab !== 'messages') {
+                    if (this.activeBottomTab !== 'messages') {
                         this.unreadMessages += 1;
                     }
                     this.scrollMessagesToBottom();
                 },
+                // Docks the graph/messages panel to the right of the video instead of below it.
+                toggleSidePanel() {
+                    this.sidePanel = !this.sidePanel;
+                    this.updateURL();
+                },
+
+                // ── Timeline toolbar ──
+                resetTimeline() {
+                    this.uiTimeline.reset();
+                    this.tlFollowing = true;
+                },
+                toggleTimelineFollow() {
+                    this.tlFollowing = !this.tlFollowing;
+                    this.uiTimeline.following = this.tlFollowing;
+                },
+                setTimelineAxis(axis) {
+                    this.tlAxis = axis;
+                    this.uiTimeline.axis = axis;
+                },
+                setTimelineWindow(seconds) {
+                    this.tlWindow = seconds;
+                    this.uiTimeline.windowDuration = seconds;
+                },
+                downloadTimeline() {
+                    this.download('timeline.csv', this.uiTimeline.toCSV(), 'text/csv;charset=utf-8;');
+                },
+
                 mute() {
                     this.muted = !this.muted;
                     this.$refs.video.muted = this.muted;
@@ -999,57 +1447,61 @@
                         this.player.goLive();
                     }
                 },
+
+                // ── Metrics ──
                 resetMetrics(all=false) {
                     this.uiStats.reset();
-                    // reset incremental metrics counters
+                    // Rebaseline the counters the Player reports cumulatively, so the chart
+                    // shows what happened since this reset and not since the stream started.
                     if (this.player) {
-                        let playerStats = this.player.computeStats();
-                        const {skippedAudio, skippedVideo, stallCount} = playerStats;
-                        this.deltaStats = { skippedAudio, skippedVideo, stallCount} ;
+                        const {skippedAudio, skippedVideo, stallCount} = this.player.computeStats();
+                        this.deltaStats = { skippedAudio, skippedVideo, stallCount };
                     }
-                    const displayableCount = all ? 0 : this.uiStats.displayableCount;
-                    for(let [_, values] of this.stats) {
-                        values.splice(0, Math.max(0, values.length - displayableCount));
-                    }
-                    this.times.splice(0, Math.max(0, this.times.length - displayableCount));
+                    this.trimStats(all);
                     if (all){
                         this.hasMetrics = false;
                         this.deltaStats = {};
                     }
                 },
+                // Drop the samples the chart no longer displays, or all of them when `all` is set
+                // (a new stream: the previous run's scale would flatten the new one).
+                trimStats(all = false) {
+                    const displayableCount = all ? 0 : this.uiStats.displayableCount;
+                    for (const [, values] of this.stats) {
+                        values.splice(0, Math.max(0, values.length - displayableCount));
+                    }
+                    this.times.splice(0, Math.max(0, this.times.length - displayableCount));
+                },
                 download(name, data, type) {
-                    const url = URL.createObjectURL(new Blob([data], {type}));
-                    const link = document.createElement("a");
-                    link.setAttribute("href", url);
-                    link.setAttribute("download", name);
+                    const url = URL.createObjectURL(new Blob([data], { type }));
+                    const link = document.createElement('a');
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', name);
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
                     URL.revokeObjectURL(url);
                 },
                 downloadStats() {
-                    // Write headers and compute max values
-                    let csv = "";
                     let max = this.times.length;
-                    let headers = ["localTime" , "mediaTime"];
+                    const headers = ['localTime', 'mediaTime'];
                     for (const [header, values] of this.stats) {
                         headers.push(header);
                         max = Math.max(max, values.length);
                     }
-                    csv = headers.join(';');
-                    
-                    // Write CSV
+                    let csv = headers.join(';');
+
+                    // Series are filled independently (a metric can start late), so a row can be short
                     for (let i = 0; i < max; ++i) {
                         csv += '\n';
-                        const {time, mediaTime} = this.times[i];
+                        const { time, mediaTime } = this.times[i] ?? {};
                         csv += (time || '') + ';' + (mediaTime || '') + ';';
-                        for(let [name, stats] of this.stats) {
-                            csv += (stats[i] == null ? '' : parseFloat(stats[i])) + ';';
+                        for (const [, values] of this.stats) {
+                            csv += (values[i] == null ? '' : parseFloat(values[i])) + ';';
                         }
                     }
 
-                    // Download the csv !
-                    this.download("stats.csv", csv, 'text/csv;charset=utf-8;');
+                    this.download('stats.csv', csv, 'text/csv;charset=utf-8;');
                 },
 
                 dump() {
@@ -1063,42 +1515,34 @@
                 },
                 fullscreen() {
                     const video = this.$refs.video;
+                    const target = this.$refs.player; // fullscreen the container so our overlay stays reachable
 
-                    if (document.fullscreenElement) {
-                        if(document.exitFullscreen) {
-                            document.exitFullscreen();
-                        } else if(video && video.webkitExitFullscreen) {
-                            video.webkitExitFullscreen();
-                        }
+                    // Already in fullscreen → exit. Prefer the standard exit path.
+                    if (document.fullscreenElement || document.webkitFullscreenElement) {
+                        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
                         return;
-                    } 
-
-                    if(!video) {
+                    }
+                    // iOS Safari can only fullscreen the <video> itself (native player UI exits via "Done").
+                    if (video && video.webkitDisplayingFullscreen) {
+                        video.webkitExitFullscreen && video.webkitExitFullscreen();
                         return;
                     }
 
-                    if(video.requestFullscreen) {
-                         video.requestFullscreen();
-                    } else if(video.webkitEnterFullscreen) {
+                    if (target && target.requestFullscreen) {
+                        target.requestFullscreen();
+                    } else if (target && target.webkitRequestFullscreen) {
+                        target.webkitRequestFullscreen();
+                    } else if (video && video.webkitEnterFullscreen) {
+                        // iOS Safari fallback: native fullscreen on the video element only.
                         video.webkitEnterFullscreen();
-                    } else if(video.enterFullscreen) {
-                        video.enterFullscreen();
                     }
-                },
-                playButtonCaption() {
-                    if (this.isStopped())
-                        return 'Play';
-                    if (this.isStarting())
-                        return 'Starting...';
-                    if (this.isPlaying())
-                        return 'Stop';
                 },
                 activeDrmLabel() {
                     if (!this.keySystem) {
-                        return 'protection';
+                        return 'Protection';
                     }
                     const drm = this.contentProtection.find(d => this.isDrmActive(d));
-                    return drm ? drm.label : 'protection';
+                    return drm ? drm.label : 'Protection';
                 },
                 isPlaying() {
                     return this.playState === PlayState.PLAYING;
@@ -1120,51 +1564,48 @@
                     }
                 },
                 setBuffer(min, max) {
-                    let profile;
+                    let preset;
                     if(!isNaN(min) || !isNaN(max)) {
                         // manual mode
-                        profile = this.netProfiles.entries().next().value;
-                        this.netProfile = profile[0];
-                        profile = profile[1];
+                        preset = this.netPresets.entries().next().value;
+                        this.netPreset = preset[0];
+                        preset = preset[1];
 
                         this.bufferMin = Math.min(min || max, max || min);
                         this.bufferMax = Math.max(min || max, max || min);
                     } else {
                         // auto mode
-                        profile = this.netProfiles.get(this.netProfile);
-                        if(profile[1]) {
-                            this.bufferMin = profile[1];
+                        preset = this.netPresets.get(this.netPreset);
+                        if(preset[1]) {
+                            this.bufferMin = preset[1];
                         }
-                        if(profile[2]) {
-                            this.bufferMax = profile[2];
+                        if(preset[2]) {
+                            this.bufferMax = preset[2];
                         }
                     }
 
-                    
+
                     if (this.player) {
                         // fix possible player correction!
                         this.bufferMin = (this.player.bufferLimitLow = this.bufferMin);
                         this.bufferMax = (this.player.bufferLimitHigh = this.bufferMax);
                     }
-                    
+
                     // Display user description
-                    this.netDescription = profile[0];
-                    this.netDescription += "<br>Expected buffering ≈" + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + "ms";
+                    this.netDescription = preset[0];
+                    this.netDescription += '<br><strong>Expected buffering ≈ ' + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + 'ms</strong>';
 
                     this.updateURL();
-                    
+
                 },
                 updateURL() {
-                    if (history.pushState) {
+                    if (history.replaceState) {
                         let path = location.origin + location.pathname + '?stream=' + encodeURIComponent(this.buildStream()) + '&bufferMin=' + this.bufferMin + '&bufferMax=' + this.bufferMax;
                         if(options.token != null) {
                             path += "&token=" + options.token;
                         }
                         if(options.id != null) {
                             path += "&id=" + options.id;
-                        }
-                        if(options.combinable != null) {
-                            path += "&combinable=" + options.combinable;
                         }
                         if(options.latency != null) {
                             path += "&latency";
@@ -1184,8 +1625,23 @@
                         if(!this.adaptiveFrameSkipping) {
                             path += "&reliable";
                         }
+                        if (options.combinable != null && !options.combinable) {
+                            path += "&combinable=false";
+                        }
                         if(options.dump) {
                             path += "&dump";
+                        }
+                        if(options.fixedRate) {
+                            path += "&fixedRate";
+                        }
+                        if(this.sidePanel) {
+                            path += "&sidePanel";
+                        }
+                        if(options.debugoverlay) {
+                            path += "&debugoverlay";
+                        }
+                        if(options.events) {
+                            path += "&events";
                         }
                         if(options.host != null) {
                             path += "&host=" + options.host;
@@ -1194,7 +1650,13 @@
                         if (contentProtection) {
                             path += "&contentProtection=" + utf8ToBase64Url(contentProtection);
                         }
-                        history.pushState({path},'',path);
+                        // Skip if nothing changed, and use replaceState (not pushState) so settings
+                        // tweaks update the address bar in place instead of stacking history entries
+                        // the user then has to click back through.
+                        if (path === location.href) {
+                            return;
+                        }
+                        history.replaceState({path}, '', path);
                     }
                 },
                 mutableReliability() {
