@@ -1271,6 +1271,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
         this._bufferState = state;
         this.onBufferState(oldState);
+        // A state transition must always be able to re-evaluate the rate, even if bufferAmount
+        // happens to settle within BUFFER_CHANGE_STEP of its last onBufferChange right after transitioning
+        this.onBufferChange();
     }
 
     private _newMediaSource(): MediaSource | undefined {
