@@ -224,17 +224,17 @@ export class HTTPAdaptiveSource extends Source {
                 const bandwidthMeasure = this.recvByteRate.value();
                 let up = false;
                 const aborted = this._cancelableController.signal.aborted || this._alterableController.signal.aborted;
-                const constrained = playing.playbackConstrained || videoTrack.limitedSupport;
+                const constrained = playing.playbackConstrained;
                 if (
                     constrained || // the current playback is not smooth enough to sustain the current rendition
+                    videoTrack.limitedSupport || // the current rendition is not fully supported by the browser
                     aborted || // we have aborted a sequence because of a stall or a low buffer
                     low // we reach low in buffer without UP emulation perturbation
                 ) {
                     // We have to down one level
-                    if (constrained || (!this._upController && !upRetry.failed)) {
-                        // The current playback is not smooth enough
-                        // OR was no emulation and no a consecutive fail
-                        // => we have to down at least of one level
+                    if (videoTrack.limitedSupport || (!upRetry.failed && (constrained || !this._upController))) {
+                        // Always downshift renditions with limited support.
+                        // Otherwise, avoid consecutive downshifts during the same failure period.
                         videoTrack = videoTrack.down ?? videoTrack;
                     }
                     // Compute the best rendition to play according to the bandwidth measure
