@@ -5,14 +5,14 @@
  */
 
 /**
- * Collects normalized buffer measurements and exposes the observed range.
+ * Collects buffer measurements and exposes the observed range.
  *
  * Buffer amounts and durations are expressed in milliseconds. Measurement times
  * are Unix timestamps in milliseconds.
  */
 export class BufferMeasure {
     /**
-     * Lowest normalized buffer amount observed, or `0` before the first measurement.
+     * Lowest buffer amount observed, or `0` before the first measurement.
      */
     get low(): number {
         return this._low;
@@ -24,7 +24,7 @@ export class BufferMeasure {
         return this._lowTime;
     }
     /**
-     * Highest normalized buffer amount observed, or `0` before the first measurement.
+     * Highest buffer amount observed, or `0` before the first measurement.
      */
     get high(): number {
         return this._high;
@@ -54,7 +54,7 @@ export class BufferMeasure {
     }
 
     /**
-     * Difference between the highest and lowest normalized buffer amounts.
+     * Difference between the highest and lowest buffer amounts.
      * Returns `0` until both observations are available.
      */
     get lowHighRange(): number {
@@ -64,53 +64,17 @@ export class BufferMeasure {
         return this._high - this._low;
     }
 
-    /**
-     * Whether samples are being ignored while the initial playback-speed reaches real-time speed.
-     */
-    get starting() {
-        return this._starting != null;
-    }
-
-    /**
-     * Whether the buffer measurements are currently being ignored
-     * due to the initial playback-speed being below real-time speed.
-     */
-    set starting(value: boolean) {
-        this._starting = value ? 0 : undefined;
-    }
-
     private _low: number = 0;
     private _lowTime: number = 0;
     private _high: number = 0;
     private _highTime: number = 0;
     private _time: number = 0;
-    private _starting?: number;
 
     /**
-     * Adds a buffer measurement normalized for the current playback speed.
-     *
-     * When {@link starting} is enabled, initial samples are ignored while the
-     * playback-speed estimate increases below real-time speed.
-     *
+     * Adds a buffer measurement.
      * @param bufferAmount Current buffered media duration in milliseconds.
-     * @param playbackSpeed Estimated playback speed, where `1` is real-time speed.
      */
-    set(bufferAmount: number, playbackSpeed: number) {
-        // Ignore initial values while the playback-speed reaches real-time speed
-        if (this._starting != null) {
-            if (playbackSpeed < 1 && playbackSpeed >= this._starting) {
-                this._starting = playbackSpeed;
-                return;
-            }
-            this._starting = undefined;
-        }
-        // Compute buffer amount relative to playback rate
-        if (playbackSpeed > 1) {
-            bufferAmount /= playbackSpeed;
-        } else if (playbackSpeed < 1) {
-            bufferAmount *= playbackSpeed;
-        }
-        bufferAmount = Math.round(bufferAmount);
+    set(bufferAmount: number) {
         // Save the current time and update low/high values
         this._time = Date.now();
         if (!this._lowTime || bufferAmount <= this._low) {

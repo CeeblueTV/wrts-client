@@ -664,6 +664,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _buffering: boolean;
     private _maximumResolution?: Media.Resolution;
     private _paused: boolean;
+    private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;
     private _mediaKeysStopping?: Promise<unknown>;
     private _playbackSpeed: ByteRate;
@@ -891,7 +892,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 }
             };
             this._playback.onClose = error => this.stop(error);
-            this._bufferMeasure.starting = true;
             this.onStart();
         };
 
@@ -913,7 +913,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             /// start data timeout
             clearTimeout(this._timeout.id);
             this._timeout.id = setTimeout(() => this.stop({ type: 'PlayerError', name: 'Data timeout' }), this._timeout.value);
-            // wait data
+            /// wait data
             this.log('buffering...').info();
             this._buffering = true;
             this._setBufferState(BufferState.LOW); // Force buffer to LOW
@@ -947,10 +947,27 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.log(`Playback seek to ${this.currentTime}s (${(this.currentTime - this.endTime).toFixed(3)} from end)`).info();
         };
         const onPause = () => {
+            this._starting = Number.MIN_VALUE;
             this.log('Playback paused')[this._paused ? 'info' : 'warn']();
         };
         const onTimeUpdate = () => {
-            this._computePlaybackSpeed();
+            const playbackSpeed = this.playbackSpeed;
+            // Detect starting phase to avoid wrong buffer measure
+            if (this._starting) {
+                if (playbackSpeed) {
+                    if (playbackSpeed < this.playbackRate && playbackSpeed >= this._starting) {
+                        // playback starting
+                        this._starting = playbackSpeed;
+                    } else {
+                        // stop starting phase =>
+                        // playbackRate reached OR playbackSpeed decreasing
+                        this._starting = 0;
+                        this.log(
+                            `Playback starting phase ended at x${playbackSpeed.toFixed(2)} speed (bufferAmount=${this.bufferAmount}ms)`
+                        ).info();
+                    }
+                }
+            }
             this._onPlayerProgress();
         };
 
@@ -1080,6 +1097,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._playbackSpeed.clear();
         this._playbackPrevTime = undefined;
         this._stallCount = 0;
+        this._starting = Number.MIN_VALUE;
         this._previousBufferAmount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
@@ -1292,6 +1310,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         } else if (!this._playbackSpeed.value()) {
             // When no value, reset to avoid long amortization while starting
             this._playbackSpeed.clear();
+            // reset starting phase
+            this._starting = Number.MIN_VALUE;
         }
         this._playbackPrevTime = currentTime;
     }
@@ -1349,9 +1369,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._playback.startTime = currentTime - PAST_BUFFER;
         }
 
+        // Measure buffer amount
         const bufferAmount = this.bufferAmount;
-
-        this._bufferMeasure.set(bufferAmount, this.playbackSpeed);
+        if (!this._starting) {
+            // measure buffer after starting phase
+            this._bufferMeasure.set(bufferAmount);
+        }
 
         // Playing progress => check buffering!
         if (bufferAmount > this._bufferLimitLow) {
