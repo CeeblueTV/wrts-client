@@ -353,9 +353,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     set bufferLimitLow(value: number) {
         value = Math.round(value);
+        const window = this._bufferLimitHigh - this._bufferLimitLow;
         this._bufferLimitLow = value;
         // to fix bufferLimitHigh and update _bufferLimitMiddle
-        this._setBufferLimitHigh(Math.max(value, this._bufferLimitHigh));
+        this._setBufferLimitHigh(
+            Math.max(value, this._bufferLimitHighAuto ? this._bufferLimitLow + window : this._bufferLimitHigh)
+        );
     }
 
     /**
