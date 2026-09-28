@@ -217,7 +217,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     onVideoAppended(data: Uint8Array) {}
 
     /**
-     * Event fire when the buffer amount changes  by at least BUFFER_CHANGE_STEP ms
+     * Event fire when the buffer amount changes by at least BUFFER_CHANGE_STEP ms
      * @event
      *
      * Note: on iPhone / iOS / Safari, playbackRate changes can produce audible glitches during live streaming.
@@ -1231,7 +1231,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         } else {
             // Buffer diminution
             if (shouldIncrease) {
-                // wait end of measure
+                // Wait for a more complete measurement
+                // OR the end of the measurement window
                 return;
             }
             if (highLimit < this._bufferLimitHigh) {
