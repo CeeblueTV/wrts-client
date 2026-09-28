@@ -165,6 +165,20 @@ export interface IPlaying extends EventEmitter {
     get playbackSpeed(): number;
 
     /**
+     * Indicates whether the current playback appears to be constrained.
+     *
+     * Playback is considered constrained when:
+     * - enough media is buffered, but the effective playback speed is more than
+     *   3% below the requested playback rate, or
+     * - more than 3% of the expected video frames are being dropped.
+     *
+     * This metric can be used as an additional input for the MBR logic, allowing
+     * rendition decisions to take local playback performance into account in
+     * addition to buffer/network conditions.
+     */
+    get playbackConstrained(): boolean;
+
+    /**
      * Get maximum resolution that the MBR algo can reach, undefined means no limit.
      * Defaults to the value of {@link Media.screenResolution}
      */

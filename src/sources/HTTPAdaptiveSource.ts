@@ -224,15 +224,16 @@ export class HTTPAdaptiveSource extends Source {
                 const bandwidthMeasure = this.recvByteRate.value();
                 let up = false;
                 const aborted = this._cancelableController.signal.aborted || this._alterableController.signal.aborted;
+                const constrained = playing.playbackConstrained || videoTrack.limitedSupport;
                 if (
-                    videoTrack.limitedSupport || // the current rendition is not smoothly supported
+                    constrained || // the current playback is not smooth enough to sustain the current rendition
                     aborted || // we have aborted a sequence because of a stall or a low buffer
                     low // we reach low in buffer without UP emulation perturbation
                 ) {
                     // We have to down one level
-                    if (videoTrack.limitedSupport || (!this._upController && !upRetry.failed)) {
-                        // Not supported correctly
-                        // OR was no emulation, and no a consecutive fail
+                    if (constrained || (!this._upController && !upRetry.failed)) {
+                        // The current playback is not smooth enough
+                        // OR was no emulation and no a consecutive fail
                         // => we have to down at least of one level
                         videoTrack = videoTrack.down ?? videoTrack;
                     }
@@ -259,7 +260,7 @@ export class HTTPAdaptiveSource extends Source {
                     // change track
                     let log = `MBR ${up ? 'UP' : 'DOWN'} from track ${tracks.video} to ${videoTrack.id} at ${(videoTrack.bandwidth * 8) / 1000}kbps ${Util.stringify(videoTrack.resolution)}`;
                     if (!up) {
-                        log += ' (constraint=' + ((bandwidthMeasure * 8) / 1000).toFixed() + 'kbps)';
+                        log += ` (constrained='${constrained}', bandwidth=${((bandwidthMeasure * 8) / 1000).toFixed()}kbps)`;
                     }
                     this.log(log)[up ? 'info' : 'warn']();
                     tracks.video = videoTrack.id;

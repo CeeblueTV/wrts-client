@@ -439,6 +439,33 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * @override
+     * {@inheritDoc IPlaying.playbackConstrained}
+     */
+    get playbackConstrained(): boolean {
+        if (!this._source || this._paused || this._starting) {
+            return false;
+        }
+        if (this.bufferAmount > this._bufferLimitHigh) {
+            // We are in a high buffer state, check if playback speed is too slow!
+            // Only check playback speed when media buffered exceeds the accurate range,
+            // indeed slow playback may simply be caused by insufficient input.
+            if (this.playbackSpeed < this.playbackRate * 0.97) {
+                // playback speed inferior of 3% of the playback rate = NOK
+                return true;
+            }
+        }
+        // More than 3% dropped frames = NOK.
+        const videoFPS = this._source.videoPerSecond;
+        if (!videoFPS) {
+            // no video!
+            return false;
+        }
+        const droppedFPS = this._droppedFramePerSecond.exact();
+        return droppedFPS / videoFPS > 0.03;
+    }
+
+    /**
      * Gets an estimation of playback latency in milliseconds,
      * Computed as the difference between the estimated live time and the current playback time.
      */
