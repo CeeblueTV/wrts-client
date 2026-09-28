@@ -148,6 +148,11 @@ export interface IPlaying extends EventEmitter {
     get audioPerSecond(): number;
 
     /**
+     * Get the number of frame per second currently dropped by the renderer
+     */
+    get droppedFramePerSecond(): number;
+
+    /**
      * Gets the current playback rate.
      * A value of 1.0 represents real-time playback.
      */

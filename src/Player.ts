@@ -566,6 +566,14 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * @override
+     * {@inheritDoc IPlaying.droppedFramePerSecond}
+     */
+    get droppedFramePerSecond(): number {
+        return this._droppedFramePerSecond.exact();
+    }
+
+    /**
+     * @override
      * {@inheritDoc ICMCD.cmcd}
      */
     get cmcd(): CMCD {
@@ -672,6 +680,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _passthroughCMAF?: boolean;
     private _previousBufferAmount: number;
     private _stallCount: number = 0;
+    private _droppedVideoFrames: number = 0;
+    private _droppedFramePerSecond: ByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
 
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
@@ -861,6 +871,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 this._playback?.appendAudio(this._metadata, trackId, sample);
             };
             this._source.onVideo = (trackId: number, sample: Media.Sample) => {
+                if (sample.isKeyFrame) {
+                    this._droppedFramePerSecond.clip();
+                }
                 this._playback?.appendVideo(this._metadata, trackId, sample);
             };
             this._source.onData = (trackId: number, sample: Media.Sample) => {
@@ -1085,6 +1098,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         // Reset values
+        this._droppedVideoFrames = 0;
+        this._droppedFramePerSecond.clear();
         this._bufferLimitHighAuto?.reset();
         this._bufferMeasure = new BufferMeasure();
         this._passthroughCMAF = undefined;
@@ -1414,6 +1429,14 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // Buffer change detection
         if (this.running && Math.abs(this._previousBufferAmount - bufferAmount) >= BUFFER_CHANGE_STEP) {
             this._previousBufferAmount = bufferAmount;
+
+            // also compute dropped frames per second
+            const quality = this._video.getVideoPlaybackQuality();
+            const dropped = quality.droppedVideoFrames - this._droppedVideoFrames;
+            this._droppedVideoFrames = quality.droppedVideoFrames;
+            if (dropped) {
+                this._droppedFramePerSecond.addBytes(dropped);
+            }
             this.onBufferChange();
         }
     }
