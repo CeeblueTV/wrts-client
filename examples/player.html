@@ -238,6 +238,10 @@
                                 <img alt="Dump media" title="Dump media as MP4 files"
                                     @click="dump()" src="./assets/dump.png"
                                     v-show="audioDump || videoDump">
+                                <button class="e2e-btn" :class="{ on: e2eEnabled }" @click="toggleE2E()"
+                                    title="End-to-end latency from the timestamp burnt into the video. Off by default: reading back a video frame every sample is costly on mobile">
+                                    E2E
+                                </button>
                             </div>
                         </div>
 
@@ -722,6 +726,7 @@
                     startTime: 0,
                     adaptiveFrameSkipping: true,
                     fixedPlaybackRate: options.fixedRate ? true : false,
+                    e2eEnabled: options.e2e ? true : false,
                     streamMetadata: null,
                     netDescription: "",
                     videoTracks: new Map(),
@@ -903,10 +908,14 @@
 
                         stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
 
-                        const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
-                        if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
-                            // displaid only if activated!
-                            e2eLatencies.push(e2eLatency+"ms");
+                        if (this.e2eEnabled) {
+                            const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
+                            if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
+                                // displaid only if activated!
+                                e2eLatencies.push(e2eLatency+"ms");
+                            }
+                        } else if (e2eLatencies.length) {
+                            e2eLatencies.push('0ms'); // keeps the series aligned, 0 = no measure
                         }
                         this.times.push({
                             time: new Date().toISOString(),
@@ -1488,6 +1497,10 @@
                         this.deltaStats = {};
                     }
                 },
+                toggleE2E() {
+                    this.e2eEnabled = !this.e2eEnabled;
+                    this.updateURL();
+                },
                 // Drop the samples the chart no longer displays, or all of them when `all` is set
                 // (a new stream: the previous run's scale would flatten the new one).
                 trimStats(all = false) {
@@ -1677,6 +1690,9 @@
                         }
                         if(options.fixedRate) {
                             path += "&fixedRate";
+                        }
+                        if(this.e2eEnabled) {
+                            path += "&e2e";
                         }
                         if(this.sidePanel) {
                             path += "&sidePanel";
