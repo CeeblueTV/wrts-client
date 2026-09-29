@@ -8,7 +8,7 @@ import { Connect, ILog, Util } from '@ceeblue/web-utils';
 import * as Media from '../media/Media';
 import { Source } from './Source';
 import { Metadata } from '../media/Metadata';
-import { AdaptiveRetry } from '../media/AdaptiveRetry';
+import { AdaptiveRetry } from '../utils/AdaptiveRetry';
 import { BufferState, IPlaying } from './IPlaying';
 import { CMCD } from '../media/CMCD';
 import { Reader } from '../media/reader/Reader';
@@ -174,13 +174,21 @@ export class HTTPAdaptiveSource extends Source {
         // propagate Metadata
         this.readMetadata(metadata);
 
+        let low = false;
         playing.on(
             'BufferState',
             async () => {
+                low = false;
                 if (playing.bufferState === BufferState.LOW) {
-                    // Stop up emulation if is running !
-                    this._upController?.abort();
+                    if (this._upController) {
+                        // Stop up emulation if is running !
+                        this._upController.abort();
+                    } else {
+                        low = true;
+                    }
                 }
+                // Just rearm the UP emulation on every buffer instability
+                upRetry.rearm();
             },
             { signal: playing.signal }
         );
@@ -203,7 +211,7 @@ export class HTTPAdaptiveSource extends Source {
         );
 
         // Start download
-        const upRetry = new AdaptiveRetry();
+        const upRetry = new AdaptiveRetry('MBR');
         upRetry.log = this.log.bind(this, 'Adaptive Bitrate,') as ILog;
 
         while (!this.closed) {
@@ -216,15 +224,17 @@ export class HTTPAdaptiveSource extends Source {
                 const bandwidthMeasure = this.recvByteRate.value();
                 let up = false;
                 const aborted = this._cancelableController.signal.aborted || this._alterableController.signal.aborted;
-                const low = playing.bufferState === BufferState.LOW && !this._upController;
+                const playbackConstraint = playing.playbackConstraint;
                 if (
+                    playbackConstraint || // the current playback is not smooth enough to sustain the current rendition
+                    videoTrack.limitedSupport || // the current rendition is not fully supported by the browser
                     aborted || // we have aborted a sequence because of a stall or a low buffer
-                    low // we are low in buffer without UP emulation perturbation
+                    low // we reach low in buffer without UP emulation perturbation
                 ) {
                     // We have to down one level
-                    if (!this._upController && !upRetry.failed) {
-                        // was no emulation, and no a consecutive fail
-                        // so we have to down at least of one level
+                    if (videoTrack.limitedSupport || (!upRetry.failed && (playbackConstraint || !this._upController))) {
+                        // Always downshift renditions with limited support.
+                        // Otherwise, avoid consecutive downshifts during the same failure period.
                         videoTrack = videoTrack.down ?? videoTrack;
                     }
                     // Compute the best rendition to play according to the bandwidth measure
@@ -248,12 +258,25 @@ export class HTTPAdaptiveSource extends Source {
 
                 if (tracks.video !== videoTrack.id) {
                     // change track
-                    let log = `MBR ${up ? 'UP' : 'DOWN'} from track ${tracks.video} to ${videoTrack.id} at ${(videoTrack.bandwidth * 8) / 1000}kbps ${Util.stringify(videoTrack.resolution)}`;
-                    if (!up) {
-                        log += ' (constraint=' + ((bandwidthMeasure * 8) / 1000).toFixed() + 'kbps)';
-                    }
-                    this.log(log)[up ? 'info' : 'warn']();
+                    this.log(
+                        `MBR ${up ? 'UP' : 'DOWN'} from track ${tracks.video} to ${videoTrack.id} at ${(videoTrack.bandwidth * 8) / 1000}kbps ${Util.stringify(
+                            Object.assign(
+                                {
+                                    bandwidth: ((bandwidthMeasure * 8) / 1000).toFixed() + 'kbps',
+                                    buffer: playing.bufferAmount + 'ms'
+                                },
+                                playbackConstraint,
+                                videoTrack.resolution
+                            )
+                        )}`
+                    )[up ? 'info' : 'warn']();
                     tracks.video = videoTrack.id;
+                }
+
+                // compute current and UP support on each sequence, because it can change
+                videoTrack.detectSupportLimit();
+                if (videoTrack.up) {
+                    videoTrack.up.detectSupportLimit();
                 }
             } else {
                 // if no video track selected or no video metadata => reset
@@ -399,25 +422,35 @@ export class HTTPAdaptiveSource extends Source {
                 sequence > 0 &&
                 this._maxSequenceDuration &&
                 this._lastSequenceWasLive && // just if we are on live edge, any delay means a possible bandwidth issue
-                upRetry.try() &&
-                videoTrack.up &&
-                !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution)
+                upRetry.try()
             ) {
-                const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
-                this._upController = new AbortController();
-                if (extraByteRateRequired > 0) {
-                    const bytes = Math.ceil((extraByteRateRequired * this._maxSequenceDuration) / 1000);
-                    this.log(
-                        `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs by adding ${((extraByteRateRequired * 8) / 1000).toFixed()}kbs to current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
-                    ).info();
-                    this._downloadSequence(playing, this._upController, videoTrack.up.id, sequence - 1, bytes).then(
-                        response => (mbrOK = response.ok)
-                    );
-                } else {
-                    mbrOK = true;
-                    this.log(
-                        `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs requires no extra bandwidth over current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
-                    ).warn();
+                if (
+                    videoTrack.up && // there is a UP option
+                    !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution) && // this option is compatible with screen
+                    !videoTrack.up.limitedSupport // if unknown, we assume it is supported
+                ) {
+                    // this option is supported by the browser
+                    const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
+                    this._upController = new AbortController();
+                    if (extraByteRateRequired > 0) {
+                        const bytes = Math.ceil((extraByteRateRequired * this._maxSequenceDuration) / 1000);
+                        this.log(
+                            `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs by adding ${((extraByteRateRequired * 8) / 1000).toFixed()}kbs to current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
+                        ).info();
+                        this._downloadSequence(playing, this._upController, videoTrack.up.id, sequence - 1, bytes).then(
+                            response => (mbrOK = response.ok)
+                        );
+                    } else {
+                        mbrOK = true;
+                        this.log(
+                            `Bandwidth emulation of ${((videoTrack.up.bandwidth * 8) / 1000).toFixed()}kbs requires no extra bandwidth over current ${((videoTrack.bandwidth * 8) / 1000).toFixed()}kbs`
+                        ).warn();
+                    }
+                } else if (upRetry.success) {
+                    // We are at the maximum rendition: a success here means the network sustains the top level,
+                    // so the next UP recovery attempt can happen sooner after a future DOWN.
+                    // Note: no decrease on a successful UP emulation below the top, the next UP would be harder.
+                    upRetry.decrease();
                 }
             }
 

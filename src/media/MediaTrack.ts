@@ -56,6 +56,10 @@ export class MediaTrack {
      * Content Protection
      */
     contentProtection?: string;
+    /**
+     * Whether smooth playback support is limited by the browser.
+     */
+    limitedSupport?: boolean;
 
     up?: MediaTrack; // track up by ascending MAXBPS
     down?: MediaTrack; // track down by ascending MAXBPS
@@ -82,5 +86,40 @@ export class MediaTrack {
         name += ' ' + this.rate.toFixed() + (this.type === Media.Type.VIDEO ? 'fps' : 'hz');
         name += ' ' + ((this.bandwidth * 8) / 1000).toFixed() + 'kbps';
         return name;
+    }
+
+    /**
+     * Detect limited playback support.
+     */
+    async detectSupportLimit(): Promise<boolean | undefined> {
+        if (typeof navigator === 'undefined' || !navigator.mediaCapabilities?.decodingInfo) {
+            return (this.limitedSupport = undefined);
+        }
+
+        const type = Media.typeToString(this.type);
+        const configuration = {
+            type: 'media-source',
+            [type]: {
+                contentType: `video/mp4; codecs="${this.codecString}"`,
+                bitrate: this.bandwidth * 8 // convert to bps
+            }
+        } as MediaDecodingConfiguration;
+        if (configuration.audio) {
+            configuration.audio.samplerate = this.rate;
+        } else if (configuration.video) {
+            Object.assign(configuration.video, {
+                framerate: this.rate,
+                width: this.resolution.width,
+                height: this.resolution.height
+            });
+        }
+        try {
+            const result = await navigator.mediaCapabilities.decodingInfo(configuration);
+            this.limitedSupport = !result.supported || !result.smooth;
+        } catch {
+            // Preserve playback when Media Capabilities cannot evaluate this configuration.
+            this.limitedSupport = undefined;
+        }
+        return this.limitedSupport;
     }
 }

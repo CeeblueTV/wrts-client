@@ -184,7 +184,7 @@
                             <div class="net-row gap-panel">
                                 <div class="net-prof">
                                     <span class="lbl">Network preset</span>
-                                    <select class="sel" v-model="netPreset" @change="setBuffer()">
+                                    <select class="sel" v-model="netPreset" @change="setBuffer(undefined, undefined, true)">
                                         <option :value="preset" v-for="[preset, _] of netPresets">{{ preset }}</option>
                                     </select>
                                 </div>
@@ -198,6 +198,7 @@
                                     <span class="lbl">Buffer max (ms)</span>
                                     <input class="inp" type="number" min="0"
                                         required oninput="validity.valid||(value='');"
+                                        :disabled="netPreset === '-auto-'"
                                         v-model="bufferMax" @change="setBuffer(this.bufferMin, this.bufferMax)">
                                 </div>
                                 <p class="net-desc" v-html="netDescription"></p>
@@ -237,6 +238,10 @@
                                 <img alt="Dump media" title="Dump media as MP4 files"
                                     @click="dump()" src="./assets/dump.png"
                                     v-show="audioDump || videoDump">
+                                <button class="e2e-btn" :class="{ on: e2eEnabled }" @click="toggleE2E()"
+                                    title="End-to-end latency from the timestamp burnt into the video. Off by default: reading back a video frame every sample is costly on mobile">
+                                    E2E
+                                </button>
                             </div>
                         </div>
 
@@ -673,8 +678,8 @@
                     stream: '',
                     muted: false,
                     host: null,
-                    bufferMin: 0,
-                    bufferMax: 0,
+                    bufferMin: 200,
+                    bufferMax: 1000,
                     bufferAmount: 0,
 
                     audioDump: options.dump ? new BinaryWriter() : undefined,
@@ -721,6 +726,7 @@
                     startTime: 0,
                     adaptiveFrameSkipping: true,
                     fixedPlaybackRate: options.fixedRate ? true : false,
+                    e2eEnabled: options.e2e ? true : false,
                     streamMetadata: null,
                     netDescription: "",
                     videoTracks: new Map(),
@@ -755,6 +761,9 @@
                     player: null,
                     latencies: [],
                     netPresets: new Map([
+                        ['-auto-', [
+                            "Dynamically adjusts the maximum buffer limit based on the configured minimum buffer limit and current network conditions.",
+                        ]],
                         ['-manual-', [
                             "Manually configure a buffer window large enough to compensate for variations caused by network fluctuations.",
                         ]],
@@ -775,7 +784,7 @@
                             2000, 4000 // 3 seconds
                         ]],
                     ]),
-                    netPreset: 'normal'
+                    netPreset: '-auto-'
                 }
             },
             mounted() {
@@ -788,7 +797,12 @@
                 this.host = new NetAddress(host || location.host, 443);
                 this.stream = options.stream || '';
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
-                this.setBuffer(Number(options.bufferMin), Number(options.bufferMax))
+                const bufferMin = Number(options.bufferMin);
+                const bufferMax = Number(options.bufferMax);
+                if (Number.isFinite(bufferMax)) {
+                    this.netPreset = '-manual-';
+                }
+                this.setBuffer(bufferMin, bufferMax);
 
                 // An OS theme change overrides the stored choice (the initial paint is done in <head>).
                 this._themeQuery = matchMedia('(prefers-color-scheme: dark)');
@@ -821,17 +835,18 @@
 
                 // Stats to be displayed in the UI
                 const bandwidths = []; this.stats.set("Bandwidth", bandwidths);
-                const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
                 const avOffsets = []; this.stats.set("A/V offset", avOffsets);
+                const fps = []; this.stats.set("Video FPS", fps); // received video frames
+                const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
                 const latencies = this.latencies; this.stats.set("Latency", latencies);
                 const e2eLatencies = []; this.stats.set("Latency e2e", e2eLatencies);
                 const playbackRates = []; this.stats.set("Playback rate", playbackRates);
                 const playbackSpeeds = []; this.stats.set("Playback speed", playbackSpeeds);
-                const fps = []; this.stats.set("Video FPS", fps);
                 const trackAudio = []; this.stats.set("Track audio", trackAudio);
                 const trackVideo = []; this.stats.set("Track video", trackVideo);
                 const skippedAudio = []; this.stats.set("Skipped audio", skippedAudio);
                 const skippedVideo = []; this.stats.set("Skipped video", skippedVideo);
+                const droppedFps = []; this.stats.set("Dropped FPS", droppedFps); // renderer drops
                 const stalls = []; this.stats.set("Stalls", stalls);
 
                 this.uiStats = new UIMetrics(this.$refs.stats);
@@ -846,9 +861,14 @@
                     this.tlFollowing = following;
                 };
 
+                let prevDropped;
+                let prevSampleTime;
                 setInterval(() => {
                     const player = this.player;
                     if(player) {
+                        if(this.netPreset === '-auto-' && this.bufferMax !== player.bufferLimitHigh) {
+                            this.bufferMax = player.bufferLimitHigh;
+                        }
                         this.hasMetrics = true;
                         const stats = player.computeStats();
                        // For bandwidth calculation, using player.recvByteRate is faster than
@@ -878,17 +898,31 @@
                         skippedAudio.push((((stats.skippedAudio || 0) - (this.deltaStats.skippedAudio || 0)) /1000).toFixed(1)+"s");
                         skippedVideo.push((((stats.skippedVideo || 0) - (this.deltaStats.skippedVideo || 0)) /1000).toFixed(1)+"s");
 
+                        // Frames dropped by the renderer since the previous sample
+                        const now = performance.now();
+                        const dropped = this.$refs.video.getVideoPlaybackQuality?.().droppedVideoFrames;
+                        const elapsed = prevSampleTime ? (now - prevSampleTime) / 1000 : 0;
+                        droppedFps.push((elapsed && dropped != null && prevDropped != null ? Math.max(0, dropped - prevDropped) / elapsed : 0).toFixed(2));
+                        prevDropped = dropped;
+                        prevSampleTime = now;
+
                         stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
 
-                        const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
-                        if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
-                            // displaid only if activated!
-                            e2eLatencies.push(e2eLatency+"ms");
+                        if (this.e2eEnabled) {
+                            const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
+                            if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
+                                // displaid only if activated!
+                                e2eLatencies.push(e2eLatency+"ms");
+                            }
+                        } else if (e2eLatencies.length) {
+                            e2eLatencies.push('0ms'); // keeps the series aligned, 0 = no measure
                         }
                         this.times.push({
                             time: new Date().toISOString(),
                             mediaTime: player.currentTime
                         });
+                    } else {
+                        prevDropped = prevSampleTime = undefined;
                     }
                     this.uiStats.display(this.stats);
                 }, 700);
@@ -1463,6 +1497,10 @@
                         this.deltaStats = {};
                     }
                 },
+                toggleE2E() {
+                    this.e2eEnabled = !this.e2eEnabled;
+                    this.updateURL();
+                },
                 // Drop the samples the chart no longer displays, or all of them when `all` is set
                 // (a new stream: the previous run's scale would flatten the new one).
                 trimStats(all = false) {
@@ -1491,13 +1529,15 @@
                     }
                     let csv = headers.join(';');
 
-                    // Series are filled independently (a metric can start late), so a row can be short
+                    // Series are filled independently (a metric can start late) but all end on the
+                    // latest sample, so they are right-aligned and a late one leaves its first cells empty
                     for (let i = 0; i < max; ++i) {
                         csv += '\n';
-                        const { time, mediaTime } = this.times[i] ?? {};
+                        const { time, mediaTime } = this.times[i - (max - this.times.length)] ?? {};
                         csv += (time || '') + ';' + (mediaTime || '') + ';';
                         for (const [, values] of this.stats) {
-                            csv += (values[i] == null ? '' : parseFloat(values[i])) + ';';
+                            const value = values[i - (max - values.length)];
+                            csv += (value == null ? '' : parseFloat(value)) + ';';
                         }
                     }
 
@@ -1563,44 +1603,61 @@
                         this.player.audioTrack = this.audioTrackId;
                     }
                 },
-                setBuffer(min, max) {
-                    let preset;
-                    if(!isNaN(min) || !isNaN(max)) {
-                        // manual mode
-                        preset = this.netPresets.entries().next().value;
-                        this.netPreset = preset[0];
-                        preset = preset[1];
+                setBuffer(min, max, presetChanged = false) {
+                    const hasMin = min !== '' && Number.isFinite(Number(min));
+                    const hasMax = max !== '' && Number.isFinite(Number(max));
+                    const automatic = this.netPreset === '-auto-';
+                    let preset = this.netPresets.get(this.netPreset);
 
-                        this.bufferMin = Math.min(min || max, max || min);
-                        this.bufferMax = Math.max(min || max, max || min);
-                    } else {
-                        // auto mode
+                    if(automatic) {
+                        if(hasMin) {
+                            this.bufferMin = Number(min);
+                        }
+                    } else if(hasMin || hasMax) {
+                        // manual mode
+                        this.netPreset = '-manual-';
                         preset = this.netPresets.get(this.netPreset);
-                        if(preset[1]) {
+
+                        const minValue = hasMin ? Number(min) : Number(max);
+                        const maxValue = hasMax ? Number(max) : Number(min);
+                        this.bufferMin = Math.min(minValue, maxValue);
+                        this.bufferMax = Math.max(minValue, maxValue);
+                    } else {
+                        // preset mode
+                        if(preset[1] != null) {
                             this.bufferMin = preset[1];
                         }
-                        if(preset[2]) {
+                        if(preset[2] != null) {
                             this.bufferMax = preset[2];
                         }
                     }
 
-
                     if (this.player) {
-                        // fix possible player correction!
-                        this.bufferMin = (this.player.bufferLimitLow = this.bufferMin);
-                        this.bufferMax = (this.player.bufferLimitHigh = this.bufferMax);
+                        if(automatic) {
+                            this.player.bufferLimitHigh = undefined;
+                        } else if(presetChanged && this.netPreset === '-manual-') {
+                            this.player.bufferLimitHigh = this.player.bufferLimitHigh;
+                        } else {
+                            this.player.bufferLimitHigh = this.bufferMax;
+                        }
+                        this.player.bufferLimitLow = this.bufferMin;
+                        this.bufferMax = this.player.bufferLimitHigh;
                     }
 
                     // Display user description
                     this.netDescription = preset[0];
-                    this.netDescription += '<br><strong>Expected buffering ≈ ' + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + 'ms</strong>';
+                    if(!automatic) {
+                        this.netDescription += '<br><strong>Expected buffering ≈ ' + (this.bufferMin + (this.bufferMax-this.bufferMin)/2) + 'ms</strong>';
+                    }
 
                     this.updateURL();
-
                 },
                 updateURL() {
                     if (history.replaceState) {
-                        let path = location.origin + location.pathname + '?stream=' + encodeURIComponent(this.buildStream()) + '&bufferMin=' + this.bufferMin + '&bufferMax=' + this.bufferMax;
+                        let path = location.origin + location.pathname + '?stream=' + encodeURIComponent(this.buildStream()) + '&bufferMin=' + this.bufferMin;
+                        if(this.netPreset !== '-auto-') {
+                            path += '&bufferMax=' + this.bufferMax;
+                        }
                         if(options.token != null) {
                             path += "&token=" + options.token;
                         }
@@ -1633,6 +1690,9 @@
                         }
                         if(options.fixedRate) {
                             path += "&fixedRate";
+                        }
+                        if(this.e2eEnabled) {
+                            path += "&e2e";
                         }
                         if(this.sidePanel) {
                             path += "&sidePanel";

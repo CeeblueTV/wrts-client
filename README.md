@@ -101,9 +101,11 @@ player.start({
 
 ## Playback rate adaptation
 
-To stay close to the live edge and protect against stalls when the network worsens, the default `Player` continuously adjusts `<video>.playbackRate` from the buffer state — speeding up slightly to catch back up to live (up to 1.16x) and slowing down when the buffer runs low (down to 0.84x). This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
+To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts `<video>.playbackRate` from the buffer state. On platforms without `ManagedMediaSource`, it switches to 1.1x when the buffer is `HIGH`, to 0.9x when it is `LOW`, and back to 1x when it is `OK`. This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
 
-On **iOS / Safari**, that compromise can be audible — rate changes there sometimes produce small audio glitches. The default is still to adapt, because for most applications the latency / stall benefits outweigh the cost. If smoother audio matters more for your use case, disable adaptation on iOS / Safari (detected via `ManagedMediaSource`):
+On Safari environments exposing `ManagedMediaSource`, changing `playbackRate` can briefly interrupt playback due to [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433). The player mitigates this with playback-rate hysteresis: after increasing the rate in the `HIGH` state, it keeps that rate through the `OK` state and returns directly to 1x only when the buffer reaches `LOW`. It does not apply the configured low rate on these environments, which reduces repeated rate changes and their associated audio and video interruptions.
+
+If smoother playback matters more than automatic latency and buffer control, override `onBufferChange` to disable playback-rate adaptation on these Safari environments:
 
 ```javascript
 player.onBufferChange = () => {
@@ -114,7 +116,7 @@ player.onBufferChange = () => {
 };
 ```
 
-To narrow the range on any platform, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 84 / 116).
+To use different rates on platforms without `ManagedMediaSource`, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 90 / 110). On Safari environments exposing `ManagedMediaSource`, `maxRate` still controls the rate used in the `HIGH` state, but `minRate` is not applied because the workaround returns directly to 1x in the `LOW` state.
 
 
 ## DRM
@@ -155,8 +157,8 @@ For browser playback, prefer **Widevine** where it is available. PlayReady is fu
 ```javascript
 player.onBufferChange = () => {
    // Disable playback rate increase to avoid audio artifacts and video lag with PlayReady on Edge
-   // Keep the ability to decrease playback rate between [0.84, 0.92] to reduce the risk of stall when the network condition worsen
-   player.adjustPlaybackRate(84, 100);
+   // Keep the ability to decrease playback rate to reduce the risk of stalls when network conditions worsen
+   player.adjustPlaybackRate(90, 100);
 };
 ```
 
