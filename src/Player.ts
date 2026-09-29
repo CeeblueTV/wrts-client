@@ -22,19 +22,18 @@ const BUFFER_LIMIT_HIGH = 1000; // ms
 const TIMEOUT = 14000; // at least superior to max gop duration (10s)
 const BUFFER_CHANGE_STEP = 50; // ms
 
-const BUFFER_AUTO_MIN_WINDOW = 200; // ms
+const root = typeof window !== 'undefined' ? window : global;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ManagedMediaSource = (root as any).ManagedMediaSource;
+const BUFFER_AUTO_MIN_WINDOW = ManagedMediaSource ? 400 : 200; // ms
 const BUFFER_AUTO_MIN_TRY_DELAY = 5000; // ms
 
 const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high: 10% faster
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
 
-const root = typeof window !== 'undefined' ? window : global;
-
 let _maximumResolution: Media.Resolution | undefined;
 root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution()));
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ManagedMediaSource = (root as any).ManagedMediaSource;
 
 export type PlayerError =
     /**
@@ -226,12 +225,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     onVideoAppended(data: Uint8Array) {}
 
     /**
-     * Event fire when the buffer amount changes by at least BUFFER_CHANGE_STEP ms
-     * @event
+     * Event fired when the buffer amount changes by at least `BUFFER_CHANGE_STEP` milliseconds.
      *
-     * Note: on iPhone / iOS / Safari, playbackRate changes can produce audible glitches during live streaming.
-     * In that case you can override `onBufferChange` to disable playbackRate adaptation on iOS / Safari
-     * (detected via `ManagedMediaSource`).
+     * The default implementation calls {@link adjustPlaybackRate}.
+     *
+     * @warning On Safari environments exposing `ManagedMediaSource`, changing `playbackRate` can briefly interrupt
+     * playback due to [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433). The default
+     * {@link adjustPlaybackRate} implementation uses playback-rate hysteresis to mitigate these interruptions.
+     * Override this event without calling {@link adjustPlaybackRate} to disable automatic playback-rate adjustments.
+     *
+     * @event
      */
     onBufferChange(): void {
         this.adjustPlaybackRate();
@@ -720,6 +723,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _previousBufferAmount: number;
     private _stallCount: number = 0;
     private _droppedVideoFrames: number = 0;
+    private _safariWarningShown = false;
     private _droppedFramePerSecond: ByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
 
     /**
@@ -1154,6 +1158,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._playbackPrevTime = undefined;
         this._stallCount = 0;
         this._starting = Number.MIN_VALUE;
+        this._safariWarningShown = false;
         this._previousBufferAmount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
@@ -1210,23 +1215,50 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      *
      * Note: Intended to be called from {@link onBufferChange}.
      *
+     * @warning On Safari environments exposing `ManagedMediaSource`, this method enables a workaround for
+     * [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433). To minimize playback interruptions, an
+     * increased rate is kept until the buffer reaches `LOW`, then restored to 1x instead of applying `minRate`.
+     * Override {@link onBufferChange} without calling this method to disable automatic playback-rate adjustments.
+     *
      * @param minRate playback rate percentage applied when the buffer is low; defaults to 90 (0.9x)
      * @param maxRate playback rate percentage applied when the buffer is high; defaults to 110 (1.1x)
      */
     adjustPlaybackRate(minRate = PLAYBACK_RATE_MIN, maxRate = PLAYBACK_RATE_MAX) {
-        // Save the current rate so the change is logged only when the browser applies a different value.
-        // Browsers may ignore an assignment to video.playbackRate.
         const playbackRate = this._video.playbackRate;
 
-        if (this.bufferState === BufferState.HIGH && maxRate > 100) {
-            this._video.playbackRate = maxRate / 100;
-        } else if (this.bufferState === BufferState.LOW && minRate < 100) {
-            this._video.playbackRate = minRate / 100;
-        } else {
-            this._video.playbackRate = 1;
+        let rate = 1;
+        if (this.bufferState === BufferState.HIGH) {
+            if (maxRate > 100) {
+                rate = maxRate / 100;
+            }
+        } else if (ManagedMediaSource) {
+            // Changing playbackRate can briefly interrupt playback on Safari:
+            // https://bugs.webkit.org/show_bug.cgi?id=163433
+            if (!this._safariWarningShown) {
+                this._safariWarningShown = true;
+                this.log(
+                    'ManagedMediaSource detected: enabling playback-rate hysteresis to mitigate Safari playback ' +
+                        'interruptions (WebKit bug 163433). Once increased, playbackRate remains elevated until the ' +
+                        'buffer reaches LOW, then returns to 1x. Override onBufferChange without calling ' +
+                        'adjustPlaybackRate to disable automatic rate adjustment.'
+                ).warn();
+            }
+            if (playbackRate > 1) {
+                // Keep the increased rate through the OK state. Returning to 1x sooner could let the buffer grow back
+                // to HIGH, causing repeated rate changes and playback interruptions. LOW is the hysteresis boundary.
+                rate = this.bufferState === BufferState.LOW ? 1 : playbackRate;
+            }
+        } else if (this.bufferState === BufferState.LOW) {
+            if (minRate < 100) {
+                rate = minRate / 100;
+            }
         }
-        if (playbackRate !== this._video.playbackRate) {
-            this.log(`Adapt playback rate to ${this._video.playbackRate}`).info();
+
+        // Some browsers expose playbackRate with float32 precision. Avoid an assignment when both values represent the
+        // same float32, as it may fire a ratechange event and briefly disrupt playback.
+        if (Math.fround(playbackRate) !== Math.fround(rate)) {
+            this._video.playbackRate = rate;
+            this.log(`Adapt playback rate to ${this._video.playbackRate} (bufferAmount=${this.bufferAmount}ms)`).info();
         }
     }
 

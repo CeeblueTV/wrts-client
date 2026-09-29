@@ -16,18 +16,20 @@ This logic is primarily handled within the `Player` class (`src/Player.ts`) and 
 
 ### The Core Concepts
 
-1.  **Buffer Management**: The player constantly monitors the amount of buffered media in the `HTMLVideoElement`. It defines three buffer states:
-    -   **`LOW`**: The buffer is running low (e.g., < 150ms). This indicates network congestion or a delay in receiving data.
-    -   **`MIDDLE`**: The buffer is in a healthy state.
-    -   **`HIGH`**: The buffer is growing too large (e.g., > 550ms), meaning the client is downloading data faster than it's being played.
+1.  **Buffer Management**: The player constantly monitors the amount of buffered media in the `HTMLVideoElement`. It defines three active buffer states:
+    -   **`LOW`**: The buffer is at or below the low threshold (200ms by default). This indicates network congestion or a delay in receiving data.
+    -   **`OK`**: The buffer is within acceptable limits for smooth playback.
+    -   **`HIGH`**: The buffer is above the high threshold, meaning the client is downloading data faster than it is being played. This threshold starts at 1000ms and is automatically adjusted according to network conditions by default.
+
+    The target position between the low and high thresholds is exposed as `bufferLimitMiddle`. In automatic mode, the high threshold remains at least 200ms above the low threshold, or 400ms on Safari environments exposing `ManagedMediaSource`.
     
 2.  **Adaptive Bitrate**: When the stream offers multiple quality tracks, the algorithm adapts the selected track based on the playback state.
     -   In the `LOW` state, it chooses a lower-quality track.
-    -   If the buffer level rises above the `MIDDLE` threshold, it can switch to a higher-quality track—provided the estimated bandwidth permits it .
+    -   If the buffer level rises above the `bufferLimitMiddle` target, it can switch to a higher-quality track—provided the estimated bandwidth permits it.
 
-3.  **Dynamic Playback Rate**: To gently manage the buffer without noticeable skips, the player slightly adjusts the video's `playbackRate`:
-    -   In `LOW` state, `playbackRate` is reduced (e.g., to `0.92x`) to slow down consumption and allow the buffer to refill.
-    -   In `HIGH` state, `playbackRate` is increased (e.g., to `1.08x`) to drain the buffer faster and move closer to the live edge.
+3.  **Dynamic Playback Rate**: To manage the buffer without seeking, the player slightly adjusts the video's `playbackRate`:
+    -   On platforms without `ManagedMediaSource`, the rate is reduced to `0.9x` in the `LOW` state, increased to `1.1x` in the `HIGH` state, and restored to `1x` in the `OK` state.
+    -   On Safari environments exposing `ManagedMediaSource`, changing `playbackRate` can briefly interrupt playback due to [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433). The player therefore uses hysteresis: after increasing the rate in the `HIGH` state, it keeps that rate through the `OK` state and returns directly to `1x` when the buffer reaches `LOW`. This avoids repeatedly changing the rate when the buffer oscillates around the target.
 
 4.  **Partial Reliability & Frame Skipping**: This is the most critical part of the low-latency strategy. When the player is configured for partial reliability and the network deteriorates while the buffer is under the `LOW` state, it doesn’t wait for every video frame from a completed sequence—risking a stall—instead it can **proactively skip individual frames** to preserve audio continuity, or if a stall has already occurred **skip several completed video segments** to rejoin the live edge.
 
