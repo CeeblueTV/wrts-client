@@ -841,6 +841,7 @@
                 const trackVideo = []; this.stats.set("Track video", trackVideo);
                 const skippedAudio = []; this.stats.set("Skipped audio", skippedAudio);
                 const skippedVideo = []; this.stats.set("Skipped video", skippedVideo);
+                const droppedFps = []; this.stats.set("Dropped FPS", droppedFps); // renderer drops
                 const stalls = []; this.stats.set("Stalls", stalls);
 
                 this.uiStats = new UIMetrics(this.$refs.stats);
@@ -855,6 +856,8 @@
                     this.tlFollowing = following;
                 };
 
+                let prevDropped;
+                let prevSampleTime;
                 setInterval(() => {
                     const player = this.player;
                     if(player) {
@@ -890,6 +893,14 @@
                         skippedAudio.push((((stats.skippedAudio || 0) - (this.deltaStats.skippedAudio || 0)) /1000).toFixed(1)+"s");
                         skippedVideo.push((((stats.skippedVideo || 0) - (this.deltaStats.skippedVideo || 0)) /1000).toFixed(1)+"s");
 
+                        // Frames dropped by the renderer since the previous sample
+                        const now = performance.now();
+                        const dropped = this.$refs.video.getVideoPlaybackQuality?.().droppedVideoFrames;
+                        const elapsed = prevSampleTime ? (now - prevSampleTime) / 1000 : 0;
+                        droppedFps.push((elapsed && dropped != null && prevDropped != null ? Math.max(0, dropped - prevDropped) / elapsed : 0).toFixed(2));
+                        prevDropped = dropped;
+                        prevSampleTime = now;
+
                         stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
 
                         const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
@@ -901,6 +912,8 @@
                             time: new Date().toISOString(),
                             mediaTime: player.currentTime
                         });
+                    } else {
+                        prevDropped = prevSampleTime = undefined;
                     }
                     this.uiStats.display(this.stats);
                 }, 700);
