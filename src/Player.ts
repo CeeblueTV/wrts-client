@@ -31,6 +31,7 @@ const BUFFER_AUTO_MIN_TRY_DELAY = 5000; // ms
 
 const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high: 10% faster
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
+const PLAYBACK_CONSTRAINT_THRESHOLD = 0.03;
 
 let _maximumResolution: Media.Resolution | undefined;
 root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution()));
@@ -462,16 +463,20 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             return;
         }
 
-        // Only check playback speed when media buffered exceeds the accurate range,
-        // indeed slow playback may simply be caused by insufficient input.
-        const playbackSlow = this.bufferAmount > this._bufferLimitHigh && this.playbackSpeed < this.playbackRate * 0.97;
+        // Only measure slowdown when buffered media exceeds the accurate range,
+        // because slow playback may otherwise be caused by insufficient input.
+        const playbackRate = this.playbackRate;
+        const slowdownRatio =
+            this.bufferAmount > this._bufferLimitHigh && playbackRate > 0
+                ? Math.min(Math.max(1 - this.playbackSpeed / playbackRate, 0), 1)
+                : 0;
 
-        // More than 3% dropped frames = NOK.
+        // Clamp the ratio because the input and renderer measurements use independent time windows.
         const videoFPS = this._source.videoPerSecond;
-        const droppedFrame = videoFPS ? this._droppedFramePerSecond.exact() / videoFPS > 0.03 : false;
+        const droppedRatio = videoFPS ? Math.min(Math.max(this._droppedFramePerSecond.exact() / videoFPS, 0), 1) : 0;
 
-        if (droppedFrame || playbackSlow) {
-            return { droppedFrame, playbackSlow };
+        if (droppedRatio > PLAYBACK_CONSTRAINT_THRESHOLD || slowdownRatio > PLAYBACK_CONSTRAINT_THRESHOLD) {
+            return { droppedRatio, slowdownRatio };
         }
     }
 

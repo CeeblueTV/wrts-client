@@ -159,12 +159,12 @@ Failed probes increase an adaptive retry delay, from a short initial delay up to
 
 ### 4.4 `playbackConstraint`
 
-`playbackConstraint` separates **delivery capacity** from **playback capacity**. It is `undefined` while the player is paused, starting, has no active source, or is unconstrained. During normal playback it returns an object whose flags describe whether:
+`playbackConstraint` separates **delivery capacity** from **playback capacity**. It is `undefined` while the player is paused, starting, has no active source, or is unconstrained. During normal playback it returns an object containing:
 
-- `playbackSlow` is set because the buffer is above `bufferLimitHigh`, yet `playbackSpeed` is more than 3% below the requested `playbackRate`; or
-- `droppedFrame` is set because dropped video frames exceed 3% of the incoming video frame rate.
+- `droppedRatio`, the proportion of incoming video frames dropped by the renderer, where `0` means none and `1` means all frames;
+- `slowdownRatio`, the effective playback slowdown relative to the requested `playbackRate`, where `0` means the requested rate is reached and `1` means there is no playback progress.
 
-The effective-speed test is intentionally evaluated only with a high buffer. If little media is available, a slow playhead may simply be a network starvation symptom; with abundant buffered media, the decoder or renderer is the more likely constraint.
+The value is defined when either ratio exceeds 3%. Both ratios are clamped between `0` and `1`. The slowdown ratio is intentionally evaluated only when the buffer is above `bufferLimitHigh`. If little media is available, a slow playhead may simply be a network starvation symptom; with abundant buffered media, the decoder or renderer is the more likely constraint.
 
 When this value is defined, MBR follows the downshift path even if measured network throughput appears sufficient. It therefore handles devices that can download a high-resolution rendition but cannot decode it in real time. `playbackConstraint` is an adaptation signal, not a stall counter and not a replacement for `bufferState`.
 

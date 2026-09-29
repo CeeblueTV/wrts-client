@@ -40,11 +40,17 @@ export enum BufferState {
  * Describes the causes of a playback constraint.
  */
 export type PlaybackConstraint = {
-    /** Whether more than 3% of the expected video frames are being dropped. */
-    droppedFrame: boolean;
+    /**
+     * Ratio of incoming video frames dropped by the renderer.
+     * `0` means no dropped frames and `1` means all frames are dropped.
+     */
+    droppedRatio: number;
 
-    /** Whether playback is more than 3% slower than the requested playback rate. */
-    playbackSlow: boolean;
+    /**
+     * Ratio of effective playback slowdown relative to the requested playback rate.
+     * `0` means the requested rate is reached and `1` means there is no playback progress.
+     */
+    slowdownRatio: number;
 };
 
 /**
@@ -178,10 +184,8 @@ export interface IPlaying extends EventEmitter {
     /**
      * Describes why the current playback appears to be constrained.
      *
-     * Playback is considered constrained when:
-     * - enough media is buffered, but the effective playback speed is more than
-     *   3% below the requested playback rate, or
-     * - more than 3% of the expected video frames are being dropped.
+     * Playback is considered constrained when either the dropped-frame ratio or,
+     * with enough media buffered, the playback slowdown ratio exceeds 3%.
      *
      * Returns `undefined` when playback is not constrained.
      *
