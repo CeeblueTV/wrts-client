@@ -126,7 +126,7 @@ The decision loop uses the following signals:
 - each rendition's declared bandwidth and the active audio bandwidth;
 - `maximumResolution`;
 - `MediaCapabilities.decodingInfo()`, when available, to identify unsupported or non-smooth renditions;
-- `playbackConstrained`, which detects a local decoding or rendering bottleneck.
+- `playbackConstraint`, which describes a local decoding or rendering bottleneck.
 
 Receive throughput is smoothed on approximately a GOP-sized window. It is useful for choosing how far to move down, but it is deliberately not sufficient on its own to authorize a move up.
 
@@ -137,7 +137,7 @@ A downshift is considered when at least one of these conditions occurs:
 1. the buffer reaches `LOW` without an active upward probe causing the disturbance;
 2. a stall or low-buffer recovery aborts a cancelable request;
 3. the current rendition has limited browser support;
-4. `playbackConstrained` reports that the browser cannot play the current rendition smoothly.
+4. `playbackConstraint` reports why the browser cannot play the current rendition smoothly.
 
 On a new failure, MBR first moves down one rendition. It can then continue downward until the declared video bandwidth plus the active audio bandwidth fits within the measured receive throughput. Consecutive failure handling is damped so that one incident does not blindly step down once per loop iteration. The resolution cap is applied again before the new track is selected.
 
@@ -157,16 +157,16 @@ This adds the missing load needed to emulate the candidate rendition without fee
 
 Failed probes increase an adaptive retry delay, from a short initial delay up to a bounded maximum. Any buffer-state instability rearms the waiting period. Once the top rendition remains stable, successful observation windows can shorten the delay again. This asymmetric policy—fast down, probed and delayed up—limits oscillation near the available-bandwidth boundary.
 
-### 4.4 `playbackConstrained`
+### 4.4 `playbackConstraint`
 
-`playbackConstrained` separates **delivery capacity** from **playback capacity**. It is `false` while the player is paused, starting, or has no active source. During normal playback it becomes `true` when either:
+`playbackConstraint` separates **delivery capacity** from **playback capacity**. It is `undefined` while the player is paused, starting, has no active source, or is unconstrained. During normal playback it returns an object whose flags describe whether:
 
-- the buffer is above `bufferLimitHigh`, yet `playbackSpeed` is more than 3% below the requested `playbackRate`; or
-- dropped video frames exceed 3% of the incoming video frame rate.
+- `playbackSlow` is set because the buffer is above `bufferLimitHigh`, yet `playbackSpeed` is more than 3% below the requested `playbackRate`; or
+- `droppedFrame` is set because dropped video frames exceed 3% of the incoming video frame rate.
 
 The effective-speed test is intentionally evaluated only with a high buffer. If little media is available, a slow playhead may simply be a network starvation symptom; with abundant buffered media, the decoder or renderer is the more likely constraint.
 
-When this metric is true, MBR follows the downshift path even if measured network throughput appears sufficient. It therefore handles devices that can download a high-resolution rendition but cannot decode it in real time. `playbackConstrained` is an adaptation signal, not a stall counter and not a replacement for `bufferState`.
+When this value is defined, MBR follows the downshift path even if measured network throughput appears sufficient. It therefore handles devices that can download a high-resolution rendition but cannot decode it in real time. `playbackConstraint` is an adaptation signal, not a stall counter and not a replacement for `bufferState`.
 
 ## 5. Partial reliability and adaptive frame skipping
 
@@ -196,7 +196,7 @@ The controls are complementary rather than interchangeable:
 |---|---|
 | Buffer reaches `LOW` without an active upshift probe | Slow playback, downshift, and enlarge the automatic buffer window if necessary |
 | Buffer reaches `LOW` during an upshift probe | Abort the probe without immediately blaming the current rendition |
-| Browser drops frames or cannot maintain the requested rate with a full buffer | Set `playbackConstrained` and downshift for local device capacity |
+| Browser drops frames or cannot maintain the requested rate with a full buffer | Set `playbackConstraint` and downshift for local device capacity |
 | Stable live-edge playback with a higher rendition available | Probe the additional bandwidth, then move up one level on success |
 | Buffer grows beyond `HIGH` | Accelerate playback to reclaim latency |
 | Stall while obsolete completed sequences exist | Abort cancelable work and skip forward in partial-reliability mode |

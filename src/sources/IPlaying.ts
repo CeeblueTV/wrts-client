@@ -37,6 +37,17 @@ export enum BufferState {
 }
 
 /**
+ * Describes the causes of a playback constraint.
+ */
+export type PlaybackConstraint = {
+    /** Whether more than 3% of the expected video frames are being dropped. */
+    droppedFrame: boolean;
+
+    /** Whether playback is more than 3% slower than the requested playback rate. */
+    playbackSlow: boolean;
+};
+
+/**
  * Interface for real-time playback information
  */
 export interface IPlaying extends EventEmitter {
@@ -165,18 +176,20 @@ export interface IPlaying extends EventEmitter {
     get playbackSpeed(): number;
 
     /**
-     * Indicates whether the current playback appears to be constrained.
+     * Describes why the current playback appears to be constrained.
      *
      * Playback is considered constrained when:
      * - enough media is buffered, but the effective playback speed is more than
      *   3% below the requested playback rate, or
      * - more than 3% of the expected video frames are being dropped.
      *
+     * Returns `undefined` when playback is not constrained.
+     *
      * This metric can be used as an additional input for the MBR logic, allowing
      * rendition decisions to take local playback performance into account in
      * addition to buffer/network conditions.
      */
-    get playbackConstrained(): boolean;
+    get playbackConstraint(): PlaybackConstraint | undefined;
 
     /**
      * Get maximum resolution that the MBR algo can reach, undefined means no limit.

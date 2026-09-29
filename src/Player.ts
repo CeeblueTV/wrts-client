@@ -7,7 +7,7 @@
 import { ILog, Connect, Util, EventEmitter, ByteRate, PlayerStats } from '@ceeblue/web-utils';
 import { Source, SourceError } from './sources/Source';
 import { ICMCD, CMCD, CMCDMode } from './media/CMCD';
-import { BufferState, IPlaying } from './sources/IPlaying';
+import { BufferState, IPlaying, PlaybackConstraint } from './sources/IPlaying';
 import * as Media from './media/Media';
 import { Metadata } from './media/Metadata';
 import { MediaPlayback, MediaPlaybackError } from './media/MediaPlayback';
@@ -455,29 +455,24 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * @override
-     * {@inheritDoc IPlaying.playbackConstrained}
+     * {@inheritDoc IPlaying.playbackConstraint}
      */
-    get playbackConstrained(): boolean {
+    get playbackConstraint(): PlaybackConstraint | undefined {
         if (!this._source || this._paused || this._starting) {
-            return false;
+            return;
         }
-        if (this.bufferAmount > this._bufferLimitHigh) {
-            // We are in a high buffer state, check if playback speed is too slow!
-            // Only check playback speed when media buffered exceeds the accurate range,
-            // indeed slow playback may simply be caused by insufficient input.
-            if (this.playbackSpeed < this.playbackRate * 0.97) {
-                // playback speed inferior of 3% of the playback rate = NOK
-                return true;
-            }
-        }
+
+        // Only check playback speed when media buffered exceeds the accurate range,
+        // indeed slow playback may simply be caused by insufficient input.
+        const playbackSlow = this.bufferAmount > this._bufferLimitHigh && this.playbackSpeed < this.playbackRate * 0.97;
+
         // More than 3% dropped frames = NOK.
         const videoFPS = this._source.videoPerSecond;
-        if (!videoFPS) {
-            // no video!
-            return false;
+        const droppedFrame = videoFPS ? this._droppedFramePerSecond.exact() / videoFPS > 0.03 : false;
+
+        if (droppedFrame || playbackSlow) {
+            return { droppedFrame, playbackSlow };
         }
-        const droppedFPS = this._droppedFramePerSecond.exact();
-        return droppedFPS / videoFPS > 0.03;
     }
 
     /**
