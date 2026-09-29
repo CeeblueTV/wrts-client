@@ -258,19 +258,18 @@ export class HTTPAdaptiveSource extends Source {
 
                 if (tracks.video !== videoTrack.id) {
                     // change track
-                    let log = `MBR ${up ? 'UP' : 'DOWN'} from track ${tracks.video} to ${videoTrack.id} at ${(videoTrack.bandwidth * 8) / 1000}kbps ${Util.stringify(videoTrack.resolution)}`;
-                    if (!up) {
-                        log += ` (constraint=${Util.stringify(
+                    this.log(
+                        `MBR ${up ? 'UP' : 'DOWN'} from track ${tracks.video} to ${videoTrack.id} at ${(videoTrack.bandwidth * 8) / 1000}kbps ${Util.stringify(
                             Object.assign(
                                 {
                                     bandwidth: ((bandwidthMeasure * 8) / 1000).toFixed() + 'kbps',
                                     buffer: playing.bufferAmount + 'ms'
                                 },
-                                playbackConstraint
+                                playbackConstraint,
+                                videoTrack.resolution
                             )
-                        )})`;
-                    }
-                    this.log(log)[up ? 'info' : 'warn']();
+                        )}`
+                    )[up ? 'info' : 'warn']();
                     tracks.video = videoTrack.id;
                 }
 
