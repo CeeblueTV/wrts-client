@@ -1503,13 +1503,15 @@
                     }
                     let csv = headers.join(';');
 
-                    // Series are filled independently (a metric can start late), so a row can be short
+                    // Series are filled independently (a metric can start late) but all end on the
+                    // latest sample, so they are right-aligned and a late one leaves its first cells empty
                     for (let i = 0; i < max; ++i) {
                         csv += '\n';
-                        const { time, mediaTime } = this.times[i] ?? {};
+                        const { time, mediaTime } = this.times[i - (max - this.times.length)] ?? {};
                         csv += (time || '') + ';' + (mediaTime || '') + ';';
                         for (const [, values] of this.stats) {
-                            csv += (values[i] == null ? '' : parseFloat(values[i])) + ';';
+                            const value = values[i - (max - values.length)];
+                            csv += (value == null ? '' : parseFloat(value)) + ';';
                         }
                     }
 
