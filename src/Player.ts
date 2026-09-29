@@ -751,7 +751,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._paused = false;
         this._buffering = false;
         this._metadata = new Metadata();
-        this._playbackSpeed = new ByteRate(200); // 200ms of amortization
+        // Average over 500ms to cover multiple timeupdate samples while keeping playbackSpeed responsive.
+        this._playbackSpeed = new ByteRate(500);
         this._bufferLimitMiddle = 0;
         this._bufferLimitLow = BUFFER_LIMIT_LOW;
         this._bufferLimitHigh = BUFFER_LIMIT_HIGH;
