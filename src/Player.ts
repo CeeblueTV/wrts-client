@@ -31,7 +31,7 @@ const BUFFER_AUTO_MIN_TRY_DELAY = 5000; // ms
 
 const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high: 10% faster
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
-const PLAYBACK_CONSTRAINT_THRESHOLD = 0.03;
+const PLAYBACK_CONSTRAINT_THRESHOLD = 0.05; // 5%
 
 let _maximumResolution: Media.Resolution | undefined;
 root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution()));
