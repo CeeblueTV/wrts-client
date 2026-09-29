@@ -830,13 +830,13 @@
 
                 // Stats to be displayed in the UI
                 const bandwidths = []; this.stats.set("Bandwidth", bandwidths);
-                const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
                 const avOffsets = []; this.stats.set("A/V offset", avOffsets);
+                const fps = []; this.stats.set("Video FPS", fps); // received video frames
+                const bufferAmounts = []; this.stats.set("Buffer", bufferAmounts);
                 const latencies = this.latencies; this.stats.set("Latency", latencies);
                 const e2eLatencies = []; this.stats.set("Latency e2e", e2eLatencies);
                 const playbackRates = []; this.stats.set("Playback rate", playbackRates);
                 const playbackSpeeds = []; this.stats.set("Playback speed", playbackSpeeds);
-                const fps = []; this.stats.set("Video FPS", fps);
                 const trackAudio = []; this.stats.set("Track audio", trackAudio);
                 const trackVideo = []; this.stats.set("Track video", trackVideo);
                 const skippedAudio = []; this.stats.set("Skipped audio", skippedAudio);
