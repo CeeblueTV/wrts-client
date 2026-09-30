@@ -465,10 +465,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
         // Only measure slowdown when buffered media exceeds the accurate range,
         // because slow playback may otherwise be caused by insufficient input.
+        const playbackSpeed = this.playbackSpeed;
         const playbackRate = this.playbackRate;
         const slowdownRatio =
-            this.bufferAmount > this._bufferLimitHigh && playbackRate > 0
-                ? Math.min(Math.max(1 - this.playbackSpeed / playbackRate, 0), 1)
+            this.bufferAmount > this._bufferLimitHigh && playbackRate > 0 && !this._playbackSpeed.increasing
+                ? Math.min(Math.max(0, 1 - playbackSpeed / playbackRate), 1)
                 : 0;
 
         // Clamp the ratio because the input and renderer measurements use independent time windows.
@@ -775,6 +776,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (prevCurrentTime !== currentTime) {
             // After the seek, give the value
             this._playbackPrevTime = currentTime;
+            // Reset starting phase to avoid playbackSpeed mismeasurement after goLive()
+            // AND to avoid multiple playback adjustement (see adjustPlaybackRate)
+            this._starting = Number.MIN_VALUE;
         }
         reason = reason ? ' ' + reason.trim() : '';
         this.log(
@@ -1012,19 +1016,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         const onTimeUpdate = () => {
             const playbackSpeed = this.playbackSpeed;
             // Detect starting phase to avoid wrong buffer measure
-            if (this._starting) {
-                if (playbackSpeed) {
-                    if (playbackSpeed < this.playbackRate && playbackSpeed >= this._starting) {
-                        // playback starting
-                        this._starting = playbackSpeed;
-                    } else {
-                        // stop starting phase =>
-                        // playbackRate reached OR playbackSpeed decreasing
-                        this._starting = 0;
-                        this.log(
-                            `Playback starting phase ended at x${playbackSpeed.toFixed(2)} speed (bufferAmount=${this.bufferAmount}ms)`
-                        ).info();
-                    }
+            if (this._starting && playbackSpeed) {
+                if (playbackSpeed < this.playbackRate && (playbackSpeed > this._starting || this._playbackSpeed.increasing)) {
+                    // playback starting
+                    this._starting = playbackSpeed;
+                } else {
+                    // stop starting phase =>
+                    // playbackRate reached OR playbackSpeed decreasing
+                    this._starting = 0;
+                    this.log(
+                        `Playback starting phase ended at x${playbackSpeed.toFixed(2)} speed (bufferAmount=${this.bufferAmount}ms)`
+                    ).info();
                 }
             }
             this._onPlayerProgress();
