@@ -1315,10 +1315,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     private _setBufferState(state: BufferState) {
-        // always try to increase bufferLimitHigh when buffer is low
-        if (this._bufferLimitHighAuto && state === BufferState.LOW) {
+        if (this._bufferLimitHighAuto && (state === BufferState.LOW || state === BufferState.HIGH)) {
+            // Increase dynamically the bufferLimitHigh according to the bufferMeasure
             this._adjustBufferLimitHigh(true);
         }
+
         // check if we have a difference
         const oldState = this._bufferState;
         if (oldState === state) {
