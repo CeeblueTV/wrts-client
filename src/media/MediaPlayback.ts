@@ -174,9 +174,9 @@ export class MediaPlayback extends Loggable {
         }
     }
 
-    flush(fixHole = false) {
-        this._audioBuffer?.flush(fixHole);
-        this._videoBuffer?.flush(fixHole);
+    flush(fixAudioHole = false) {
+        this._audioBuffer?.flush(fixAudioHole);
+        this._videoBuffer?.flush();
     }
 
     close(error?: MediaPlaybackError) {
