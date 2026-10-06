@@ -863,7 +863,7 @@
 
                 let prevDropped;
                 let prevSampleTime;
-                setInterval(() => {
+                const computeStats = () => {
                     const player = this.player;
                     if(player) {
                         if(this.netPreset === '-auto-' && this.bufferMax !== player.bufferLimitHigh) {
@@ -925,7 +925,9 @@
                         prevDropped = prevSampleTime = undefined;
                     }
                     this.uiStats.display(this.stats);
-                }, 700);
+                    setTimeout(computeStats, 700);
+                }
+                computeStats();
             },
             beforeUnmount() {
                 if (this._themeQuery) {
