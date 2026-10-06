@@ -468,6 +468,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _ignoredTracks: Set<number> = new Set();
     private _skippedVideo: number = 0;
     private _skippedAudio: number = 0;
+    private _metadataReady: Promise<void> = Promise.resolve();
 
     /**
      * Create a new Source, to be passed to a Player
@@ -624,51 +625,61 @@ export abstract class Source extends EventEmitter implements ICMCD {
         this.onTrackChange(tracks.audio, tracks.video, tracks.data);
     }
 
-    protected readMetadata(metadata: Metadata) {
-        if (this.closed) {
-            return;
-        }
-
-        // fix metadata
-        (this._metadata = metadata).fix();
-
-        // Call onMetadata (user can possibly change metadata at this level)
-        const initTracks = this.onMetadata(metadata);
-        // Check if onMetadata has closed the source!
-        if (this.closed) {
-            return;
-        }
-
-        // tracks inits?
-        let init = false;
-        if (this._requestedTracks.audio == null) {
-            init = true;
-            this._requestedTracks.audio = initTracks?.audio ?? this._autoFirstTrack(metadata.audioTracks);
-        }
-        if (this._requestedTracks.video == null) {
-            init = true;
-            this._requestedTracks.video = initTracks?.video ?? this._autoFirstTrack(metadata.videoTracks);
-        }
-        if (this._requestedTracks.data == null) {
-            init = true;
-            if (initTracks?.data == null) {
-                this._requestedTracks.data = new Set();
-                // By default we receive all data tracks, even subtitle to allow an immediate switch
-                for (const dataTrack of metadata.dataTracks) {
-                    this._requestedTracks.data.add(dataTrack.id);
+    protected readMetadata(metadata: Metadata): Promise<void> {
+        this._metadataReady = this._metadataReady
+            .then(async () => {
+                if (this.closed) {
+                    return;
                 }
-            } else {
-                this._requestedTracks.data = new Set(initTracks.data);
-            }
-        }
-        if (init) {
-            this.log(`Init tracks ${Util.stringify(this._requestedTracks)}`).info();
-        }
 
-        // Check tracks available after onMetadata to allow an user change into onMetadata
-        if (!metadata.tracks.size) {
-            this.log(`No tracks available for ${this._url.toString()}`).error();
-        }
+                // fix metadata
+                await (this._metadata = metadata).fix();
+                if (this.closed) {
+                    return;
+                }
+
+                // Call onMetadata (user can possibly change metadata at this level)
+                const initTracks = this.onMetadata(metadata);
+                // Check if onMetadata has closed the source!
+                if (this.closed) {
+                    return;
+                }
+
+                // tracks inits?
+                let init = false;
+                if (this._requestedTracks.audio == null) {
+                    init = true;
+                    this._requestedTracks.audio = initTracks?.audio ?? this._autoFirstTrack(metadata.audioTracks);
+                }
+                if (this._requestedTracks.video == null) {
+                    init = true;
+                    this._requestedTracks.video = initTracks?.video ?? this._autoFirstTrack(metadata.videoTracks);
+                }
+                if (this._requestedTracks.data == null) {
+                    init = true;
+                    if (initTracks?.data == null) {
+                        this._requestedTracks.data = new Set();
+                        // By default we receive all data tracks, even subtitle to allow an immediate switch
+                        for (const dataTrack of metadata.dataTracks) {
+                            this._requestedTracks.data.add(dataTrack.id);
+                        }
+                    } else {
+                        this._requestedTracks.data = new Set(initTracks.data);
+                    }
+                }
+                if (init) {
+                    this.log(`Init tracks ${Util.stringify(this._requestedTracks)}`).info();
+                }
+
+                // Check tracks available after onMetadata to allow an user change into onMetadata
+                if (!metadata.tracks.size) {
+                    this.log(`No tracks available for ${this._url.toString()}`).error();
+                }
+            })
+            .catch((error: unknown) => {
+                this.close({ type: 'SourceError', name: 'Unexpected source issue', detail: Util.stringify(error) });
+            });
+        return this._metadataReady;
     }
 
     /**
@@ -871,9 +882,16 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 throw Error('No demuxer found for ' + this._url.pathname);
         }
         reader.onSample = (type: Media.Type, trackId: number, sample: Media.Sample) => {
-            this.readSample(type, trackId, sample);
+            // Wait metadata ready to avoid race condition on first sample
+            this._metadataReady
+                .then(() => this.readSample(type, trackId, sample))
+                .catch((error: unknown) => {
+                    this.close({ type: 'SourceError', name: 'Unexpected source issue', detail: Util.stringify(error) });
+                });
         };
-        reader.onMetadata = (metadata: Metadata) => this.readMetadata(metadata);
+        reader.onMetadata = (metadata: Metadata) => {
+            this.readMetadata(metadata);
+        };
         reader.onError = (error: ReaderError) => this.close(error);
         reader.log = this.log.bind(this) as ILog;
         reader.read = (data: BufferSource | string) => {

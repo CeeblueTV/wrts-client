@@ -172,7 +172,7 @@ export class HTTPAdaptiveSource extends Source {
         }
 
         // propagate Metadata
-        this.readMetadata(metadata);
+        await this.readMetadata(metadata);
 
         let low = false;
         playing.on(
@@ -227,14 +227,12 @@ export class HTTPAdaptiveSource extends Source {
                 const playbackConstraint = playing.playbackConstraint;
                 if (
                     playbackConstraint || // the current playback is not smooth enough to sustain the current rendition
-                    videoTrack.limitedSupport || // the current rendition is not fully supported by the browser
                     aborted || // we have aborted a sequence because of a stall or a low buffer
                     low // we reach low in buffer without UP emulation perturbation
                 ) {
                     // We have to down one level
-                    if (videoTrack.limitedSupport || (!upRetry.failed && (playbackConstraint || !this._upController))) {
-                        // Always downshift renditions with limited support.
-                        // Otherwise, avoid consecutive downshifts during the same failure period.
+                    if (!upRetry.failed && (playbackConstraint || !this._upController)) {
+                        // Avoid consecutive downshifts during the same failure period.
                         videoTrack = videoTrack.down ?? videoTrack;
                     }
                     // Compute the best rendition to play according to the bandwidth measure
@@ -271,12 +269,6 @@ export class HTTPAdaptiveSource extends Source {
                         )}`
                     )[up ? 'info' : 'warn']();
                     tracks.video = videoTrack.id;
-                }
-
-                // compute current and UP support on each sequence, because it can change
-                videoTrack.detectSupportLimit();
-                if (videoTrack.up) {
-                    videoTrack.up.detectSupportLimit();
                 }
             } else {
                 // if no video track selected or no video metadata => reset
@@ -426,8 +418,7 @@ export class HTTPAdaptiveSource extends Source {
             ) {
                 if (
                     videoTrack.up && // there is a UP option
-                    !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution) && // this option is compatible with screen
-                    !videoTrack.up.limitedSupport // if unknown, we assume it is supported
+                    !Media.overScreenSize(videoTrack.up.resolution, playing.maximumResolution)
                 ) {
                     // this option is supported by the browser
                     const extraByteRateRequired = videoTrack.up.bandwidth - videoTrack.bandwidth;
