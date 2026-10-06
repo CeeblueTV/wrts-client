@@ -626,7 +626,7 @@ export class CMAFReader extends Reader {
                     const maxBitrate = config.read32();
                     const avgBitrate = config.read32();
                     // CMAF spec: avgBitrate is the nominal average bitrate
-                    mTrack.bandwidth = avgBitrate || maxBitrate;
+                    mTrack.bandwidth = Math.ceil((avgBitrate || maxBitrate) / 8); // convert to Bps
                     break;
                 }
                 case 'dOps': {
