@@ -106,9 +106,7 @@ The middle target moves with the high threshold. This makes the latency target a
 
 A requested rate of `1.0` does not guarantee an effective speed of `1.0`: an overloaded decoder, a rendering problem, or a browser interruption can advance the media clock more slowly. Conversely, short-term measurement noise is expected because `currentTime` is sampled rather than continuously observed.
 
-On platforms without `ManagedMediaSource`, the default rate is `0.9x` in `LOW`, `1x` in `OK`, and `1.1x` in `HIGH`. Slowing in `LOW` gives incoming data more time to rebuild the buffer; accelerating in `HIGH` consumes excess buffer and moves playback toward the live edge.
-
-On Safari environments exposing `ManagedMediaSource`, changing `playbackRate` can itself interrupt playback because of [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433). The player therefore applies hysteresis to the rate too: once increased in `HIGH`, the rate remains elevated through `OK` and returns directly to `1x` only at `LOW`.
+On every supported platform, including environments exposing `ManagedMediaSource`, the default rate is `0.9x` in `LOW`, `1x` in `OK`, and `1.1x` in `HIGH`. Slowing in `LOW` gives incoming data more time to rebuild the buffer; accelerating in `HIGH` consumes excess buffer and moves playback toward the live edge. There is no Safari-specific workaround in `onBufferChange` or `adjustPlaybackRate`.
 
 ## 4. MBR: multi-bitrate rendition selection
 

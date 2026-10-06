@@ -231,11 +231,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Event fired when the buffer amount changes by at least `BUFFER_CHANGE_STEP` milliseconds.
      *
      * The default implementation calls {@link adjustPlaybackRate}.
-     *
-     * @warning On Safari environments exposing `ManagedMediaSource`, changing `playbackRate` can briefly interrupt
-     * playback due to [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433). The default
-     * {@link adjustPlaybackRate} implementation uses playback-rate hysteresis to mitigate these interruptions.
-     * Override this event without calling {@link adjustPlaybackRate} to disable automatic playback-rate adjustments.
+     * Override this event without calling {@link adjustPlaybackRate} to disable that automatic playback-rate adjustment.
      *
      * @event
      */
@@ -729,7 +725,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _previousBufferAmount: number;
     private _stallCount: number = 0;
     private _droppedVideoFrames: number = 0;
-    private _safariWarningShown = false;
     private _droppedFramePerSecond: ByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
 
     /**
@@ -1172,7 +1167,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._playbackPrevTime = undefined;
         this._stallCount = 0;
         this._starting = Number.MIN_VALUE;
-        this._safariWarningShown = false;
         this._previousBufferAmount = 0;
         // Set buffer as NONE at the beginning when not playing to ignore congestion network algo
         this._bufferState = BufferState.NONE;
@@ -1229,11 +1223,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      *
      * Note: Intended to be called from {@link onBufferChange}.
      *
-     * @warning On Safari environments exposing `ManagedMediaSource`, this method enables a workaround for
-     * [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433). To minimize playback interruptions, an
-     * increased rate is kept until the buffer reaches `LOW`, then restored to 1x instead of applying `minRate`.
-     * Override {@link onBufferChange} without calling this method to disable automatic playback-rate adjustments.
-     *
      * @param minRate playback rate percentage applied when the buffer is low; defaults to 90 (0.9x)
      * @param maxRate playback rate percentage applied when the buffer is high; defaults to 110 (1.1x)
      */
@@ -1244,23 +1233,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (this.bufferState === BufferState.HIGH) {
             if (maxRate > 100) {
                 rate = maxRate / 100;
-            }
-        } else if (ManagedMediaSource) {
-            // Changing playbackRate can briefly interrupt playback on Safari:
-            // https://bugs.webkit.org/show_bug.cgi?id=163433
-            if (!this._safariWarningShown) {
-                this._safariWarningShown = true;
-                this.log(
-                    'ManagedMediaSource detected: enabling playback-rate hysteresis to mitigate Safari playback ' +
-                        'interruptions (WebKit bug 163433). Once increased, playbackRate remains elevated until the ' +
-                        'buffer reaches LOW, then returns to 1x. Override onBufferChange without calling ' +
-                        'adjustPlaybackRate to disable automatic rate adjustment.'
-                ).warn();
-            }
-            if (playbackRate > 1) {
-                // Keep the increased rate through the OK state. Returning to 1x sooner could let the buffer grow back
-                // to HIGH, causing repeated rate changes and playback interruptions. LOW is the hysteresis boundary.
-                rate = this.bufferState === BufferState.LOW ? 1 : playbackRate;
             }
         } else if (this.bufferState === BufferState.LOW) {
             if (minRate < 100) {
@@ -1354,7 +1326,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             return new MS();
         }
         if (ManagedMediaSource) {
-            // Now try with ManagedMediaSource =>
+            // Now try with ManagedMediaSource - Safari =>
+            // disable pitch to prevent the [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433)
+            this._video.preservesPitch = false;
+            // disable remote playback what can interact with our playback control
             this._video.disableRemotePlayback = true;
             this.log('new ManagedMediaSource').info();
             return new ManagedMediaSource();

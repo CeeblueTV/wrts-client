@@ -101,22 +101,17 @@ player.start({
 
 ## Playback rate adaptation
 
-To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts `<video>.playbackRate` from the buffer state. On platforms without `ManagedMediaSource`, it switches to 1.1x when the buffer is `HIGH`, to 0.9x when it is `LOW`, and back to 1x when it is `OK`. This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
+To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts `<video>.playbackRate` from the buffer state on every supported platform, including environments exposing `ManagedMediaSource`. It switches to 1.1x when the buffer is `HIGH`, to 0.9x when it is `LOW`, and back to 1x when it is `OK`. This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
 
-On Safari environments exposing `ManagedMediaSource`, changing `playbackRate` can briefly interrupt playback due to [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433). The player mitigates this with playback-rate hysteresis: after increasing the rate in the `HIGH` state, it keeps that rate through the `OK` state and returns directly to 1x only when the buffer reaches `LOW`. It does not apply the configured low rate on these environments, which reduces repeated rate changes and their associated audio and video interruptions.
-
-If smoother playback matters more than automatic latency and buffer control, override `onBufferChange` to disable playback-rate adaptation on these Safari environments:
+There is no Safari-specific workaround in `onBufferChange` or `adjustPlaybackRate`. To disable automatic playback-rate adaptation, override `onBufferChange` without calling `adjustPlaybackRate`:
 
 ```javascript
 player.onBufferChange = () => {
-   if (window.ManagedMediaSource) {
-      return; // iOS / Safari — skip playbackRate adjustments
-   }
-   player.adjustPlaybackRate();
+   // Keep the current playback rate.
 };
 ```
 
-To use different rates on platforms without `ManagedMediaSource`, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 90 / 110). On Safari environments exposing `ManagedMediaSource`, `maxRate` still controls the rate used in the `HIGH` state, but `minRate` is not applied because the workaround returns directly to 1x in the `LOW` state.
+To use different rates, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 90 / 110).
 
 
 ## DRM
