@@ -28,7 +28,8 @@ const root = typeof window !== 'undefined' ? window : global;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ManagedMediaSource = (root as any).ManagedMediaSource;
 const BUFFER_AUTO_MIN_WINDOW = ManagedMediaSource ? 400 : 200; // ms
-const BUFFER_AUTO_MIN_TRY_DELAY = 5000; // ms
+const BUFFER_AUTO_MEASURE_MARGIN = 40; // ms
+const BUFFER_AUTO_TRY_DELAY = 5000; // ms
 
 const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high: 10% faster
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
@@ -391,7 +392,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     set bufferLimitHigh(value: number | undefined) {
         if (value == null) {
-            this._bufferLimitHighAuto = new AdaptiveRetry('Buffer', { minimumTryDelay: BUFFER_AUTO_MIN_TRY_DELAY });
+            this._bufferLimitHighAuto = new AdaptiveRetry('Buffer', {
+                minimumTryDelay: BUFFER_AUTO_TRY_DELAY,
+                learningTryStep: BUFFER_AUTO_TRY_DELAY
+            });
             this._bufferMeasure = new BufferMeasure();
             // to fix bufferLimitHigh and update _bufferLimitMiddle
             this._setBufferLimitHigh(this._bufferLimitHigh);
@@ -1283,7 +1287,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     private _adjustBufferLimitHigh(shouldIncrease = false) {
-        let highLimit = Math.round(this._bufferLimitLow + this._bufferMeasure.lowHighRange);
+        let highLimit = Math.round(this._bufferLimitLow + this._bufferMeasure.lowHighRange + BUFFER_AUTO_MEASURE_MARGIN);
 
         if (highLimit > this._bufferLimitHigh) {
             // Buffer augmentation
@@ -1292,8 +1296,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         } else {
             // Buffer diminution
             if (shouldIncrease) {
-                // Wait for a more complete measurement
-                // OR the end of the measurement window
+                // A buffer boundary was crossed, so the current window may need to be realigned.
+                // Any increase justified by the measurements would have been applied above.
+                // Wait for the observation window to complete before considering a decrease.
                 return;
             }
             if (highLimit < this._bufferLimitHigh) {
