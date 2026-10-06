@@ -1183,12 +1183,11 @@
 
 
                 play() {
-                    this.startTime = Util.time();
-                    log('Play stream', this.stream, 'with options', options).info();
                     if (this.player) {
                         this.player.stop();
                         return;
                     }
+                    log('Play stream', this.stream, 'with options', options).info();
                     // reset error
                     this._lastMediaError = null;
                     this.setStreamError(null);
@@ -1216,6 +1215,7 @@
                     }
 
                     this.playState = PlayState.STARTING;
+                    this.startTime = Util.time();
 
                     const videoElement = this.$refs.video;
                     videoElement.muted = this.muted;
