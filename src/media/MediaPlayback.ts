@@ -157,7 +157,7 @@ export class MediaPlayback extends Loggable {
     }
 
     appendAudio(metadata: Metadata, trackId: number, sample: Media.Sample) {
-        this.log('AUDIO', trackId, Util.stringify(sample, { noBin: true })).debug();
+        this.log('AUDIO', trackId, sample).debug();
         if (this._audioBuffer) {
             this._audioBuffer.append(metadata, trackId, sample);
         } else {
@@ -166,7 +166,7 @@ export class MediaPlayback extends Loggable {
     }
 
     appendVideo(metadata: Metadata, trackId: number, sample: Media.Sample) {
-        this.log('VIDEO', trackId, Util.stringify(sample, { noBin: true })).debug();
+        this.log('VIDEO', trackId, sample).debug();
         if (this._videoBuffer) {
             this._videoBuffer.append(metadata, trackId, sample);
         } else {
