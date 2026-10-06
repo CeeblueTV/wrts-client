@@ -19,6 +19,7 @@ import { BufferMeasure } from './utils/BufferMeasure';
 const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 200; // ms
 const BUFFER_LIMIT_HIGH = 1000; // ms
+const BUFFER_SEEK_MARGIN = 70; // ms
 const TIMEOUT = 14000; // at least superior to max gop duration (10s)
 const BUFFER_CHANGE_STEP = 50; // ms
 
@@ -770,9 +771,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @param reason add a log reason to display to explain this goLive call
      */
     goLive(reason?: string) {
+        if (!this.running) {
+            throw Error('Cannot goLive on stopped player');
+        }
         // Go to the middle buffer position to avoid MBR change, and in a valid range superior or equals to startTime
         const prevCurrentTime = this._video.currentTime;
-        const currentTime = (this._video.currentTime = Math.max(this.startTime, this.endTime - this._bufferLimitMiddle / 1000));
+        const currentTime = (this._video.currentTime = Math.max(
+            this.startTime,
+            this.endTime - Math.max(this._bufferLimitLow, this._bufferLimitMiddle - BUFFER_SEEK_MARGIN) / 1000
+        ));
         if (prevCurrentTime !== currentTime) {
             // After the seek, give the value
             this._playbackPrevTime = currentTime;
