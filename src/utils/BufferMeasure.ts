@@ -5,7 +5,8 @@
  */
 
 /**
- * Collects buffer measurements and exposes the observed range.
+ * Collects buffer measurements and exposes the observed range after removing
+ * the drift caused by the requested playback rate.
  *
  * Buffer amounts and durations are expressed in milliseconds. Measurement times
  * are Unix timestamps in milliseconds.
@@ -35,11 +36,20 @@ export class BufferMeasure {
     get highTime(): number {
         return this._highTime;
     }
+
     /**
-     * Time of the latest accepted measurement, or `0` before the first measurement.
+     * Reference time used to compensate the next measurement, or `0` when no previous interval should be compensated.
      */
-    get time(): number {
-        return this._time;
+    get lastTime(): number {
+        return this._lastTime;
+    }
+    /**
+     * Changes the reference time used by the next measurement.
+     * Set it to `0` to exclude a discontinuous interval, such as a seek or starting phase, without clearing the
+     * collected extrema or the accumulated playback-rate drift.
+     */
+    set lastTime(value: number) {
+        this._lastTime = value;
     }
 
     /**
@@ -68,22 +78,30 @@ export class BufferMeasure {
     private _lowTime: number = 0;
     private _high: number = 0;
     private _highTime: number = 0;
-    private _time: number = 0;
+    private _lastTime: number = 0;
+    private _rateDrift: number = 0;
 
     /**
-     * Adds a buffer measurement.
+     * Adds a buffer measurement corrected for the drift caused by the requested playback rate.
+     *
      * @param bufferAmount Current buffered media duration in milliseconds.
+     * @param playbackRate Playback rate applied since the previous measurement.
      */
-    set(bufferAmount: number) {
+    set(bufferAmount: number, playbackRate: number = 1) {
         // Save the current time and update low/high values
-        this._time = Date.now();
+        const time = Date.now();
+        if (this._lastTime) {
+            this._rateDrift += (playbackRate - 1) * (time - this._lastTime);
+        }
+        this._lastTime = time;
+        bufferAmount = Math.round(bufferAmount + this._rateDrift);
         if (!this._lowTime || bufferAmount <= this._low) {
             this._low = bufferAmount;
-            this._lowTime = this._time;
+            this._lowTime = time;
         }
         if (!this._highTime || bufferAmount >= this._high) {
             this._high = bufferAmount;
-            this._highTime = this._time;
+            this._highTime = time;
         }
     }
 }

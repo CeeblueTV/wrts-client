@@ -1034,6 +1034,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         const onSeeking = () => {
             // recompute playback speed on seeking to avoid wrong value
             this._playbackPrevTime = undefined;
+            // A seek interrupts the interval used to compensate playback-rate drift.
+            this._bufferMeasure.lastTime = 0;
         };
         const onSeeked = () => {
             if (!this.reliable && this.bufferAmount > this.bufferLimitHigh) {
@@ -1411,6 +1413,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (!this._starting) {
             // reset starting phase
             this._starting = Number.MIN_VALUE;
+            // Don't compensate playback-rate drift across a phase where progress is uncertain.
+            this._bufferMeasure.lastTime = 0;
             // clean playback speed to measure only the progress of this starting phase
             this._playbackSpeed.clear();
             // mandatory when clear to align accurate measure
@@ -1500,7 +1504,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         const bufferAmount = this.bufferAmount;
 
         if (!this._paused && !this._starting && this._bufferLimitHighAuto) {
-            this._bufferMeasure.set(bufferAmount);
+            this._bufferMeasure.set(bufferAmount, this.playbackRate);
             if (bufferAmount <= this._bufferLimitLow || bufferAmount > this._bufferLimitHigh) {
                 // React immediately when the configured window is exceeded.
                 this._adjustBufferLimitHigh(true);
