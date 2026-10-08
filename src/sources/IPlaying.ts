@@ -185,7 +185,7 @@ export interface IPlaying extends EventEmitter {
      * Describes why the current playback appears to be constrained.
      *
      * Playback is considered constrained when either the dropped-frame ratio or,
-     * with enough media buffered, the playback slowdown ratio exceeds 3%.
+     * with enough media buffered, the playback slowdown ratio exceeds 5%.
      *
      * Returns `undefined` when playback is not constrained.
      *

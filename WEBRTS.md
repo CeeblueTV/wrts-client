@@ -162,7 +162,7 @@ Failed probes increase an adaptive retry delay, from a short initial delay up to
 - `droppedRatio`, the proportion of incoming video frames dropped by the renderer, where `0` means none and `1` means all frames;
 - `slowdownRatio`, the effective playback slowdown relative to the requested `playbackRate`, where `0` means the requested rate is reached and `1` means there is no playback progress.
 
-The value is defined when either ratio exceeds 3%. Both ratios are clamped between `0` and `1`. The slowdown ratio is intentionally evaluated only when the buffer is above `bufferLimitHigh`. If little media is available, a slow playhead may simply be a network starvation symptom; with abundant buffered media, the decoder or renderer is the more likely constraint.
+The value is defined when either ratio exceeds 5%. Both ratios are clamped between `0` and `1`. The slowdown ratio is intentionally evaluated only when the buffer is above `bufferLimitHigh`. If little media is available, a slow playhead may simply be a network starvation symptom; with abundant buffered media, the decoder or renderer is the more likely constraint.
 
 When this value is defined, MBR follows the downshift path even if measured network throughput appears sufficient. It therefore handles devices that can download a high-resolution rendition but cannot decode it in real time. `playbackConstraint` is an adaptation signal, not a stall counter and not a replacement for `bufferState`.
 
