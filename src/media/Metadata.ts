@@ -208,7 +208,18 @@ export class Metadata extends Loggable {
         return metadata;
     }
 
-    fix() {
+    /**
+     * Normalizes the track collections and rebuilds the adaptive rendition links.
+     *
+     * Tracks from the type-specific collections and the track map are merged, ordered by decreasing maximum bandwidth,
+     * and checked for Media Source Extensions playback support. Only tracks reported as explicitly unsupported are
+     * removed; tracks whose support cannot be determined are preserved. The remaining tracks are deduplicated by ID and
+     * used to repopulate {@link tracks}, {@link audioTracks}, {@link videoTracks}, and {@link dataTracks}. Their
+     * {@link MediaTrack.up} and {@link MediaTrack.down} links are then rebuilt in bandwidth order.
+     *
+     * @returns A promise that resolves after all support checks and collection updates have completed.
+     */
+    async fix() {
         // get all the tracks available and sort it by Max BPS
         const tracks = this.videoTracks.concat(this.audioTracks).concat(this.dataTracks);
         for (const [, track] of this.tracks) {
@@ -219,10 +230,17 @@ export class Metadata extends Loggable {
         // Fill related collection and make each track unique
         this.dataTracks.length = this.audioTracks.length = this.videoTracks.length = 0;
         this.tracks.clear();
+        const unsupportedTracks: Array<MediaTrack> = [];
         for (const track of tracks) {
             const size = this.tracks.size;
             this.tracks.set(track.id, track);
             if (size === this.tracks.size) {
+                // same track already inserted
+                continue;
+            }
+            if (!(await track.checkSupport())) {
+                this.log(`Remove unsupported track ${track}`).warn();
+                unsupportedTracks.push(track);
                 continue;
             }
             let medias;
@@ -239,6 +257,9 @@ export class Metadata extends Loggable {
                 track.up.down = track;
             }
             medias.push(track);
+        }
+        for (const track of unsupportedTracks) {
+            this.tracks.delete(track.id);
         }
     }
 

@@ -586,6 +586,20 @@ select option { background: var(--bg); color: var(--txt); }
     transition: opacity var(--t);
 }
 .stats-actions img:hover { opacity: .9; }
+.e2e-btn {
+    height: 22px; padding: 0 8px;
+    border: 1px solid var(--border-s);
+    border-radius: var(--r-pill);
+    background: none;
+    color: var(--txt-m);
+    font: 600 10px var(--f-body);
+    letter-spacing: .06em;
+    cursor: pointer;
+    opacity: .6;
+    transition: all var(--t);
+}
+.e2e-btn:hover { opacity: 1; }
+.e2e-btn.on { opacity: 1; color: #fff; background: var(--accent); border-color: var(--accent); }
 
 /* ── Messages ── */
 .msg-box {

@@ -87,10 +87,10 @@ export class WSSource extends Source {
         }
     }
 
-    protected readMetadata(metadata: Metadata) {
+    protected async readMetadata(metadata: Metadata) {
         // fix currentTime with a ping estimation of the request
         metadata.liveTime += this._rtt / 2;
-        super.readMetadata(metadata);
+        await super.readMetadata(metadata);
     }
 
     protected newReader(params = { isStream: true }): Reader {
