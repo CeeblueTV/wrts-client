@@ -412,6 +412,8 @@
                 this.bindTimeline(new UITimeline(this.$refs.timelineBox));
                 // One CMAFReader per media type, rebuilt on each play (see _feedTimeline)
                 this._readers = new Map();
+                // Media type => average bandwidth (Bps) read from the init segment, see _feedTimeline
+                this._trackBandwidths = {};
 
                 let previousMeasurementTimestamp = null;
                 let previousPlaybackPosition = 0;
@@ -494,8 +496,8 @@
                         : video.getVideoPlaybackQuality?.().totalVideoFrames ?? 0;
                     fps.push(Math.max(0, perSecond(frames - previousFrames)).toFixed(2));
 
-                    trackAudio.push((this.player.getCurrentRepresentationForType('audio')?.bitrateInKbit ?? 0).toFixed() + "kbps");
-                    trackVideo.push((this.player.getCurrentRepresentationForType('video')?.bitrateInKbit ?? 0).toFixed() + "kbps");
+                    trackAudio.push(((this._trackBandwidths.audio || 0) * 8 / 1000).toFixed() + "kbps");
+                    trackVideo.push(((this._trackBandwidths.video || 0) * 8 / 1000).toFixed() + "kbps");
 
                     stalls.push(this.stalls);
                     this.times.push({ time: new Date().toISOString(), mediaTime: video.currentTime });
@@ -606,6 +608,11 @@
                         reader = new CMAFReader();
                         // Disable unused track-initialization events.
                         reader.onInitAllTracks = Util.EMPTY_FUNCTION;
+                        reader.onMetadata = metadata => {
+                            for (const track of metadata.tracks.values()) {
+                                this._trackBandwidths[mediaType] = track.bandwidth;
+                            }
+                        };
                         // A media segment before its init segment has no track to attach to. That is
                         // expected while recovering from an abandoned download, so warn rather than
                         // surfacing it as a stream error.
@@ -659,6 +666,7 @@
                     this.resetTimeline();
                     // A new stream means new init segments, so start from fresh parsers
                     this._readers.clear();
+                    this._trackBandwidths = {};
 
                     const url = this.manifestURL();
                     log('Play DASH manifest', url).info();
