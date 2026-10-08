@@ -424,7 +424,8 @@
                 };
                 video.requestVideoFrameCallback?.(countFrame);
 
-                this._recvBytes = new ByteRate(2000);
+                // Same measure as WRTS Source: fed by _feedTimeline() and averaged over the last GOP
+                this._recvBytes = new ByteRate(Media.MAX_GOP_DURATION);
 
                 this._stalling = false;
                 this._userSeek = false;
@@ -589,9 +590,15 @@
                 // chunk timestamps when samples become available to this parser, not their exact
                 // network arrival time. XHR delivers the entire segment at once; Fetch can deliver
                 // multiple frames together too. Do not interpret these as per-frame network timings.
+                //
+                // Bandwidth is counted here too, as WRTS Source does: every chunk as it arrives, the window clipped on each video keyframe. 
                 _feedTimeline(request, bytes) {
+                    if (!bytes || !bytes.byteLength) {
+                        return;
+                    }
+                    this._recvBytes.addBytes(bytes.byteLength);
                     const mediaType = request && request.mediaType;
-                    if (!bytes || !bytes.byteLength || (mediaType !== 'video' && mediaType !== 'audio')) {
+                    if (mediaType !== 'video' && mediaType !== 'audio') {
                         return;
                     }
                     let reader = this._readers.get(mediaType);
@@ -609,6 +616,9 @@
                                 return;
                             }
                             if (type === Media.Type.VIDEO) {
+                                if (sample.isKeyFrame) {
+                                    this._recvBytes.clip();
+                                }
                                 this.uiTimeline.pushVideo(row, sample);
                             } else {
                                 this.uiTimeline.pushAudio(row, sample);
@@ -659,10 +669,7 @@
                     this.player = MediaPlayer().create();
                     this.player.on(MediaPlayer.events.PLAYBACK_PLAYING, () => { this.playState = PlayState.PLAYING; });
                     this.player.on(MediaPlayer.events.STREAM_INITIALIZED, () => this.onMetadata());
-                    this.player.on(MediaPlayer.events.FRAGMENT_LOADING_COMPLETED, e => {
-                        this._recvBytes.addBytes(e.response?.byteLength || e.request?.bytesLoaded || 0);
-                        this._feedTimeline(e.request, e.response);
-                    });
+                    this.player.on(MediaPlayer.events.FRAGMENT_LOADING_COMPLETED, e => this._feedTimeline(e.request, e.response));
                     this.player.on(MediaPlayer.events.FRAGMENT_LOADING_PROGRESS, e => this._feedTimeline(e.request, e.response));
                     this.player.on(MediaPlayer.events.FRAGMENT_LOADING_ABANDONED, e => {
                         // Half a segment is buffered in the parser and the switch means no more of it
