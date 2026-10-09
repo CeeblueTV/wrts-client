@@ -187,6 +187,10 @@
 
                 const media = await parseManifest(manifestUrl);
 
+                // The thumbnails take the network first: the player only starts downloading once they are done.
+                await timeline.startResponsiveThumbnailGeneration(media.video)
+                    .catch(error => console.error("Could not generate thumbnails", error));
+
                 const player = new PreviewPlayer(video, media);
                 await player.load(manifestUrl);
 
@@ -260,8 +264,6 @@
                 });
 
                 openDownloadDialogButton.disabled = false;
-
-                await timeline.startResponsiveThumbnailGeneration(media.video);
             }
 
             main().catch(error => {
