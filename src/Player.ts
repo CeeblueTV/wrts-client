@@ -1082,6 +1082,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     this.log(
                         `Starting phase ended at x${playbackSpeed.toFixed(2)} speed (bufferAmount=${this.bufferAmount}ms)`
                     ).info();
+                    this.onBufferChange();
                 }
             }
             this._onPlayerProgress();
@@ -1347,9 +1348,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
         this._bufferState = state;
         this.onBufferState(oldState);
-        // A state transition must always be able to re-evaluate the rate, even if bufferAmount
-        // happens to settle within BUFFER_CHANGE_STEP of its last onBufferChange right after transitioning
-        this.onBufferChange();
+        if (!this._starting) {
+            // A state transition must always be able to re-evaluate the rate, even if bufferAmount
+            // happens to settle within BUFFER_CHANGE_STEP of its last onBufferChange right after transitioning
+            this.onBufferChange();
+        }
     }
 
     private _newMediaSource(): MediaSource | undefined {
@@ -1417,6 +1420,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (!this._timeout) {
             return;
         }
+        // always lock playback rate to 1 on starting phase
+        this.playbackRate = 1;
         if (!this._starting) {
             // reset starting phase
             this._starting = Number.MIN_VALUE;
@@ -1562,7 +1567,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             if (dropped) {
                 this._droppedFramePerSecond.addBytes(dropped);
             }
-            this.onBufferChange();
+            if (!this._starting) {
+                this.onBufferChange();
+            }
         }
     }
 }
