@@ -451,6 +451,21 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * Set video playback rate
+     */
+    set playbackRate(value: number) {
+        const playbackRate = this._video.playbackRate;
+        // Some browsers expose playbackRate with float32 precision. Avoid an assignment when both values represent the
+        // same float32, as it may fire a ratechange event and briefly disrupt playback.
+        if (Math.fround(playbackRate) !== Math.fround(value)) {
+            this._video.playbackRate = value;
+            this.log(
+                `Change playback rate from ${playbackRate} to ${this._video.playbackRate} (bufferAmount=${this.bufferAmount}ms)`
+            ).info();
+        }
+    }
+
+    /**
      * @override
      * {@inheritDoc IPlaying.playbackSpeed}
      */
@@ -1261,8 +1276,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @param maxRate playback rate percentage applied when the buffer is high; defaults to 110 (1.1x)
      */
     adjustPlaybackRate(minRate = PLAYBACK_RATE_MIN, maxRate = PLAYBACK_RATE_MAX) {
-        const playbackRate = this._video.playbackRate;
-
         let rate = 1;
         if (this.bufferState === BufferState.HIGH) {
             if (maxRate > 100) {
@@ -1273,13 +1286,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 rate = minRate / 100;
             }
         }
-
-        // Some browsers expose playbackRate with float32 precision. Avoid an assignment when both values represent the
-        // same float32, as it may fire a ratechange event and briefly disrupt playback.
-        if (Math.fround(playbackRate) !== Math.fround(rate)) {
-            this._video.playbackRate = rate;
-            this.log(`Adapt playback rate to ${this._video.playbackRate} (bufferAmount=${this.bufferAmount}ms)`).info();
-        }
+        this.playbackRate = rate;
     }
 
     private _setBufferLimitHigh(value: number) {
