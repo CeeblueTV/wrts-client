@@ -29,7 +29,7 @@ const root = typeof window !== 'undefined' ? window : global;
 const ManagedMediaSource = (root as any).ManagedMediaSource;
 const BUFFER_AUTO_MIN_WINDOW = ManagedMediaSource ? 400 : 200; // ms
 const BUFFER_AUTO_MEASURE_MARGIN = 40; // ms
-const BUFFER_AUTO_TRY_DELAY = 5000; // ms
+const BUFFER_AUTO_TRY_DELAY = 7000; // ms
 
 const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high: 10% faster
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
