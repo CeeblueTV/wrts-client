@@ -741,6 +741,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _bufferLimitHigh: number;
     private _bufferLimitHighAuto?: AdaptiveRetry;
     private _bufferMeasure: BufferMeasure = new BufferMeasure();
+    private _bufferMinMiddle: number = 0;
     private _bufferLimitMiddle: number;
     private _bufferState: BufferState;
     private _controller: AbortController;
@@ -993,26 +994,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.onStart();
         };
 
-        // Video events
-        const onWaiting = () => {
-            if (!this._timeout) {
-                // stopped!
+        const onStall = () => {
+            if (!this._timeout || this._buffering) {
+                // stopped or already in buffering phase
                 return;
             }
-
-            // Fix possible hole on waiting, in first to repair bufferAmount if need!
-            this._playback?.flush(true);
-
-            // wait end of starting phase to avoid wrong playbackConstraint
-            this._waitStarting();
-
-            if (this._buffering || this.bufferAmount > this.bufferLimitLow) {
-                // Already in buffering phase OR
-                // Enough data is buffered: treat waiting as transient and watch for playback to resume.
-                return;
-            }
-
-            // STALL (can also happen on paused player)
+            // STALL
             ++this._stallCount;
             // enter in a buffering phase!
             this.log('buffering...').info();
@@ -1027,6 +1014,54 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             /// wait data
             this._setBufferState(BufferState.LOW); // Force buffer to LOW
             this.onStall();
+        };
+
+        // Video events
+        const onWaiting = () => {
+            if (!this._timeout) {
+                // stopped!
+                return;
+            }
+            if (this._video.seeking) {
+                // wait end of seek
+                return;
+            }
+
+            // Need of data!
+
+            // Fix possible hole on waiting, in first to repair bufferAmount if need!
+            this._playback?.flush(true);
+
+            // wait end of starting phase to avoid wrong playbackConstraint
+            this._waitStarting();
+
+            if (this.bufferAmount > this.bufferLimitLow) {
+                // We have data BUT is missing data ?!
+                if (this._video.buffered.length > 1) {
+                    // Buffer hole detected => 'error' log because it should not really happen
+                    // even for B-Frame where we resolve it in a resonnable short time.
+                    this.log(`There is an audio or video hole (B-Frame?), waiting hole recovering`).error();
+                } else {
+                    // No buffer hole => Device requires a minimum of buffer to get smooth playback
+                    const bufferMinMiddle = this.bufferAmount + BUFFER_AUTO_MEASURE_MARGIN;
+                    if (this._bufferLimitHighAuto) {
+                        if (this._bufferMinMiddle < bufferMinMiddle) {
+                            this._bufferMinMiddle = bufferMinMiddle;
+                            this.log(
+                                `The device requires at least ${this._bufferMinMiddle}ms of buffered media for smooth playback`
+                            ).warn();
+                        }
+                        this._adjustBufferLimitHigh(true);
+                    } else if (this._bufferLimitMiddle < bufferMinMiddle) {
+                        this.log(
+                            `The configured target buffer is too low for smooth playback; this device requires at least ${bufferMinMiddle}ms`
+                        ).error();
+                    }
+                }
+                return;
+            }
+
+            onStall();
         };
         const onCanPlay = () => {
             // /!\ Don't use onCanPlayThrough, not called at all on Safari/iOS
@@ -1059,6 +1094,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 return;
             }
             this.log(`Playback seek to ${this.currentTime}s (${(this.currentTime - this.endTime).toFixed(3)} from end)`).info();
+            // Looks if we were on a stall
+            if (this._video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+                onStall();
+            }
         };
         const onPause = () => {
             this.log('Playback paused')[this._paused ? 'info' : 'warn']();
@@ -1202,6 +1241,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
 
         // Reset values
+        this._bufferMinMiddle = 0;
         this._droppedVideoFrames = 0;
         this._droppedFramePerSecond.clear();
         this._bufferLimitHighAuto?.reset();
@@ -1301,7 +1341,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     private _adjustBufferLimitHigh(shouldIncrease = false) {
-        let highLimit = Math.round(this._bufferLimitLow + this._bufferMeasure.lowHighRange + BUFFER_AUTO_MEASURE_MARGIN);
+        const bufferWindow = Math.max(BUFFER_AUTO_MIN_WINDOW, this._bufferMeasure.lowHighRange + BUFFER_AUTO_MEASURE_MARGIN);
+        let highLimit = Math.round(this._bufferLimitLow + bufferWindow);
 
         if (highLimit > this._bufferLimitHigh) {
             // Buffer augmentation
@@ -1309,21 +1350,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             highLimit = Math.min(highLimit, this._bufferLimitHigh * 2);
         } else {
             // Buffer diminution
-            if (shouldIncrease) {
-                // A buffer boundary was crossed, so the current window may need to be realigned.
-                // Any increase justified by the measurements would have been applied above.
-                // Wait for the observation window to complete before considering a decrease.
-                return;
-            }
             if (highLimit < this._bufferLimitHigh) {
-                // amortize the diminution
-                highLimit = Math.max(
-                    // 50% amortization to target new value
-                    Math.floor(this._bufferLimitHigh - (this._bufferLimitHigh - highLimit) / 2),
-                    // minumum acceptable relative to low buffer
-                    this._bufferLimitLow + BUFFER_AUTO_MIN_WINDOW
-                );
+                // amortize the diminution: 50% to target new value
+                highLimit = Math.floor(this._bufferLimitHigh - (this._bufferLimitHigh - highLimit) / 2);
             }
+        }
+
+        if (this._bufferMinMiddle) {
+            // Check bufferMinMiddle constraint
+            highLimit = Math.max(2 * (this._bufferMinMiddle - this._bufferLimitLow) + this._bufferLimitLow, highLimit);
         }
 
         if (highLimit === this._bufferLimitHigh) {
@@ -1335,6 +1370,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.log(`Increase bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).info();
             this._bufferLimitHighAuto?.fail();
         } else {
+            if (shouldIncrease) {
+                // A buffer boundary was crossed, so the current window may need to be realigned.
+                // Any increase justified by the measurements would have been applied above.
+                // Wait for the observation window to complete before considering a decrease.
+                return;
+            }
             this.log(`Decrease bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).info();
         }
         this._setBufferLimitHigh(highLimit);
