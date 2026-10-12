@@ -53,8 +53,11 @@
                         @mouseenter="onPlayerActivity()"
                         @mousemove="onPlayerActivity()"
                         @mouseleave="onPlayerLeave()"
-                        @touchstart="onPlayerTouch($event)"
-                        @contextmenu="onPlayerContextMenu($event)">
+                        @pointerdown="startAdvancedControlsPress($event)"
+                        @pointerup="cancelAdvancedControlsPress()"
+                        @pointercancel="cancelAdvancedControlsPress()"
+                        @pointerleave="cancelAdvancedControlsPress()"
+                        @touchstart="onPlayerTouch($event)">
 
                         <video autoplay id="video" ref="video" playsinline></video>
 
@@ -65,6 +68,19 @@
                                 :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
                                 @click="fullscreen()">
                                 <i class="fas" :class="isFullscreen ? 'fa-compress' : 'fa-expand'"></i>
+                            </button>
+                            <button v-if="advancedControlsVisible" class="pc-btn pc-latency"
+                                :class="{ 'is-on': latencies.length }"
+                                :title="latencies.length ? 'Disable latency measurements' : 'Enable latency measurements'"
+                                :aria-label="latencies.length ? 'Disable latency measurements' : 'Enable latency measurements'"
+                                :aria-pressed="!!latencies.length"
+                                @click="toggleLatencyMeasurements()">
+                                <i class="fas fa-ruler"></i>
+                            </button>
+                            <button v-if="audioDump || videoDump"
+                                class="pc-btn pc-dump" title="Dump captured media for debugging"
+                                aria-label="Dump captured media for debugging" @click="dump()">
+                                <i class="fas fa-bug"></i>
                             </button>
                             <button class="pc-btn pc-stop" title="Stop" @click="play()">
                                 <i class="fas fa-stop"></i>
@@ -156,7 +172,7 @@
                                 <button class="btn" title="Jump to live position"
                                     :class="{ 'btn-red': player && bufferAmount > player.bufferLimitMiddle }"
                                     :disabled="!player || bufferAmount <= player.bufferLimitMiddle"
-                                    @mouseleave="leaveGoLive" @touchend="leaveGoLive" v-on:click="goLive">
+                                    v-on:click="goLive">
                                     <i class="fas fa-rocket"></i>
                                     Live
                                 </button>
@@ -238,10 +254,6 @@
                                 <img alt="Dump media" title="Dump media as MP4 files"
                                     @click="dump()" src="./assets/dump.png"
                                     v-show="audioDump || videoDump">
-                                <button class="e2e-btn" :class="{ on: e2eEnabled }" @click="toggleE2E()"
-                                    title="End-to-end latency from the timestamp burnt into the video. Off by default: reading back a video frame every sample is costly on mobile">
-                                    E2E
-                                </button>
                             </div>
                         </div>
 
@@ -450,6 +462,7 @@
 
         // Beyond that the oldest rows are dropped, the messages panel is a tail not an archive.
         const MAX_MESSAGES = 200;
+        const ADVANCED_CONTROLS_LONG_PRESS_MS = 1000;
 
         // HTMLMediaElement.error.code → MediaError constant name. Surfaced in the alert when the
         // native video element fires `onerror` (the Player usually wraps this in a richer
@@ -674,7 +687,7 @@
                     sidePanel: options.sidePanel ? true : false, // dock the metrics panel to the right (large screens)
                     controlsHidden: false,
                     controlsVisible: false,
-                    _controlsTimer: null,
+                    advancedControlsVisible: false,
                     isFullscreen: false,
 
                     // Widevine-only robustness presets. Keyed by display label, the value is the
@@ -709,7 +722,6 @@
                     startTime: 0,
                     adaptiveFrameSkipping: true,
                     fixedPlaybackRate: options.fixedRate ? true : false,
-                    e2eEnabled: options.e2e ? true : false,
                     streamMetadata: null,
                     netDescription: "",
                     videoTracks: new Map(),
@@ -883,7 +895,7 @@
                             const offset = (this._audioEnd ?? 0) - (this._videoEnd ?? 0);
                             avOffsets.push((offset > 0 ? '+' : '') + offset + "ms");
                         }
-                        if(latencies.length || (options.latency && stats.latency)) {
+                        if(latencies.length || (!this.advancedControlsVisible && options.latency && stats.latency)) {
                             latencies.push((stats.latency || 0) +"ms");
                         }
 
@@ -906,14 +918,15 @@
 
                         stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
 
-                        if (this.e2eEnabled) {
+                        if(latencies.length) {
                             const e2eLatency = EpochTime.getLatency(video, this.canvas, drawContext);
                             if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
                                 // displaid only if activated!
                                 e2eLatencies.push(e2eLatency+"ms");
                             }
                         } else if (e2eLatencies.length) {
-                            e2eLatencies.push('0ms'); // keeps the series aligned, 0 = no measure
+                            // keeps the series aligned, 0 = no measure
+                            e2eLatencies.push('0ms');
                         }
                         this.times.push({
                             time: new Date().toISOString(),
@@ -936,6 +949,7 @@
                     document.removeEventListener('webkitfullscreenchange', this._fsListener);
                 }
                 if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                if (this._advancedControlsTimer) clearTimeout(this._advancedControlsTimer);
                 if (this.uiTimeline) {
                     this.uiTimeline.destroy();
                 }
@@ -971,14 +985,32 @@
                     this.streamError = normalizeError(error);
                 },
 
-                // ── Player overlay controls (fullscreen / stop on hover or tap) ──
+                // ── Player overlay controls (playback + long-press debug actions) ──
                 onPlayerActivity(isTouch = false) {
                     if (!this.isPlaying()) return;
                     this._scheduleControls(isTouch);
                 },
                 onPlayerLeave() {
                     if (this._controlsTimer) clearTimeout(this._controlsTimer);
+                    this.cancelAdvancedControlsPress();
                     this.controlsVisible = false;
+                },
+                startAdvancedControlsPress(event) {
+                    // On touch, the initial press reveals the regular controls; on desktop they may
+                    // already be visible from hover. In both cases, holding the video surface reveals
+                    // the hidden debug controls, while presses begun on a control remain regular clicks.
+                    if (!this.isPlaying() || event.button !== 0 || event.target.closest('button')) return;
+                    this.cancelAdvancedControlsPress();
+                    this._advancedControlsTimer = setTimeout(() => {
+                        this._advancedControlsTimer = null;
+                        this.advancedControlsVisible = true;
+                        this._scheduleControls(true);
+                        if (event.pointerType !== 'mouse') navigator.vibrate?.(25);
+                    }, ADVANCED_CONTROLS_LONG_PRESS_MS);
+                },
+                cancelAdvancedControlsPress() {
+                    if (this._advancedControlsTimer) clearTimeout(this._advancedControlsTimer);
+                    this._advancedControlsTimer = null;
                 },
                 onPlayerTouch(event) {
                     if (!this.isPlaying()) return;
@@ -1009,16 +1041,6 @@
                         this.controlsVisible = false;
                     }, 3000);
                 },
-                onPlayerContextMenu(event) {
-                    // Hidden debug shortcut: right-click on the player → dump current buffers and pause.
-                    // (Listener lives on the .player container so the overlay can't swallow it.)
-                    event.preventDefault();
-                    this.dump();
-                    if (this.player) {
-                        this.player.paused = true;
-                    }
-                },
-
                 buildStream() {
                     if(!this.stream) {
                         this.stream  = 'out+de1e6f7c-e5db-450b-9603-c3644274779b';
@@ -1462,20 +1484,6 @@
                     this.$refs.video.muted = this.muted;
                     log(this.muted ? 'MutePlayback' : 'UnmutePlayback').info();
                 },
-                pause() {
-                    clearTimeout(this.pauseVideo);
-                    this.pauseVideo = null;
-                    this.dump();
-                    if(this.player) {
-                        this.player.paused = !this.player.paused;
-                    }
-                },
-                leaveGoLive(event) {
-                    if ((event.buttons & 1) && this.player) {
-                        // trick to activate latency
-                        this.latencies.push(this.player.latency+"ms");
-                    }
-                },
                 goLive() {
                     if(this.player) {
                         this.player.goLive();
@@ -1483,6 +1491,16 @@
                 },
 
                 // ── Metrics ──
+                toggleLatencyMeasurements() {
+                    if (this.latencies.length) {
+                        this.latencies.length = 0;
+                        this.stats.get('Latency e2e')?.splice(0);
+                    } else if (this.player) {
+                        // A non-empty latency series is also the opt-in flag used by computeStats.
+                        this.latencies.push((this.player.latency || 0) + 'ms');
+                    }
+                    this._scheduleControls(true);
+                },
                 resetMetrics(all=false) {
                     this.uiStats.reset();
                     // Rebaseline the counters the Player reports cumulatively, so the chart
@@ -1496,10 +1514,6 @@
                         this.hasMetrics = false;
                         this.deltaStats = {};
                     }
-                },
-                toggleE2E() {
-                    this.e2eEnabled = !this.e2eEnabled;
-                    this.updateURL();
                 },
                 // Drop the samples the chart no longer displays, or all of them when `all` is set
                 // (a new stream: the previous run's scale would flatten the new one).
@@ -1690,9 +1704,6 @@
                         }
                         if(options.fixedRate) {
                             path += "&fixedRate";
-                        }
-                        if(this.e2eEnabled) {
-                            path += "&e2e";
                         }
                         if(this.sidePanel) {
                             path += "&sidePanel";
