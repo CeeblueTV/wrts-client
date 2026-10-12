@@ -1449,7 +1449,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (!this._playback) {
             return;
         }
-        // Fill hole if we are on the related playback position
+        // New media was appended; repair a potential hole at the current playback position.
         if (this._video.readyState < HTMLMediaElement.HAVE_ENOUGH_DATA) {
             this._playback.flush(true);
         }
