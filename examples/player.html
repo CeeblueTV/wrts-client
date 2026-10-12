@@ -650,23 +650,6 @@
             'seeking', 'seeked', 'ratechange', 'canplay', 'canplaythrough', 'loadeddata', 'loadedmetadata'
         ];
 
-        /** Logs the raw media events of a <video> element. Enabled by the `?events` query parameter. */
-        function logMediaEvents(video, extra) {
-            for (const name of MEDIA_EVENTS) {
-                video.addEventListener(name, () =>
-                    log(
-                        '[event]',
-                        name,
-                        't=' + video.currentTime.toFixed(3),
-                        'paused=' + video.paused,
-                        'readyState=' + video.readyState,
-                        'rate=' + video.playbackRate,
-                        extra ? extra() : ''
-                    ).info()
-                );
-            }
-        }
-
         createApp({
             data() {
                 return {
@@ -823,12 +806,27 @@
                 };
                 document.addEventListener('fullscreenchange', this._fsListener);
                 document.addEventListener('webkitfullscreenchange', this._fsListener);
-                this.$refs.video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
-                this.$refs.video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
+                const video = this.$refs.video;
+                video.addEventListener('webkitbeginfullscreen', () => { this.isFullscreen = true; });
+                video.addEventListener('webkitendfullscreen', () => { this.isFullscreen = false; });
 
                 // Debug: log raw <video> media events to diagnose freezes (append ?events to the URL).
                 if (options.events) {
-                    logMediaEvents(this.$refs.video, () => (this.player ? 'speed=' + (this.player.playbackSpeed || 0).toFixed(2) : ''));
+                    /** Logs the raw media events of a <video> element. Enabled by the `?events` query parameter. */
+                    for (const name of MEDIA_EVENTS) {
+                        video.addEventListener(name, () =>
+                            log(
+                                '[event]',
+                                name,
+                                't=' + video.currentTime.toFixed(3),
+                                'paused=' + video.paused,
+                                'readyState=' + video.readyState,
+                                'seeking=' + video.seeking,
+                                'rate=' + video.playbackRate,
+                                'speed=' + (this.player?.playbackSpeed || 0).toFixed(2)
+                            ).info()
+                        );
+                    }
                 }
 
                 const drawContext = this.canvas.getContext('2d');
@@ -900,7 +898,7 @@
 
                         // Frames dropped by the renderer since the previous sample
                         const now = performance.now();
-                        const dropped = this.$refs.video.getVideoPlaybackQuality?.().droppedVideoFrames;
+                        const dropped = video.getVideoPlaybackQuality?.().droppedVideoFrames;
                         const elapsed = prevSampleTime ? (now - prevSampleTime) / 1000 : 0;
                         droppedFps.push((elapsed && dropped != null && prevDropped != null ? Math.max(0, dropped - prevDropped) / elapsed : 0).toFixed(2));
                         prevDropped = dropped;
@@ -909,7 +907,7 @@
                         stalls.push((stats.stallCount || 0) - (this.deltaStats.stallCount || 0));
 
                         if (this.e2eEnabled) {
-                            const e2eLatency = EpochTime.getLatency(this.$refs.video, this.canvas, drawContext);
+                            const e2eLatency = EpochTime.getLatency(video, this.canvas, drawContext);
                             if(e2eLatencies.length || (e2eLatency>0 && e2eLatency<0xFFFF)) {
                                 // displaid only if activated!
                                 e2eLatencies.push(e2eLatency+"ms");
@@ -1217,18 +1215,18 @@
                     this.playState = PlayState.STARTING;
                     this.startTime = Util.time();
 
-                    const videoElement = this.$refs.video;
-                    videoElement.muted = this.muted;
-                    videoElement.autoplay = true;
-                    videoElement.onloadeddata = () => {
+                    const video = this.$refs.video;
+                    video.muted = this.muted;
+                    video.autoplay = true;
+                    video.onloadeddata = () => {
                         log('TTFF :', Util.time()-this.startTime).info();
                         this.playState = PlayState.PLAYING;
                     };
-                    videoElement.onerror = () => {
-                        const mediaError = videoElement.error;
+                    video.onerror = () => {
+                        const mediaError = video.error;
                         if (mediaError) {
                             // Capture it: the Player resets the video element before calling onStop,
-                            // which clears videoElement.error. We read this snapshot in onStop so the
+                            // which clears video.error. We read this snapshot in onStop so the
                             // real root cause survives instead of being overwritten by the symptom.
                             this._lastMediaError = { code: mediaError.code, message: mediaError.message };
                             log(
@@ -1251,7 +1249,7 @@
                     };
 
                     // Now we can start the player
-                    this.player = new Player(videoElement, this.sourceType);
+                    this.player = new Player(video, this.sourceType);
                     this.player.onStart = this.onStart.bind(this);
                     this.player.onStop = this.onStop.bind(this);
                     this.player.onTrackChange = this.onTrackChange.bind(this);
@@ -1284,8 +1282,8 @@
                     }
                     this.player.onBufferChange = () => {
                         if (this.fixedPlaybackRate) {
-                            if (videoElement.playbackRate !== 1) {
-                                videoElement.playbackRate = 1;
+                            if (video.playbackRate !== 1) {
+                                video.playbackRate = 1;
                             }
                         } else {
                             this.player.adjustPlaybackRate();
@@ -1306,15 +1304,15 @@
                     this.player.cmcdSid = options.cmcdSid;
                 },
                 onStop(error) {
-                    const videoElement = this.$refs.video;
+                    const video = this.$refs.video;
                     if(error) {
                         log('onStop', error).error();
                         // Surface the native MediaError: an "Append buffer issue" with
                         // "HTMLMediaElement.error attribute is not null" is a *secondary* symptom — the
                         // <video> element failed first. Prefer the snapshot captured by onerror because
-                        // the Player resets the video element before this fires, clearing videoElement.error;
+                        // the Player resets the video element before this fires, clearing video.error;
                         // fall back to a live read in case onerror never ran.
-                        const mediaError = this._lastMediaError || videoElement.error;
+                        const mediaError = this._lastMediaError || video.error;
                         if (mediaError) {
                             log(
                                 '>>> ROOT CAUSE VIDEO MediaError:',
@@ -1342,10 +1340,10 @@
                     } else {
                         log('onStop').info();
                     }
-                    videoElement.muted = this.muted;
-                    videoElement.autoplay = true;
-                    videoElement.onloadeddata = null;
-                    videoElement.onerror = null;
+                    video.muted = this.muted;
+                    video.autoplay = true;
+                    video.onloadeddata = null;
+                    video.onerror = null;
 
                     this.audioTracks = new Map();
                     this.audioTrack = 'Audio';
