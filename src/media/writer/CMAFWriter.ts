@@ -548,7 +548,9 @@ export class CMAFWriter extends EventEmitter {
             // trun
             writer.write32(sizeTrun);
             writer.write([0x74, 0x72, 0x75, 0x6e]); // trun
-            writer.write32(0x00000f01); // flags = sample duration + sample size + sample flags + data-offset + compositionOffset
+            const compositionOffset = sample.compositionOffset || 0;
+            // Version 0 stores an unsigned composition offset, while version 1 is required for negative offsets.
+            writer.write32((compositionOffset < 0 ? 0x01000000 : 0) | 0x00000f01);
             writer.write32(1); // samples length
             writer.write32(sizeMoof + 8); // dataoffset: 8 for [size]mdat
             writer.write32(sample.duration); // duration
@@ -556,7 +558,7 @@ export class CMAFWriter extends EventEmitter {
             // 0x01010000 => no-key => sample_depends_on YES | sample_is_difference_sample
             // 0X02000000 => key or audio => sample_depends_on NO
             writer.write32(!this._isVideo || sample.isKeyFrame ? 0x02000000 : 0x01010000);
-            writer.write32(sample.compositionOffset || 0);
+            writer.write32(compositionOffset);
         }
         if (contentProtection) {
             if (this._isVideo || contentProtection.scheme !== ProtectionScheme.CBCS || hasIVInSenc) {

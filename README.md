@@ -101,20 +101,17 @@ player.start({
 
 ## Playback rate adaptation
 
-To stay close to the live edge and protect against stalls when the network worsens, the default `Player` continuously adjusts `<video>.playbackRate` from the buffer state — speeding up slightly to catch back up to live (up to 1.16x) and slowing down when the buffer runs low (down to 0.84x). This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
+To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts `<video>.playbackRate` from the buffer state on every supported platform, including environments exposing `ManagedMediaSource`. It switches to 1.1x when the buffer is `HIGH`, to 0.9x when it is `LOW`, and back to 1x when it is `OK`. This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
 
-On **iOS / Safari**, that compromise can be audible — rate changes there sometimes produce small audio glitches. The default is still to adapt, because for most applications the latency / stall benefits outweigh the cost. If smoother audio matters more for your use case, disable adaptation on iOS / Safari (detected via `ManagedMediaSource`):
+There is no Safari-specific workaround in `onBufferChange` or `adjustPlaybackRate`. To disable automatic playback-rate adaptation, override `onBufferChange` without calling `adjustPlaybackRate`:
 
 ```javascript
 player.onBufferChange = () => {
-   if (window.ManagedMediaSource) {
-      return; // iOS / Safari — skip playbackRate adjustments
-   }
-   player.adjustPlaybackRate();
+   // Keep the current playback rate.
 };
 ```
 
-To narrow the range on any platform, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 84 / 116).
+To use different rates, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 90 / 110).
 
 
 ## DRM
@@ -155,8 +152,8 @@ For browser playback, prefer **Widevine** where it is available. PlayReady is fu
 ```javascript
 player.onBufferChange = () => {
    // Disable playback rate increase to avoid audio artifacts and video lag with PlayReady on Edge
-   // Keep the ability to decrease playback rate between [0.84, 0.92] to reduce the risk of stall when the network condition worsen
-   player.adjustPlaybackRate(84, 100);
+   // Keep the ability to decrease playback rate to reduce the risk of stalls when network conditions worsen
+   player.adjustPlaybackRate(90, 100);
 };
 ```
 

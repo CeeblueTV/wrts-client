@@ -112,7 +112,7 @@ export class MediaBuffer extends Loggable {
     private _isVideo: boolean;
     private _updateTimeout: number;
     private _startTime: number;
-    private _waitBFrames: number;
+    private _maxDurationAfterHole: number = 0;
     private _onUpdating: boolean;
 
     constructor(mediaSource: MediaSource, mimeType: string, isAlreadyCMAF: boolean = false) {
@@ -122,7 +122,6 @@ export class MediaBuffer extends Loggable {
         this._isVideo = mimeType.toLocaleLowerCase().startsWith('video');
         this._packets = [];
         this._startTime = -1;
-        this._waitBFrames = 0;
         this._updateTimeout = 0;
         // Create buffer with default AVC codec (will be change later)
         const type = mimeType + '; codecs=' + (this._isVideo ? '"avc1.42000a"' : '"mp4a.40.2"');
@@ -169,6 +168,12 @@ export class MediaBuffer extends Loggable {
                 this._packets.push(packet);
             }
             this._trackId = trackId;
+            if (this._isVideo) {
+                // Compute a bounded [100ms, 1s] wait for B-frame reordering from the track frame rate
+                this._maxDurationAfterHole = track.rate > 0 ? Math.max(0.1, Math.min(MAX_CONSECUTIVE_BFRAME / track.rate, 1)) : 1;
+            } else {
+                this._maxDurationAfterHole = 0;
+            }
             this._codecString = track.codecString;
             this._contentProtection = track.contentProtection
                 ? metadata.contentProtection.get(track.contentProtection)
@@ -194,16 +199,28 @@ export class MediaBuffer extends Loggable {
             // protected this._buffer.buffered access
             while (!this._buffer.updating) {
                 // Remove possible hole unresolvable
-                if (this._buffer.buffered.length > 1 && (fixHole || this._waitBFrames > MAX_CONSECUTIVE_BFRAME)) {
-                    this._waitBFrames = 0;
+
+                if (this._buffer.buffered.length > 1) {
                     const beginHole = this._buffer.buffered.end(0);
                     const endHole = this._buffer.buffered.start(1);
-                    update = true;
-                    // use a startTime marker because the buffer removing can not be supported by few old browsers
-                    this._startTime = Math.max(this._startTime, endHole);
-                    this.log(`Remove ${(endHole - beginHole).toFixed(3)}s of timeline from ${beginHole}s to ${endHole}s`)[
-                        this._isVideo ? 'error' : 'warn'
-                    ]();
+                    if (!fixHole && this._maxDurationAfterHole) {
+                        let durationAfterHole = 0;
+                        for (let index = 1; index < this._buffer.buffered.length; ++index) {
+                            durationAfterHole += this._buffer.buffered.end(index) - this._buffer.buffered.start(index);
+                            if (durationAfterHole > this._maxDurationAfterHole) {
+                                fixHole = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (fixHole) {
+                        update = true;
+                        // use a startTime marker because the buffer removing can not be supported by few old browsers
+                        this._startTime = Math.max(this._startTime, endHole);
+                        this.log(`Remove ${(endHole - beginHole).toFixed(3)}s of timeline from ${beginHole}s to ${endHole}s`)[
+                            this._isVideo ? 'error' : 'warn'
+                        ]();
+                    }
                 }
 
                 // remove first part if need
@@ -229,11 +246,6 @@ export class MediaBuffer extends Loggable {
                             this._buffer.changeType(packet);
                         }
                     } else {
-                        if (this._isVideo && this._buffer.buffered.length > 1) {
-                            ++this._waitBFrames;
-                        } else {
-                            this._waitBFrames = 0;
-                        }
                         this._buffer.appendBuffer(packet as Uint8Array<ArrayBuffer>);
                         this.onDataAppended(packet);
                     }

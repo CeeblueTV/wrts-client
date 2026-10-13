@@ -448,12 +448,12 @@ export class CMAFReader extends Reader {
 
                     // sample_composition_time_offset
                     if (flags & 0x800) {
-                        // sample_composition_time_offset
-                        sample.compositionOffset = reader.read32();
-                        if (version && sample.compositionOffset > 0x7fffffff) {
+                        let compositionOffset = reader.read32();
+                        if (version === 1 && compositionOffset > 0x7fffffff) {
                             // is negative!
-                            sample.compositionOffset -= 0x100000000;
+                            compositionOffset -= 0x100000000;
                         }
+                        sample.compositionOffset = (1000 / track.timeScale) * compositionOffset;
                     }
 
                     this._pendingSamples.push({ track, sample });
@@ -626,7 +626,7 @@ export class CMAFReader extends Reader {
                     const maxBitrate = config.read32();
                     const avgBitrate = config.read32();
                     // CMAF spec: avgBitrate is the nominal average bitrate
-                    mTrack.bandwidth = avgBitrate || maxBitrate;
+                    mTrack.bandwidth = Math.ceil((avgBitrate || maxBitrate) / 8); // convert to Bps
                     break;
                 }
                 case 'dOps': {

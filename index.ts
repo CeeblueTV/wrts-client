@@ -31,9 +31,12 @@ export { Source, SourceError } from './src/sources/Source';
 export { HTTPAdaptiveSource } from './src/sources/HTTPAdaptiveSource';
 export { WSSource } from './src/sources/WSSource';
 export { HTTPSource } from './src/sources/HTTPSource';
-export { BufferState, IPlaying } from './src/sources/IPlaying';
+export { BufferState, IPlaying, PlaybackConstraint } from './src/sources/IPlaying';
 
 export { Player, PlayerError } from './src/Player';
+
+// UI helpers
+export { UITimeline, UITimelineAxis } from './src/UITimeline';
 
 const __lib__version__ = '?'; // will be replaced on building by project version
 
