@@ -863,6 +863,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             return;
         }
 
+        if (this._bufferLimitHighAuto) {
+            // Reset the automatically learned buffer window for the new stream.
+            this._setBufferLimitHigh(this._bufferLimitLow + BUFFER_LIMIT_HIGH - BUFFER_LIMIT_LOW);
+        }
+
         // stop player on window unload, to avoid issue with iFrame refresh!
         window.addEventListener('beforeunload', () => this.stop(), this._controller);
 
