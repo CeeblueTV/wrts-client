@@ -1538,9 +1538,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             }
         }
 
-        // Keep the playback head within the valid media range, even while intentionally paused.
-        if (this.currentTime < this.startTime || this.currentTime >= this.endTime) {
-            this.goLive(this.currentTime ? 'repairing' : 'starting');
+        // Keep playback within the current media timeline without replaying buffered media.
+        const currentTime = this.currentTime;
+        const startTime = this.startTime;
+        const endTime = this.endTime;
+        if (currentTime < startTime) {
+            this.goLive(currentTime ? 'repairing' : 'starting');
+        } else if (currentTime > endTime) {
+            this.log(
+                `Playback position ${currentTime.toFixed(3)}s is beyond media end ${endTime.toFixed(3)}s; clamping to the end`
+            ).warn();
+            this._video.currentTime = this._playbackPrevTime = endTime;
         }
 
         this._onPlayerProgress();
