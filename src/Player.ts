@@ -462,6 +462,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.log(
                 `Change playback rate from ${playbackRate} to ${this._video.playbackRate} (bufferAmount=${this.bufferAmount}ms)`
             ).info();
+            if (playbackRate > 1 && this._video.playbackRate <= 1) {
+                // Reset dropped-frame measurements after accelerated playback to prevent it from skewing the ratio.
+                this._droppedVideoFrames = this._video.getVideoPlaybackQuality().droppedVideoFrames;
+                this._droppedFramePerSecond.clear();
+            }
         }
     }
 
@@ -493,7 +498,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
         // Clamp the ratio because the input and renderer measurements use independent time windows.
         const videoFPS = this._source.videoPerSecond;
-        const droppedRatio = videoFPS ? Math.min(Math.max(this._droppedFramePerSecond.exact() / videoFPS, 0), 1) : 0;
+        // Accelerated playback can intentionally skip frames to match the display refresh rate.
+        const droppedRatio =
+            playbackRate <= 1 && videoFPS ? Math.min(Math.max(0, this._droppedFramePerSecond.exact() / videoFPS), 1) : 0;
 
         if (droppedRatio > PLAYBACK_CONSTRAINT_THRESHOLD || slowdownRatio > PLAYBACK_CONSTRAINT_THRESHOLD) {
             return { droppedRatio, slowdownRatio };
