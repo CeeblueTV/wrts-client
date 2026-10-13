@@ -227,22 +227,35 @@ export class Metadata extends Loggable {
         }
         tracks.sort((track1: MediaTrack, track2: MediaTrack) => track2.bandwidth - track1.bandwidth);
 
-        // Fill related collection and make each track unique
-        this.dataTracks.length = this.audioTracks.length = this.videoTracks.length = 0;
-        this.tracks.clear();
-        const unsupportedTracks: Array<MediaTrack> = [];
-        for (const track of tracks) {
-            const size = this.tracks.size;
-            this.tracks.set(track.id, track);
-            if (size === this.tracks.size) {
-                // same track already inserted
+        // Create checkSupport promises and deduplicate tracks by ID
+        const promises = [];
+        const thisTracks = new Map<number, MediaTrack>();
+        for (let i = 0; i < tracks.length; ++i) {
+            const track = tracks[i];
+            if (thisTracks.has(track.id)) {
+                // Remove doublon
+                tracks.splice(i--, 1);
                 continue;
             }
-            if (!(await track.checkSupport())) {
+            // Add track
+            thisTracks.set(track.id, track);
+            // Add the checkSupport promise
+            promises.push(track.checkSupport());
+        }
+
+        // Check support in parallel
+        const supports = await Promise.all(promises);
+        for (let i = 0; i < supports.length; ++i) {
+            if (!supports[i]) {
+                const track = tracks[i];
                 this.log(`Remove unsupported track ${track}`).warn();
-                unsupportedTracks.push(track);
-                continue;
+                thisTracks.delete(track.id);
             }
+        }
+
+        // Rebuild type-specific collections and adaptive rendition links
+        this.dataTracks.length = this.audioTracks.length = this.videoTracks.length = 0;
+        for (const [, track] of thisTracks) {
             let medias;
             if (track.type === Media.Type.AUDIO) {
                 medias = this.audioTracks;
@@ -258,9 +271,7 @@ export class Metadata extends Loggable {
             }
             medias.push(track);
         }
-        for (const track of unsupportedTracks) {
-            this.tracks.delete(track.id);
-        }
+        this.tracks = thisTracks;
     }
 
     /**

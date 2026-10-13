@@ -633,10 +633,11 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 }
 
                 // fix metadata
-                await (this._metadata = metadata).fix();
+                await metadata.fix();
                 if (this.closed) {
                     return;
                 }
+                this._metadata = metadata;
 
                 // Call onMetadata (user can possibly change metadata at this level)
                 const initTracks = this.onMetadata(metadata);
