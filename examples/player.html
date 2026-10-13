@@ -1324,9 +1324,7 @@
                     }
                     this.player.onBufferChange = () => {
                         if (this.fixedPlaybackRate) {
-                            if (video.playbackRate !== 1) {
-                                video.playbackRate = 1;
-                            }
+                            this.player.playbackRate = 1;
                         } else {
                             this.player.adjustPlaybackRate();
                         }
