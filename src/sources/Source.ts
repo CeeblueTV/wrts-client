@@ -661,8 +661,11 @@ export abstract class Source extends EventEmitter implements ICMCD {
                     if (initTracks?.data == null) {
                         this._requestedTracks.data = new Set();
                         // By default we receive all data tracks, even subtitle to allow an immediate switch
-                        for (const dataTrack of metadata.dataTracks) {
-                            this._requestedTracks.data.add(dataTrack.id);
+                        if (metadata.protocolVersion.major !== 2 || metadata.protocolVersion.minor >= 1) {
+                            // Protocol version 2.0.x has an issue with subtitle tracks (ENG-1378)
+                            for (const dataTrack of metadata.dataTracks) {
+                                this._requestedTracks.data.add(dataTrack.id);
+                            }
                         }
                     } else {
                         this._requestedTracks.data = new Set(initTracks.data);
