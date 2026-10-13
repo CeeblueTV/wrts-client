@@ -31,6 +31,8 @@ const OV_H = 16;
 const OV_GAP = 6;
 /** No-video fallback GOP (ms): group audio/data-only tracks into fixed media-time buckets, like the server. */
 const FALLBACK_GOP = 2000;
+/** Maximum canvas refresh rate. Timeline data does not need display-rate rendering. */
+const RENDER_INTERVAL = 1000 / 20;
 
 /** Time axis used to position sequences. */
 export type UITimelineAxis = 'media' | 'reception';
@@ -234,8 +236,12 @@ export class UITimeline {
         // Listen on the window so a drag that ends outside the canvas still releases.
         root.addEventListener('mouseup', this._onUp);
 
-        const loop = () => {
-            this.render();
+        let lastRender = -RENDER_INTERVAL;
+        const loop = (now: number) => {
+            if (now - lastRender >= RENDER_INTERVAL) {
+                this.render();
+                lastRender = now;
+            }
             this._raf = root.requestAnimationFrame(loop);
         };
         this._raf = root.requestAnimationFrame(loop);
@@ -385,7 +391,7 @@ export class UITimeline {
         this._hasData = true;
     }
 
-    /** Draws the current state. Called every animation frame; cheap no-op while hidden. */
+    /** Draws the current state. Called by the throttled animation loop; cheap no-op while hidden. */
     render() {
         const canvas = this._canvas;
         if (canvas.offsetParent === null) {
