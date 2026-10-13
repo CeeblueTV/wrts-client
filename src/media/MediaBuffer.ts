@@ -168,7 +168,12 @@ export class MediaBuffer extends Loggable {
                 this._packets.push(packet);
             }
             this._trackId = trackId;
-            this._maxDurationAfterHole = 0;
+            if (this._isVideo) {
+                // Compute a bounded [100ms, 1s] wait for B-frame reordering from the track frame rate
+                this._maxDurationAfterHole = track.rate > 0 ? Math.max(0.1, Math.min(MAX_CONSECUTIVE_BFRAME / track.rate, 1)) : 1;
+            } else {
+                this._maxDurationAfterHole = 0;
+            }
             this._codecString = track.codecString;
             this._contentProtection = track.contentProtection
                 ? metadata.contentProtection.get(track.contentProtection)
@@ -178,9 +183,6 @@ export class MediaBuffer extends Loggable {
                 this.onError(error);
                 return;
             }
-        }
-        if (this._isVideo) {
-            this._maxDurationAfterHole = Math.max(this._maxDurationAfterHole, (sample.duration / 1000) * MAX_CONSECUTIVE_BFRAME);
         }
         this._cmafWriter.write(sample, this._contentProtection);
         return this;
