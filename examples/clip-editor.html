@@ -187,12 +187,7 @@
 
                 const media = await parseManifest(manifestUrl);
 
-                // The thumbnails take the network first: the player only starts downloading once they are done.
-                await timeline.startResponsiveThumbnailGeneration(media.video)
-                    .catch(error => console.error("Could not generate thumbnails", error));
-
                 const player = new PreviewPlayer(video, media);
-                await player.load(manifestUrl);
 
                 timeline.addEventListener("selection-change", event => player.setBufferingEnd(event.detail.end));
 
@@ -202,6 +197,12 @@
                     timestampS => player.seek(timestampS),
                     () => player.getCurrentTime()
                 );
+
+                // The thumbnails take the network first: the player only starts downloading once they are done.
+                await timeline.startResponsiveThumbnailGeneration(media.video)
+                    .catch(error => console.error("Could not generate thumbnails", error));
+
+                await player.load(manifestUrl, timeline.selection.start);
 
                 const exporter = new MediaExporter(media);
 
