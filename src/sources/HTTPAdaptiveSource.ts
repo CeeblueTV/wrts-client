@@ -174,18 +174,21 @@ export class HTTPAdaptiveSource extends Source {
         // propagate Metadata
         await this.readMetadata(metadata);
 
-        let low = false;
+        let bufferOk: boolean | undefined = true;
         playing.on(
             'BufferState',
             async () => {
-                low = false;
                 if (playing.bufferState === BufferState.LOW) {
                     if (this._upController) {
                         // Stop up emulation if is running !
                         this._upController.abort();
                     } else {
-                        low = true;
+                        // buffer NOK
+                        bufferOk = false;
                     }
+                } else if (bufferOk == null) {
+                    // buffer improvement!
+                    bufferOk = true;
                 }
                 // Just rearm the UP emulation on every buffer instability
                 upRetry.rearm();
@@ -228,7 +231,7 @@ export class HTTPAdaptiveSource extends Source {
                 if (
                     playbackConstraint || // the current playback is not smooth enough to sustain the current rendition
                     aborted || // we have aborted a sequence because of a stall or a low buffer
-                    low // we reach low in buffer without UP emulation perturbation
+                    !bufferOk // we reach low in buffer without UP emulation perturbation
                 ) {
                     // We have to down one level
                     if (!upRetry.failed && (playbackConstraint || !this._upController)) {
@@ -373,6 +376,7 @@ export class HTTPAdaptiveSource extends Source {
             this._cancelableController = new AbortController();
             this._alterableController = new AbortController();
             this._upController = undefined;
+            bufferOk = playing.bufferState !== BufferState.LOW ? true : undefined;
 
             // Create promises
             const promises = [];
