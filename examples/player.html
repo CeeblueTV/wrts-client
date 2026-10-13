@@ -502,6 +502,17 @@
             return new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
         }
 
+        function downloadFile(name, data, type) {
+            const url = URL.createObjectURL(new Blob([data], { type }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = name;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
         /**
          * Normalizes any error shape (a Player onStop union member, a synthesized video onerror, an
          * input-validation error) into what .player-alert renders:
@@ -603,14 +614,7 @@
                 box.textContent = '';
             };
             downloadBtn.onclick = () => {
-                const url = URL.createObjectURL(new Blob([getText()], { type: 'text/plain;charset=utf-8' }));
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `wrts-logs-${downloadDate()}.txt`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
+                downloadFile(`wrts-logs-${downloadDate()}.txt`, getText(), 'text/plain;charset=utf-8');
             };
             copyBtn.onclick = () => {
                 const text = getText();
@@ -1494,7 +1498,7 @@
                     this.uiTimeline.windowDuration = seconds;
                 },
                 downloadTimeline() {
-                    this.download('timeline.csv', this.uiTimeline.toCSV(), 'text/csv;charset=utf-8;');
+                    downloadFile('timeline.csv', this.uiTimeline.toCSV(), 'text/csv;charset=utf-8;');
                 },
 
                 mute() {
@@ -1542,16 +1546,6 @@
                     }
                     this.times.splice(0, Math.max(0, this.times.length - displayableCount));
                 },
-                download(name, data, type) {
-                    const url = URL.createObjectURL(new Blob([data], { type }));
-                    const link = document.createElement('a');
-                    link.setAttribute('href', url);
-                    link.setAttribute('download', name);
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                },
                 downloadStats() {
                     let max = this.times.length;
                     const headers = ['localTime', 'mediaTime'];
@@ -1573,16 +1567,16 @@
                         }
                     }
 
-                    this.download(`wrts-stats-${downloadDate()}.csv`, csv, 'text/csv;charset=utf-8;');
+                    downloadFile(`wrts-stats-${downloadDate()}.csv`, csv, 'text/csv;charset=utf-8;');
                 },
 
                 dump() {
                     // Just here to debug binary generation when need
                     if(this.audioDump && this.audioDump.size()) {
-                        this.download("audio.mp4", this.audioDump.data(), 'video/mp4');
+                        downloadFile("audio.mp4", this.audioDump.data(), 'video/mp4');
                     }
                     if(this.videoDump && this.videoDump.size()) {
-                        this.download("video.mp4", this.videoDump.data(), 'video/mp4');
+                        downloadFile("video.mp4", this.videoDump.data(), 'video/mp4');
                     }
                 },
                 fullscreen() {
