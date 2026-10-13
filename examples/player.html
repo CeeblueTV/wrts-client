@@ -653,7 +653,7 @@
             };
             document.readyState === 'loading' ? addEventListener('DOMContentLoaded', ready) : ready();
             log.on = (level, args) => {
-                const line = args.map(a => (typeof a === 'object' && a !== null ? Util.stringify(a) : String(a))).join(' ');
+                const line = args.map(a => Util.stringify(a, { noBin: true })).join(' ');
                 const row = document.createElement('div');
                 row.style.color = level === 'error' ? '#f55' : level === 'warn' ? '#fd5' : '#9f9';
                 const d = new Date();
