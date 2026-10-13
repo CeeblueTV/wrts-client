@@ -1034,6 +1034,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 // stopped!
                 return;
             }
+            if (this._paused) {
+                // Let playback resume handle any remaining lack of data after an intentional pause.
+                return;
+            }
+
             // Reset playback measurements and keep a watchdog active until playback resumes.
             this._waitStarting();
 
@@ -1108,7 +1113,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.log(`Playback seek to ${this.currentTime}s (${(this.currentTime - this.endTime).toFixed(3)} from end)`).info();
             // Looks if we were on a stall
             if (this._video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
-                onStall();
+                onWaiting();
             }
         };
         const onPause = () => {
