@@ -1034,8 +1034,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 // stopped!
                 return;
             }
+            // Reset playback measurements and keep a watchdog active until playback resumes.
+            this._waitStarting();
+
             if (this._video.seeking) {
-                // wait end of seek
+                // Wait for the seek to complete without treating it as a regular stall.
                 return;
             }
 
@@ -1043,9 +1046,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
             // Fix possible hole on waiting, in first to repair bufferAmount if need!
             this._playback?.flush(true);
-
-            // wait end of starting phase to avoid wrong playbackConstraint
-            this._waitStarting();
 
             if (this.bufferAmount > this.bufferLimitLow) {
                 // We have data BUT is missing data ?!
