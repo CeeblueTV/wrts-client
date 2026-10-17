@@ -35,7 +35,8 @@ const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high:
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
 const PLAYBACK_CONSTRAINT_THRESHOLD = 0.05; // 5%
 
-let _maximumResolution: Media.Resolution | undefined;
+// Initialize with the current screen resolution, then refresh it on resize
+let _maximumResolution: Media.Resolution | undefined = Media.screenResolution();
 root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution()));
 
 export type PlayerError =
@@ -576,7 +577,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * {@inheritDoc IPlaying.maximumResolution}
      */
     get maximumResolution(): Media.Resolution | undefined {
-        return this._maximumResolution ?? _maximumResolution;
+        // null means never set: use the screen resolution, an explicit undefined means no limit
+        return this._maximumResolution === null ? _maximumResolution : this._maximumResolution;
     }
 
     /**
@@ -753,7 +755,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _bufferState: BufferState;
     private _controller: AbortController;
     private _buffering: boolean;
-    private _maximumResolution?: Media.Resolution;
+    private _maximumResolution: Media.Resolution | undefined | null = null;
     private _paused: boolean;
     private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;

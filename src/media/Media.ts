@@ -106,6 +106,10 @@ export function screenResolution(): Resolution | undefined {
         // smartphone, switch to compute max fullscreen ability (height becomes width)
         [width, height] = [height, width];
     }
+    if (width <= 0 || height <= 0) {
+        // screen not attached or not measurable (jsdom, detached webview), no resolution available
+        return;
+    }
     return { width, height };
 }
 
