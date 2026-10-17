@@ -35,6 +35,10 @@ export type SourceError =
      */
     | { type: 'SourceError'; name: 'Resource unavailable' }
     /**
+     * Represents a media type whose tracks all use a codec that cannot be remuxed, detail lists the codecs
+     */
+    | { type: 'SourceError'; name: 'Unsupported codec'; detail: string }
+    /**
      * Represents a {@link ReaderError} error
      */
     | ReaderError
@@ -638,7 +642,21 @@ export abstract class Source extends EventEmitter implements ICMCD {
                     return;
                 }
                 // remove tracks that CMAFWriter cannot remux, before any track selection
-                metadata.filterTracks(track => this._isRemuxable(track));
+                const audioCount = metadata.audioTracks.length;
+                const videoCount = metadata.videoTracks.length;
+                const skippedCodecs = new Set<string>();
+                metadata.filterTracks(track => {
+                    if (this._isRemuxable(track)) {
+                        return true;
+                    }
+                    skippedCodecs.add(track.codecString);
+                    return false;
+                });
+                if ((audioCount && !metadata.audioTracks.length) || (videoCount && !metadata.videoTracks.length)) {
+                    // a media type lost all its tracks, fail now instead of stalling or playing it partially
+                    this.close({ type: 'SourceError', name: 'Unsupported codec', detail: [...skippedCodecs].join(', ') });
+                    return;
+                }
                 this._metadata = metadata;
 
                 // Call onMetadata (user can possibly change metadata at this level)
