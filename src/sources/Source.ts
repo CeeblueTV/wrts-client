@@ -35,6 +35,10 @@ export type SourceError =
      */
     | { type: 'SourceError'; name: 'Resource unavailable' }
     /**
+     * Represents a media type whose tracks all use a codec that cannot be remuxed, detail lists the codecs
+     */
+    | { type: 'SourceError'; name: 'Unsupported codec'; detail: string }
+    /**
      * Represents a {@link ReaderError} error
      */
     | ReaderError
@@ -637,6 +641,22 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 if (this.closed) {
                     return;
                 }
+                // remove tracks that CMAFWriter cannot remux, before any track selection
+                const audioCount = metadata.audioTracks.length;
+                const videoCount = metadata.videoTracks.length;
+                const skippedCodecs = new Set<string>();
+                metadata.filterTracks(track => {
+                    if (this._isRemuxable(track)) {
+                        return true;
+                    }
+                    skippedCodecs.add(track.codecString);
+                    return false;
+                });
+                if ((audioCount && !metadata.audioTracks.length) || (videoCount && !metadata.videoTracks.length)) {
+                    // a media type lost all its tracks, fail now instead of stalling or playing it partially
+                    this.close({ type: 'SourceError', name: 'Unsupported codec', detail: [...skippedCodecs].join(', ') });
+                    return;
+                }
                 this._metadata = metadata;
 
                 // Call onMetadata (user can possibly change metadata at this level)
@@ -905,6 +925,24 @@ export abstract class Source extends EventEmitter implements ICMCD {
             }
         };
         return reader;
+    }
+
+    /**
+     * Returns true if CMAFWriter can remux the track codec, always true in passthrough CMAF mode
+     * @param track audio or video track
+     * @returns
+     */
+    private _isRemuxable(track: MediaTrack): boolean {
+        if (
+            this._playing.passthroughCMAF ||
+            (track.type === Media.Type.VIDEO
+                ? track.codec === Media.Codec.H264
+                : track.codec === Media.Codec.AAC || track.codec === Media.Codec.MP3)
+        ) {
+            return true;
+        }
+        this.log(`Skipping track ${track.id} because codec ${track.codecString} cannot be remuxed`).warn();
+        return false;
     }
 
     /**

@@ -301,23 +301,38 @@ export class Metadata extends Loggable {
         return this._filter(this.dataTracks, new Set(codecs));
     }
 
+    /**
+     * Filter metadata to subset with only audio and video tracks accepted by the predicate
+     * @param accept returns true to keep the track
+     * @returns the metadata modified
+     */
+    filterTracks(accept: (track: MediaTrack) => boolean): this {
+        this._filterBy(this.audioTracks, accept);
+        return this._filterBy(this.videoTracks, accept);
+    }
+
     private _filter(medias: Array<MediaTrack>, codecs?: Set<Media.Codec>): this {
         if (codecs) {
-            for (let i = 0; i < medias.length; ++i) {
-                const media = medias[i];
-                if (!codecs.has(media.codec)) {
-                    this.tracks.delete(media.id);
-                    medias.splice(i--, 1);
-                }
+            this._filterBy(medias, media => codecs.has(media.codec));
+        }
+        return this;
+    }
+
+    private _filterBy(medias: Array<MediaTrack>, accept: (track: MediaTrack) => boolean): this {
+        for (let i = 0; i < medias.length; ++i) {
+            const media = medias[i];
+            if (!accept(media)) {
+                this.tracks.delete(media.id);
+                medias.splice(i--, 1);
             }
-            // Fix UP/DOWN
-            for (const track of medias) {
-                while (track.up && !this.tracks.has(track.up.id)) {
-                    track.up = track.up.up;
-                }
-                while (track.down && !this.tracks.has(track.down.id)) {
-                    track.down = track.down.down;
-                }
+        }
+        // Fix UP/DOWN
+        for (const track of medias) {
+            while (track.up && !this.tracks.has(track.up.id)) {
+                track.up = track.up.up;
+            }
+            while (track.down && !this.tracks.has(track.down.id)) {
+                track.down = track.down.down;
             }
         }
         return this;
