@@ -189,7 +189,7 @@ export class MediaPlayback extends Loggable {
 
         if (this._audioBuffer) {
             this._audioBuffer.abort();
-            this._videoBuffer = undefined;
+            this._audioBuffer = undefined;
         }
         if (this._videoBuffer) {
             this._videoBuffer.abort();
