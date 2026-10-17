@@ -35,7 +35,8 @@ const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high:
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
 const PLAYBACK_CONSTRAINT_THRESHOLD = 0.05; // 5%
 
-let _maximumResolution: Media.Resolution | undefined;
+// Initialize with the current screen resolution, then refresh it on resize
+let _maximumResolution: Media.Resolution | undefined = Media.screenResolution();
 root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution()));
 
 export type PlayerError =
