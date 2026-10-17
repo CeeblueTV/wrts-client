@@ -102,9 +102,9 @@ export class UITimeline {
     static MAX_SEQUENCES = 5000;
 
     /**
-     * Event fired when {@link following} changes on its own (e.g. the user grabs the scrollbar, which
+     * Event fired when {@link UITimeline.following | following} changes on its own (e.g. the user grabs the scrollbar, which
      * pauses live-follow). Lets a host UI keep a play/pause button in sync.
-     * @param following the new {@link following} value
+     * @param following the new {@link UITimeline.following | following} value
      * @event
      */
     onFollowingChange(following: boolean) {}

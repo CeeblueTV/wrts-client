@@ -39,7 +39,7 @@ export type SourceError =
      */
     | ReaderError
     /**
-     * Represents a {@link WebSocketReliableError} error
+     * Represents a {@link utils.WebSocketReliableError} error
      */
     | WebSocketReliableError;
 
@@ -760,8 +760,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
     /**
      * Ingest timed data sample for trackId
      * @param trackId
-     * @param time
-     * @param data
+     * @param sample
      */
     protected readData(trackId: number, sample: Media.Sample) {
         if (this._closed) {

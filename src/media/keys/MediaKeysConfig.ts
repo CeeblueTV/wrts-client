@@ -46,7 +46,7 @@ export type NormalizedMediaKeyCertificate = {
 export abstract class MediaKeysConfig extends EventEmitter {
     /**
      * Base {@link MediaKeySystemConfiguration} used as a template when the caller does not
-     * supply {@link Connect.MediaKeySystem.configurations}. Spread first so caller-provided
+     * supply {@link Connect.MediaKeySystem | Connect.MediaKeySystem.configurations}. Spread first so caller-provided
      * fields override these defaults.
      */
     static readonly DefaultConfiguration: MediaKeySystemConfiguration = {
