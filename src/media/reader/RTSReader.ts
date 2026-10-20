@@ -50,10 +50,11 @@ export class RTSReader extends Reader {
             let size = reader.available();
             if (this._params.withSize) {
                 const available = size;
-                size = reader.read7Bit();
-                if (reader.available() < size) {
+                const packetSize = RTSReader._readSize(reader);
+                if (packetSize == null || reader.available() < packetSize) {
                     return available;
                 }
+                size = packetSize;
             } // else Is a frame protocol like WebSocket!
 
             const frame = new BinaryReader(reader.read(size));
@@ -118,6 +119,24 @@ export class RTSReader extends Reader {
             }
         }
         return 0;
+    }
+
+    /**
+     * Reads a 7bit packet size, undefined when the data ends inside it (the size continues in the next chunk)
+     * BinaryReader.read7Bit returns the bytes read so far, a size cut after a 0x80 byte would read as 0
+     */
+    private static _readSize(reader: BinaryReader): number | undefined {
+        let result = 0;
+        let factor = 1;
+        while (reader.available()) {
+            const byte = reader.read8();
+            result += (byte & 0x7f) * factor;
+            if (!(byte & 0x80)) {
+                return result;
+            }
+            factor *= 128;
+        }
+        return undefined;
     }
 
     private _readCustom(reader: BinaryReader, sample?: Media.Sample) {
