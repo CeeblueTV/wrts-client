@@ -577,12 +577,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * {@inheritDoc IPlaying.maximumResolution}
      */
     get maximumResolution(): Media.Resolution | undefined {
-        // null means never set: use the screen resolution, an explicit undefined means no limit
-        return this._maximumResolution === null ? _maximumResolution : this._maximumResolution;
+        return this._maximumResolution == null ? _maximumResolution : this._maximumResolution;
     }
 
     /**
-     * Set maximum resolution that the MBR algo can reach, undefined means no limit.
+     * Set maximum resolution that the MBR algo can reach, undefined restores the default.
      * Defaults to the value of {@link Media.screenResolution}
      */
     set maximumResolution(value: Media.Resolution | undefined) {
@@ -755,7 +754,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _bufferState: BufferState;
     private _controller: AbortController;
     private _buffering: boolean;
-    private _maximumResolution: Media.Resolution | undefined | null = null;
+    private _maximumResolution?: Media.Resolution;
     private _paused: boolean;
     private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;
