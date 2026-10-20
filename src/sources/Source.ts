@@ -644,25 +644,37 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 // remove tracks that CMAFWriter cannot remux, before any track selection
                 const audioCount = metadata.audioTracks.length;
                 const videoCount = metadata.videoTracks.length;
-                const skippedCodecs = new Set<string>();
+                const skippedCodecs = new Map<Media.Type, Set<string>>();
                 metadata.filterTracks(track => {
                     if (this._isRemuxable(track)) {
                         return true;
                     }
-                    skippedCodecs.add(track.codecString);
+                    let codecs = skippedCodecs.get(track.type);
+                    if (!codecs) {
+                        skippedCodecs.set(track.type, (codecs = new Set()));
+                    }
+                    codecs.add(track.codecString || track.codec || 'unknown');
                     return false;
                 });
-                if ((audioCount && !metadata.audioTracks.length) || (videoCount && !metadata.videoTracks.length)) {
-                    // a media type lost all its tracks, fail now instead of stalling or playing it partially
-                    this.close({ type: 'SourceError', name: 'Unsupported codec', detail: [...skippedCodecs].join(', ') });
-                    return;
-                }
                 this._metadata = metadata;
 
                 // Call onMetadata (user can possibly change metadata at this level)
                 const initTracks = this.onMetadata(metadata);
                 // Check if onMetadata has closed the source!
                 if (this.closed) {
+                    return;
+                }
+
+                // a media type lost all its tracks and is not disabled (-1), fail now instead of stalling or playing it partially
+                const lostCodecs: string[] = [];
+                if (audioCount && !metadata.audioTracks.length && (this._requestedTracks.audio ?? initTracks?.audio) !== -1) {
+                    lostCodecs.push(...(skippedCodecs.get(Media.Type.AUDIO) ?? []));
+                }
+                if (videoCount && !metadata.videoTracks.length && (this._requestedTracks.video ?? initTracks?.video) !== -1) {
+                    lostCodecs.push(...(skippedCodecs.get(Media.Type.VIDEO) ?? []));
+                }
+                if (lostCodecs.length) {
+                    this.close({ type: 'SourceError', name: 'Unsupported codec', detail: lostCodecs.join(', ') });
                     return;
                 }
 
@@ -941,7 +953,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         ) {
             return true;
         }
-        this.log(`Skipping track ${track.id} because codec ${track.codecString} cannot be remuxed`).warn();
+        this.log(`Skipping track ${track.id} because codec ${track.codecString || track.codec} cannot be remuxed`).warn();
         return false;
     }
 
