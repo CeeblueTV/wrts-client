@@ -51,7 +51,8 @@ export class RTSReader extends Reader {
             if (this._params.withSize) {
                 const available = size;
                 size = reader.read7Bit();
-                if (reader.available() < size) {
+                if (!size || reader.available() < size) {
+                    // a size of 0 means it was cut by the end of the chunk, a frame always has its type byte
                     return available;
                 }
             } // else Is a frame protocol like WebSocket!
