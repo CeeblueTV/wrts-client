@@ -88,7 +88,7 @@ export type PlayerError =
  * Use Player to start playing a WebRTS stream.
  *
  * You can implement and use a custom {@link Source} by passing it as the second argument in the constructor.
- * If not provided, {@link Player.start} will attempt to determine the protocol from {@link Connect.Params.endPoint}
+ * If not provided, {@link Player.start} will attempt to determine the protocol from {@link Connect.Params | Connect.Params.endPoint}
  * to instantiate the corresponding {@link Source.registerClass} or fall back to the default {@link HTTPAdaptiveSource}.
  *
  * You can initialize tracks selection by playing with {@link onMetadata}
@@ -774,7 +774,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      *
      * @param video HTMLVideoElement object to render the video
      * @param SourceClass Optional Source logic to use, by default it uses {@link HTTPAdaptiveSource}
-     * unless {@link Connect.Params.endPoint} begin with ws:// see {@link Player.start}
+     * unless {@link Connect.Params | Connect.Params.endPoint} begin with ws:// see {@link Player.start}
      * @example
      * // Default build
      * const player = new Player(video);

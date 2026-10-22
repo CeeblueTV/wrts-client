@@ -203,7 +203,7 @@ export interface IPlaying extends EventEmitter {
 
     /**
      * Source is CMAF and passthrough it to MSE, it's a debugging mode
-     * activable when you set {@link Connect.Params.mediaExt} to 'cmaf'
+     * activable when you set {@link utils.Connect.Params | Connect.Params.mediaExt} to 'cmaf'
      */
     get passthroughCMAF(): boolean | undefined;
 

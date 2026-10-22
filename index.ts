@@ -25,6 +25,7 @@ export { MediaTrack } from './src/media/MediaTrack';
 export { Metadata } from './src/media/Metadata';
 export { ICMCD, CMCD, CMCDMode } from './src/media/CMCD';
 export { MediaKeysEngine, MediaKeysEngineError } from './src/media/keys/MediaKeysEngine';
+export { NormalizedMediaKeyCertificate } from './src/media/keys/MediaKeysConfig';
 
 // Sources
 export { Source, SourceError } from './src/sources/Source';
