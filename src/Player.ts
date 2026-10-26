@@ -35,8 +35,10 @@ const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high:
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
 const PLAYBACK_CONSTRAINT_THRESHOLD = 0.05; // 5%
 
-let _maximumResolution: Media.Resolution | undefined;
-root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution()));
+// Default screen limit, initialized with the current screen resolution then refreshed on resize.
+// null means that the screen resolution cannot be determined, so no resolution limit can be applied.
+let _maximumResolution = Media.screenResolution() ?? null;
+root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution() ?? null));
 
 export type PlayerError =
     /**
@@ -575,15 +577,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @override
      * {@inheritDoc IPlaying.maximumResolution}
      */
-    get maximumResolution(): Media.Resolution | undefined {
-        return this._maximumResolution ?? _maximumResolution;
+    get maximumResolution(): Media.Resolution | null {
+        return this._maximumResolution === undefined ? _maximumResolution : this._maximumResolution;
     }
 
     /**
-     * Set maximum resolution that the MBR algo can reach, undefined means no limit.
-     * Defaults to the value of {@link Media.screenResolution}
+     * Set maximum resolution that the MBR algo can reach:
+     * - a Resolution applies an explicit limit;
+     * - undefined restores the default screen limit, see {@link Media.screenResolution};
+     * - null disables the resolution limit.
      */
-    set maximumResolution(value: Media.Resolution | undefined) {
+    set maximumResolution(value: Media.Resolution | null | undefined) {
         this._maximumResolution = value;
     }
 
@@ -753,7 +757,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _bufferState: BufferState;
     private _controller: AbortController;
     private _buffering: boolean;
-    private _maximumResolution?: Media.Resolution;
+    private _maximumResolution?: Media.Resolution | null;
     private _paused: boolean;
     private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;
