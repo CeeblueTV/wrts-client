@@ -196,10 +196,10 @@ export interface IPlaying extends EventEmitter {
     get playbackConstraint(): PlaybackConstraint | undefined;
 
     /**
-     * Get the effective maximum resolution that the MBR algo can reach, null means no limit.
-     * Defaults to the value of {@link Media.screenResolution}, or null if it cannot be determined
+     * Get the effective maximum resolution that the MBR algo can reach, undefined means no limit.
+     * Defaults to the value of {@link Media.screenResolution}, or no limit if it cannot be determined
      */
-    get maximumResolution(): Media.Resolution | null;
+    get maximumResolution(): Media.Resolution | undefined;
 
     /**
      * Source is CMAF and passthrough it to MSE, it's a debugging mode

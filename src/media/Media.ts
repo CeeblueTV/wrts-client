@@ -120,6 +120,6 @@ export function screenResolution(): Resolution | undefined {
  * @param screen
  * @returns
  */
-export function overScreenSize(resolution: Resolution, screen?: Resolution | null) {
+export function overScreenSize(resolution: Resolution, screen?: Resolution) {
     return screen && resolution.height > screen.height && resolution.width > screen.width;
 }
