@@ -99,7 +99,8 @@ export function screenResolution(): Resolution | undefined {
     if (typeof window === 'undefined' || !window.screen) {
         return;
     }
-    const ratio = window.devicePixelRatio || 1;
+    // Clamp to 1 so a page zoom-out (which lowers devicePixelRatio in Chromium) never caps below the screen size
+    const ratio = Math.max(window.devicePixelRatio || 1, 1);
     let height = ratio * window.screen.height;
     let width = ratio * window.screen.width;
     if (height > width) {
@@ -119,6 +120,6 @@ export function screenResolution(): Resolution | undefined {
  * @param screen
  * @returns
  */
-export function overScreenSize(resolution: Resolution, screen?: Resolution) {
+export function overScreenSize(resolution: Resolution, screen?: Resolution | null) {
     return screen && resolution.height > screen.height && resolution.width > screen.width;
 }
