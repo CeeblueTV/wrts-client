@@ -1034,7 +1034,11 @@ export abstract class Source extends EventEmitter implements ICMCD {
             if (this.cmcdMode === CMCDMode.QUERY) {
                 url.searchParams.set('cmcd', CML.encodeCmcd(cmcd));
             } else {
-                options.headers = CML.toCmcdHeaders(cmcd);
+                // Merge CMCD headers to keep the existing ones, like range
+                options.headers = new Headers(options.headers); // normalize
+                for (const [name, value] of Object.entries(CML.toCmcdHeaders(cmcd))) {
+                    options.headers.set(name, value);
+                }
             }
         }
 
