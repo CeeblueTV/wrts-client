@@ -37,7 +37,7 @@ const PLAYBACK_CONSTRAINT_THRESHOLD = 0.05; // 5%
 
 // Default screen limit, initialized with the current screen resolution then refreshed on resize.
 // null means that the screen resolution cannot be determined, so no resolution limit can be applied.
-let _maximumResolution: Media.Resolution | null = Media.screenResolution() ?? null;
+let _maximumResolution = Media.screenResolution() ?? null;
 root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution() ?? null));
 
 export type PlayerError =
