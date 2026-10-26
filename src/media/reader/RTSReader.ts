@@ -18,6 +18,7 @@ enum CustomType {
  * RTSReader to unserialize RTS container
  *
  * Format:
+ * ```text
  * MEDIA PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type](7bit firstTime)[7bit duration << 2 | hasCompositionOffset<<1 | isKeyFrame](7bit compositionOffset) [frame] --
  * DATA  PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type][7bit time] [frame] --
  * INIT TRACKS  -- (7bit packetSize)[7bit 0 << 2 | 3]  (7bit audioTrackId+1)(7bit videoTrackId+1)--
@@ -31,6 +32,7 @@ enum CustomType {
  * compositionOffset => composition offset
  * frame => binary frame payload
  * meta => JSON metadata payload
+ * ```
  */
 export class RTSReader extends Reader {
     private _nextTimes: Map<number, number>; // <trackId,time>
