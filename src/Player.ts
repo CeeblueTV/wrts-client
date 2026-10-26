@@ -36,9 +36,9 @@ const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 1
 const PLAYBACK_CONSTRAINT_THRESHOLD = 0.05; // 5%
 
 // Default screen limit, initialized with the current screen resolution then refreshed on resize.
-// undefined means that the screen resolution cannot be determined, so no resolution limit can be applied.
-let _maximumResolution: Media.Resolution | undefined = Media.screenResolution();
-root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution()));
+// null means that the screen resolution cannot be determined, so no resolution limit can be applied.
+let _maximumResolution: Media.Resolution | null = Media.screenResolution() ?? null;
+root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution() ?? null));
 
 export type PlayerError =
     /**
@@ -577,9 +577,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @override
      * {@inheritDoc IPlaying.maximumResolution}
      */
-    get maximumResolution(): Media.Resolution | undefined {
-        // null (no limit) is reported as undefined to keep the public getter type
-        return this._maximumResolution === undefined ? _maximumResolution : this._maximumResolution ?? undefined;
+    get maximumResolution(): Media.Resolution | null {
+        return this._maximumResolution === undefined ? _maximumResolution : this._maximumResolution;
     }
 
     /**
