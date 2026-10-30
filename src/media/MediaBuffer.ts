@@ -84,7 +84,8 @@ export class MediaBuffer extends Loggable {
     }
 
     get startTime(): number {
-        const startTime = this._buffer?.buffered.length ? this._buffer.buffered.start(0) : 0;
+        const buffered = this._buffered();
+        const startTime = buffered?.length ? buffered.start(0) : 0;
         if (startTime >= this._startTime) {
             // fix startTime set by user if the real is superior !
             this._startTime = startTime;
@@ -99,10 +100,28 @@ export class MediaBuffer extends Loggable {
     }
 
     get endTime(): number {
-        return this._buffer?.buffered.length ? this._buffer.buffered.end(this._buffer.buffered.length - 1) : 0;
+        if (!this._buffer) {
+            return 0;
+        }
+        const buffered = this._buffered();
+        if (buffered) {
+            this._endTime = buffered.length ? buffered.end(buffered.length - 1) : 0;
+        }
+        return this._endTime;
+    }
+
+    // The SourceBuffer's buffered ranges, undefined once it was removed from its MediaSource (reading them throws
+    // InvalidStateError then, e.g. during a stop): the getters keep their last values
+    private _buffered(): TimeRanges | undefined {
+        try {
+            return this._buffer?.buffered;
+        } catch (_) {
+            return undefined;
+        }
     }
 
     private _buffer?: SourceBuffer; // make possibly undefined because can try exception one time closed!
+    private _endTime: number = 0; // the last end read, kept once the buffered ranges can't be read
     private _cmafWriter: CMAFWriter;
     private _packets: Array<Uint8Array | string>;
     private _trackId?: number;
