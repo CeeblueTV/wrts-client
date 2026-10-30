@@ -89,35 +89,11 @@ export class HTTPAdaptiveSource extends Source {
         }
 
         // GET METADATA!
-
-        let response;
-        let attempts = 0;
-
-        do {
-            if (this.closed) {
-                return;
-            }
-            if (attempts++) {
-                this.log(`Fetch again ${url.toString()}`).info();
-            }
-            try {
-                response = await this.fetchWithRTT(url, { signal: playing.signal });
-                if (response.error) {
-                    // unrecoverable error
-                    return this.close({ type: 'SourceError', name: 'Request error', detail: response.error });
-                }
-            } catch (e) {
-                // Request error, already displaid as a console error log => try again!
-                await Util.sleep(500);
-            }
-        } while (!response);
-
-        const text = await response.text();
-        this.recvByteRate.addBytes(text.length);
-        const manifest = JSON.parse(text); // Must be JSON!
-        const metadata = new Metadata(manifest);
-        // fix liveTime with a ping estimation of the request
-        metadata.liveTime += response.rtt / 2;
+        const fetched = await this._fetchManifest(url, playing);
+        if (!fetched) {
+            return;
+        }
+        const { manifest, metadata } = fetched;
 
         const mSequence = manifest.sequence;
         if (!mSequence) {
@@ -143,32 +119,9 @@ export class HTTPAdaptiveSource extends Source {
             this._sequencePattern = this._sequencePattern.replace('{trackId}', '{trackIds}');
         }
 
-        const sequenceId = Number(mSequence.current?.id ?? mSequence.currentId); // WIP remove old currentId
-        const sequenceFirstId = Number(mSequence.first?.id ?? mSequence.firstId ?? 0); // WIP remove old firstId
-        if (isNaN(sequenceId)) {
-            return this.close({
-                type: 'SourceError',
-                name: 'Malformed payload',
-                detail: `No valid sequence.current.id field in the JSON manifest ${url.toString()}`
-            });
-        }
-        const sequenceTime = Number(mSequence.current?.time);
-        let deltaSequence = 0;
-        if (!isNaN(sequenceTime)) {
-            const currentGopElapsed = metadata.liveTime - sequenceTime;
-            const bufferTarget = playing.bufferLimitMiddle - currentGopElapsed;
-            if (bufferTarget > 0) {
-                const sequenceFirstTime = Number(mSequence.first?.time);
-                const idDiff = sequenceId - sequenceFirstId;
-                if (idDiff > 0 && !isNaN(sequenceFirstTime)) {
-                    const gopSize = Math.max(1, sequenceTime - sequenceFirstTime) / idDiff;
-                    deltaSequence = Math.ceil(bufferTarget / gopSize);
-                }
-            }
-        }
-        let sequence = Math.max(sequenceId - deltaSequence, Math.min(sequenceFirstId, sequenceId));
-        if (deltaSequence > 0) {
-            this.log(`Preload of ${deltaSequence} sequences`).info();
+        let sequence = this._liveSequence(url, mSequence, metadata, playing);
+        if (sequence == null) {
+            return;
         }
 
         // propagate Metadata
@@ -218,6 +171,27 @@ export class HTTPAdaptiveSource extends Source {
         upRetry.log = this.log.bind(this, 'Adaptive Bitrate,') as ILog;
 
         while (!this.closed) {
+            // Held (a paused player): no download until released, then rejoin the live edge
+            const holding = this.holding;
+            if (holding) {
+                this.log(`Downloads held after sequence ${sequence - 1}`).info();
+                await holding;
+                if (this.closed) {
+                    return;
+                }
+                const live = await this._fetchManifest(url, playing);
+                if (!live) {
+                    return; // closed
+                }
+                const liveSequence = this._liveSequence(url, live.manifest.sequence, live.metadata, playing);
+                if (liveSequence == null) {
+                    return; // closed
+                }
+                metadata.liveTime = live.metadata.liveTime;
+                this.log(`Downloads released, rejoin the live edge at sequence ${liveSequence}`).info();
+                sequence = liveSequence;
+            }
+
             // Process MBR
             videoTrack =
                 this.videoSelected == null && playing.bufferState !== BufferState.NONE
@@ -507,6 +481,75 @@ export class HTTPAdaptiveSource extends Source {
                 ).warn();
             }
         } // Main sequence while loop
+    }
+
+    // The manifest (index.json) and its metadata, fetched again until it answers; undefined once closed
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private async _fetchManifest(url: URL, playing: IPlaying): Promise<{ manifest: any; metadata: Metadata } | undefined> {
+        let response;
+        let attempts = 0;
+
+        do {
+            if (this.closed) {
+                return;
+            }
+            if (attempts++) {
+                this.log(`Fetch again ${url.toString()}`).info();
+            }
+            try {
+                response = await this.fetchWithRTT(url, { signal: playing.signal });
+                if (response.error) {
+                    // unrecoverable error
+                    this.close({ type: 'SourceError', name: 'Request error', detail: response.error });
+                    return;
+                }
+            } catch (e) {
+                // Request error, already displaid as a console error log => try again!
+                await Util.sleep(500);
+            }
+        } while (!response);
+
+        const text = await response.text();
+        this.recvByteRate.addBytes(text.length);
+        const manifest = JSON.parse(text); // Must be JSON!
+        const metadata = new Metadata(manifest);
+        // fix liveTime with a ping estimation of the request
+        metadata.liveTime += response.rtt / 2;
+        return { manifest, metadata };
+    }
+
+    // The sequence to download first: the current one less the ones that fill the buffer target; undefined, after
+    // closing, without a valid current sequence
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private _liveSequence(url: URL, mSequence: any, metadata: Metadata, playing: IPlaying): number | undefined {
+        const sequenceId = Number(mSequence?.current?.id ?? mSequence?.currentId); // WIP remove old currentId
+        const sequenceFirstId = Number(mSequence?.first?.id ?? mSequence?.firstId ?? 0); // WIP remove old firstId
+        if (isNaN(sequenceId)) {
+            this.close({
+                type: 'SourceError',
+                name: 'Malformed payload',
+                detail: `No valid sequence.current.id field in the JSON manifest ${url.toString()}`
+            });
+            return;
+        }
+        const sequenceTime = Number(mSequence.current?.time);
+        let deltaSequence = 0;
+        if (!isNaN(sequenceTime)) {
+            const currentGopElapsed = metadata.liveTime - sequenceTime;
+            const bufferTarget = playing.bufferLimitMiddle - currentGopElapsed;
+            if (bufferTarget > 0) {
+                const sequenceFirstTime = Number(mSequence.first?.time);
+                const idDiff = sequenceId - sequenceFirstId;
+                if (idDiff > 0 && !isNaN(sequenceFirstTime)) {
+                    const gopSize = Math.max(1, sequenceTime - sequenceFirstTime) / idDiff;
+                    deltaSequence = Math.ceil(bufferTarget / gopSize);
+                }
+            }
+        }
+        if (deltaSequence > 0) {
+            this.log(`Preload of ${deltaSequence} sequences`).info();
+        }
+        return Math.max(sequenceId - deltaSequence, Math.min(sequenceFirstId, sequenceId));
     }
 
     /**

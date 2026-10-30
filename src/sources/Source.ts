@@ -195,6 +195,37 @@ export abstract class Source extends EventEmitter implements ICMCD {
     get closed(): boolean {
         return this._closed;
     }
+
+    /**
+     * True while the downloads are held, see {@link hold}
+     */
+    get held(): boolean {
+        return this._held != null;
+    }
+
+    /**
+     * Holds the downloads once the requests in flight end, or releases them. A source that cannot hold keeps
+     * downloading; {@link HTTPAdaptiveSource} rejoins the live edge on release
+     */
+    hold(value: boolean) {
+        if (value) {
+            if (!this._held && !this._closed) {
+                let release!: () => void;
+                const promise = new Promise<void>(resolve => (release = resolve));
+                this._held = { promise, release };
+            }
+        } else if (this._held) {
+            this._held.release();
+            this._held = undefined;
+        }
+    }
+
+    /**
+     * Resolves on the release while the downloads are held (or on close), undefined when they aren't
+     */
+    protected get holding(): Promise<void> | undefined {
+        return this._held?.promise;
+    }
     /**
      * Stream name, for example `as+bc3f535f-37f3-458b-8171-b4c5e77a6137`
      */
@@ -446,6 +477,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _streamName: string;
     private _metadata?: Metadata;
     private _closed: boolean;
+    private _held?: { promise: Promise<void>; release: () => void }; // downloads held until released, see hold()
     private _tracks: Media.Tracks; // effective tracks
     private _selectedTracks: Media.Tracks; // tracks selected by the user
     private _requestedTracks: Media.Tracks; // tracks requested
@@ -514,6 +546,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
             return;
         }
         this._closed = true;
+        this.hold(false); // a loop waiting on the hold sees the close
         clearTimeout(this._trackRequest);
         if (error && error.type === 'SourceError' && 'detail' in error) {
             // WIP MF fix = >morph a possible request error to a stream unavailable
