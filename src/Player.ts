@@ -1247,10 +1247,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const mediaKeysEngine = this._mediaKeysEngine;
             mediaKeysEngine.onMediaKeys = Util.EMPTY_FUNCTION;
             mediaKeysEngine.onError = Util.EMPTY_FUNCTION;
-            const stopping = mediaKeysEngine.stop();
+            // a release that fails (or times out) must not hold every later start(): reset anyway, the next start
+            // sets its own MediaKeys
+            const stopping = mediaKeysEngine.stop().catch(error => this.log('Failed to release the MediaKeys', error).warn());
             this._mediaKeysStopping = stopping;
             stopping.then(() => {
-                // Reset mediaKeysEngine only when the MediaKeys have been released
+                // Reset mediaKeysEngine once the release ended, released or not
                 if (this._mediaKeysEngine === mediaKeysEngine) {
                     this._mediaKeysEngine = undefined;
                     this.onMediaKeys();
