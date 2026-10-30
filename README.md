@@ -83,6 +83,21 @@ player.start({
    endPoint: `https://<hostname>/wrts/out+12423351-d0a2-4f0f-98a0-015b73f934f2/index.json`
 });
 ```
+#### Autoplay
+
+Browsers refuse to start playback with sound before the viewer interacts with the page. The player then plays muted
+and fires `onAutoplayMuted`, so you can offer an unmute button; on `stop()` it unmutes the element if nobody has
+unmuted it since. Where even muted playback is refused (iOS Low Power Mode, some data-saver settings), it waits paused
+and fires `onPlayBlocked`: resume it from a click with `player.paused = false`, it starts at the live edge. While it
+waits, however long, it downloads nothing (its downloads are held, which also spares a mobile device's battery) and
+the picture stays. Set `player.autoplayMuted = false` to skip the muted attempt.
+On iOS, inline muted playback needs `playsinline` on the `<video>` element.
+
+```javascript
+player.onAutoplayMuted = () => showUnmuteButton(() => (videoElement.muted = false));
+player.onPlayBlocked = () => showPlayButton(() => (player.paused = false));
+```
+
 > [!TIP]
 > 
 > By default the player (class) uses [HTTPAdaptiveSource](./src/sources/HTTPAdaptiveSource.ts) which is our HTTP [WebRTS](#webrts) implementation. The library now acts as a source factory, you can create a custom [Source implementation](./src/sources/Source.ts) and select it in the constructor:

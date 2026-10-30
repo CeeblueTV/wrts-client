@@ -110,6 +110,11 @@ export type PlayerError =
  * // optional : fix video track to the best track and disable MBR
  * player.onMetadata = (metadata) => player.videoTrack = metadata.videoTracks[0].id;
  *
+ * // the browser refused autoplay with sound: the player plays muted, offer to unmute
+ * player.onAutoplayMuted = () => showUnmuteButton(() => (videoElement.muted = false));
+ * // the browser refused autoplay even muted: the player waits paused, downloading nothing, resume it from a user gesture
+ * player.onPlayBlocked = () => showPlayButton(() => (player.paused = false));
+ *
  * // start playback
  * player.start({
  *    endPoint: <endPoint>
@@ -182,6 +187,27 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @event {@link Source.onFinalizeRequest}
      */
     onFinalizeRequest(url: URL, headers: Headers) {}
+
+    /**
+     * Event fired when the browser refused autoplay with sound and the player plays muted instead
+     * (see {@link autoplayMuted}), once per session: offer the viewer to unmute, setting the video element's `muted`
+     * to false. The player unmutes the element on stop if it is still the player's mute (nobody unmuted it since), so
+     * the next session asks for sound again
+     * @event
+     */
+    onAutoplayMuted() {
+        this.log('Autoplay with sound refused by the browser, playing muted').warn();
+    }
+
+    /**
+     * Event fired when the browser refused to start playback without a user gesture, even muted: the player waits
+     * paused, as long as needed, with its downloads held (nothing downloaded, the picture stays); set {@link paused} to
+     * false from a user gesture (a click) to play at the live edge
+     * @event
+     */
+    onPlayBlocked() {
+        this.log('Playback refused by the browser until a user gesture, set paused to false to play').warn();
+    }
 
     /**
      * @override
@@ -592,6 +618,21 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * Whether the player falls back to muted playback when the browser refuses autoplay with sound, true by default;
+     * false waits for a user gesture instead (see {@link onPlayBlocked})
+     */
+    get autoplayMuted(): boolean {
+        return this._autoplayMuted;
+    }
+
+    /**
+     * Set whether the player falls back to muted playback when the browser refuses autoplay with sound
+     */
+    set autoplayMuted(value: boolean) {
+        this._autoplayMuted = value;
+    }
+
+    /**
      * Returns true if player is paused
      */
     get paused(): boolean {
@@ -621,6 +662,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 // Restart buffer learning after an intentional pause.
                 this._bufferMeasure = new BufferMeasure();
                 this._bufferLimitHighAuto?.rearm();
+            }
+            if (this._playBlocked) {
+                this._playBlocked = false;
+                this._rejoinLive();
+                return;
             }
             this._tryToPlay();
         }
@@ -759,6 +805,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _buffering: boolean;
     private _maximumResolution?: Media.Resolution | null;
     private _paused: boolean;
+    private _autoplayMuted: boolean = true;
+    private _playBlocked: boolean = false; // the browser refused to play until a user gesture
+    private _autoMuted: boolean = false; // the player muted the element after a refused autoplay with sound
+    private _autoMutedFired: boolean = false; // onAutoplayMuted fired for this session
     private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;
     private _mediaKeysStopping?: Promise<unknown>;
@@ -1000,6 +1050,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                     return this.stop({ type: 'MediaBufferError', name: 'Exceeds buffer size' });
                 }
                 if (this._video.paused) {
+                    if (this._playBlocked) {
+                        // waiting for a user gesture: only the gesture resumes it, at the live edge
+                        return;
+                    }
                     this.log('Unpause video to release buffer space').warn();
                     this.paused = false;
                 } else {
@@ -1148,6 +1202,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._onPlayerProgress();
         };
 
+        // Once the element is unmuted (the viewer, the app), its mute is no longer the player's: stop() leaves it alone
+        const onVolumeChange = () => {
+            if (!this._video.muted) {
+                this._autoMuted = false;
+            }
+        };
+
         this._video.addEventListener('waiting', onWaiting);
         this._video.addEventListener('canplay', onCanPlay);
         this._video.addEventListener('playing', onPlaying);
@@ -1155,6 +1216,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._video.addEventListener('seeked', onSeeked);
         this._video.addEventListener('pause', onPause);
         this._video.addEventListener('timeupdate', onTimeUpdate);
+        this._video.addEventListener('volumechange', onVolumeChange);
 
         this._controller.signal.addEventListener(
             'abort',
@@ -1166,6 +1228,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 this._video.removeEventListener('seeked', onSeeked);
                 this._video.removeEventListener('pause', onPause);
                 this._video.removeEventListener('timeupdate', onTimeUpdate);
+                this._video.removeEventListener('volumechange', onVolumeChange);
             },
             { once: true }
         );
@@ -1270,6 +1333,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._passthroughCMAF = undefined;
         this._buffering = false;
         this._paused = false;
+        this._playBlocked = false;
+        if (this._autoMuted) {
+            this._video.muted = false; // the player's mute, the next session asks for sound again
+        }
+        this._autoMuted = false;
+        this._autoMutedFired = false;
         this._source = undefined;
         this._mediaSource = undefined;
         this._playback = undefined;
@@ -1402,6 +1471,33 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._setBufferLimitHigh(highLimit);
     }
 
+    // Stop downloading the live stream while nothing plays, no data timeout while nothing is asked for
+    private _holdDownloads() {
+        if (!this._paused || !this._source || !this._timeout) {
+            return;
+        }
+        this.log('Downloads held, the resume rejoins the live edge').info();
+        clearTimeout(this._timeout.id);
+        this._source.hold(true);
+    }
+
+    // Resume after held downloads: the media buffered before is stale, so drop it, let the source fetch the live edge
+    // again and wait for it like at a start; play() runs now, within the gesture that resumed
+    private _rejoinLive() {
+        if (this._playback) {
+            this._playback.startTime = this._playback.endTime;
+        }
+        this._source?.hold(false);
+        this._buffering = false;
+        this._tryToPlay();
+        this._buffering = true;
+        this._setBufferState(BufferState.NONE); // like at a start: no ABR decision on the empty buffer
+        if (this._timeout) {
+            clearTimeout(this._timeout.id);
+            this._timeout.id = setTimeout(() => this.stop({ type: 'PlayerError', name: 'Data timeout' }), this._timeout.value);
+        }
+    }
+
     private _setBufferState(state: BufferState) {
         // check if we have a difference
         const oldState = this._bufferState;
@@ -1441,17 +1537,21 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (this._paused || this._buffering) {
             return;
         }
+        const signal = this._controller.signal; // this session's: a stop or a new start aborts it
         try {
             if (this._video.paused) {
                 this._waitStarting(true);
                 await this._video.play();
+                if (!signal.aborted) {
+                    this._autoMutedPlaying();
+                }
             }
         } catch (err) {
             if (err instanceof DOMException) {
                 switch (err.name) {
                     case 'NotAllowedError':
-                        // Can happen when the player needs user interaction to start playback
-                        this.stop({ type: 'PlayerError', name: 'Video play error', detail: err.message });
+                        // Autoplay refused without a user gesture: muted, or wait paused for the app's play
+                        await this._onPlayRefused(signal);
                         return;
                     case 'NotSupportedError':
                         // Can happen when the player doesn't support a format
@@ -1461,6 +1561,48 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 }
                 // nothing todo, log already displaid
             }
+        }
+    }
+
+    // The browser refused play() without a user gesture: try muted once (allowed almost everywhere), else keep the
+    // session paused until the app resumes it from a gesture, instead of stopping it
+    private async _onPlayRefused(signal: AbortSignal) {
+        if (signal.aborted) {
+            return;
+        }
+        if (this._autoplayMuted && !this._video.muted) {
+            this._video.muted = true;
+            this._autoMuted = true;
+            try {
+                await this._video.play();
+                if (!signal.aborted) {
+                    this._autoMutedPlaying();
+                }
+                return;
+            } catch (err) {
+                if (!(err instanceof DOMException && err.name === 'NotAllowedError')) {
+                    // interrupted (a pause on a stall, a stop, a new load), not refused: the next play() goes muted
+                    return;
+                }
+                // refused anyway: the gesture that resumes it plays with sound
+                this._video.muted = false;
+                this._autoMuted = false;
+            }
+        }
+        if (signal.aborted || this._paused) {
+            return; // stopped, restarted or paused meanwhile
+        }
+        this._playBlocked = true;
+        this.paused = true; // clears the playback watchdog
+        this._holdDownloads(); // waits as long as needed: nothing to download until the gesture
+        this.onPlayBlocked();
+    }
+
+    // Playback runs muted because the player muted it: tell the app once per session
+    private _autoMutedPlaying() {
+        if (this._autoMuted && !this._autoMutedFired) {
+            this._autoMutedFired = true;
+            this.onAutoplayMuted();
         }
     }
 
