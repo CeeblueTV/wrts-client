@@ -83,6 +83,13 @@ player.start({
    endPoint: `https://<hostname>/wrts/out+12423351-d0a2-4f0f-98a0-015b73f934f2/index.json`
 });
 ```
+#### Pause
+
+`player.paused = true` pauses a live stream without downloading it: the player holds its downloads, which spares
+bandwidth and a mobile device's battery, and `player.paused = false` resumes at the live edge (as fast as a start,
+0.2 to 0.4 s in our tests). `player.pauseHoldDelay` (ms, 0 by default) keeps downloading for that long first, so a
+pause shorter than it resumes instantly where it paused, behind live by the pause.
+
 > [!TIP]
 > 
 > By default the player (class) uses [HTTPAdaptiveSource](./src/sources/HTTPAdaptiveSource.ts) which is our HTTP [WebRTS](#webrts) implementation. The library now acts as a source factory, you can create a custom [Source implementation](./src/sources/Source.ts) and select it in the constructor:
