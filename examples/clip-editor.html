@@ -188,6 +188,7 @@
                 const media = await parseManifest(manifestUrl);
 
                 const player = new PreviewPlayer(video, media);
+                player.onError = showError;
 
                 timeline.addEventListener("selection-change", event => player.setBufferingEnd(event.detail.end));
 
@@ -267,13 +268,15 @@
                 openDownloadDialogButton.disabled = false;
             }
 
-            main().catch(error => {
+            function showError(error) {
                 console.error(error);
                 // The page is often embedded in an iframe, where the console isn't the first place one looks
                 const hint = document.querySelector("#editor-hint");
                 hint.textContent = error instanceof Error ? error.message : String(error);
                 hint.classList.add("is-error");
-            });
+            }
+
+            main().catch(showError);
         </script>
     </head>
     <body>
