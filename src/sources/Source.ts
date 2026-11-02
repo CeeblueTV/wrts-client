@@ -197,22 +197,30 @@ export abstract class Source extends EventEmitter implements ICMCD {
     }
 
     /**
-     * True while the downloads are held, see {@link hold}
+     * True when this source can hold its downloads, see {@link hold}; false by default
      */
-    get held(): boolean {
-        return this._held != null;
+    get canHold(): boolean {
+        return false;
     }
 
     /**
-     * Holds the downloads once the requests in flight end, or releases them. A source that cannot hold keeps
-     * downloading; {@link HTTPAdaptiveSource} rejoins the live edge on release
+     * True once the downloads have stopped on a hold, until its release: a hold asked while a request is still in
+     * flight is not held yet, see {@link hold}
+     */
+    get held(): boolean {
+        return this._held?.waiting === true;
+    }
+
+    /**
+     * Asks to hold the downloads once the requests in flight end, or releases them. A source that cannot hold
+     * ({@link canHold} false) keeps downloading; {@link HTTPAdaptiveSource} rejoins the live edge on release
      */
     hold(value: boolean) {
         if (value) {
             if (!this._held && !this._closed) {
                 let release!: () => void;
                 const promise = new Promise<void>(resolve => (release = resolve));
-                this._held = { promise, release };
+                this._held = { promise, release, waiting: false };
             }
         } else if (this._held) {
             this._held.release();
@@ -221,9 +229,13 @@ export abstract class Source extends EventEmitter implements ICMCD {
     }
 
     /**
-     * Resolves on the release while the downloads are held (or on close), undefined when they aren't
+     * For a source that can hold, where its downloads stop: undefined when no hold is asked, else marks the downloads
+     * {@link held} and resolves on the release (or on close)
      */
-    protected get holding(): Promise<void> | undefined {
+    protected waitHold(): Promise<void> | undefined {
+        if (this._held) {
+            this._held.waiting = true;
+        }
         return this._held?.promise;
     }
     /**
@@ -477,7 +489,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _streamName: string;
     private _metadata?: Metadata;
     private _closed: boolean;
-    private _held?: { promise: Promise<void>; release: () => void }; // downloads held until released, see hold()
+    private _held?: { promise: Promise<void>; release: () => void; waiting: boolean }; // a hold until released, see hold()
     private _tracks: Media.Tracks; // effective tracks
     private _selectedTracks: Media.Tracks; // tracks selected by the user
     private _requestedTracks: Media.Tracks; // tracks requested

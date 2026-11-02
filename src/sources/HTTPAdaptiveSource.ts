@@ -35,6 +35,14 @@ export class HTTPAdaptiveSource extends Source {
         this._cmcd = value;
     }
 
+    /**
+     * @override
+     * {@inheritDoc Source.canHold}
+     */
+    get canHold(): boolean {
+        return true;
+    }
+
     // To emulate UP rendition before to switch
     private _upController?: AbortController;
     // For channel sequence-cancelable + morphable (first frame),
@@ -172,7 +180,7 @@ export class HTTPAdaptiveSource extends Source {
 
         while (!this.closed) {
             // Held (a paused player): no download until released, then rejoin the live edge
-            const holding = this.holding;
+            const holding = this.waitHold();
             if (holding) {
                 this.log(`Downloads held after sequence ${sequence - 1}`).info();
                 await holding;

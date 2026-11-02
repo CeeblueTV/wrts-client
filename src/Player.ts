@@ -593,7 +593,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * How long a paused player keeps downloading the live stream, in milliseconds, before it holds the downloads; a
-     * resume after that rejoins the live edge instead of playing on from the pause. 0 (default): hold at once
+     * resume after that rejoins the live edge instead of playing on from the pause. 0 (default): hold at once,
+     * Infinity: never hold
      */
     get pauseHoldDelay(): number {
         return this._pauseHoldDelay;
@@ -603,7 +604,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Set how long a paused player keeps downloading before it holds the downloads, in milliseconds
      */
     set pauseHoldDelay(value: number) {
-        this._pauseHoldDelay = Math.max(0, value);
+        this._pauseHoldDelay = value >= 0 ? value : 0; // NaN as 0
     }
 
     /**
@@ -634,23 +635,31 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._video.pause();
             if (!wasPaused) {
                 clearTimeout(this._pauseHold);
-                if (this._pauseHoldDelay) {
-                    this._pauseHold = setTimeout(() => this._holdDownloads(), this._pauseHoldDelay);
-                } else {
+                const delay = this._pauseHoldDelay;
+                if (!delay) {
                     this._holdDownloads();
+                } else if (delay !== Infinity) {
+                    // a timer longer than 2^31-1 ms would fire at once
+                    this._pauseHold = setTimeout(() => this._holdDownloads(), Math.min(delay, 0x7fffffff));
                 }
             }
         } else {
             clearTimeout(this._pauseHold);
             this._pauseHold = undefined;
+            this._holdOnSource = false;
             if (wasPaused) {
                 // Restart buffer learning after an intentional pause.
                 this._bufferMeasure = new BufferMeasure();
                 this._bufferLimitHighAuto?.rearm();
             }
             if (this._downloadsHeld) {
-                this._rejoinLive();
-                return;
+                if (this._source?.held) {
+                    this._rejoinLive();
+                    return;
+                }
+                // a request was still in flight: the downloads never stopped, play on from the pause
+                this._downloadsHeld = false;
+                this._source?.hold(false);
             }
             this._tryToPlay();
         }
@@ -791,7 +800,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _paused: boolean;
     private _pauseHoldDelay: number = 0;
     private _pauseHold?: ReturnType<typeof setTimeout>; // holds the downloads of a paused player
-    private _downloadsHeld: boolean = false; // paused with the downloads held: the resume rejoins the live edge
+    private _downloadsHeld: boolean = false; // paused with a hold asked: the resume rejoins the live edge once held
+    private _holdOnSource: boolean = false; // a hold due before the source existed, asked once it does
     private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;
     private _mediaKeysStopping?: Promise<unknown>;
@@ -957,6 +967,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const protocol = params.endPoint.substring(0, params.endPoint.indexOf('://'));
             this._source = new (this.SourceClass || Source.getClass(protocol) || HTTPAdaptiveSource)(this, params);
             this._source.log = this.log.bind(this, this._source?.name + ':') as ILog;
+            if (this._holdOnSource) {
+                this._holdOnSource = false;
+                this._holdDownloads();
+            }
             this._source.onTrackChange = (audioTrack: number, videoTrack: number, dataTrack: Set<number>) => {
                 if (!this._playback) {
                     return;
@@ -1306,6 +1320,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         clearTimeout(this._pauseHold);
         this._pauseHold = undefined;
         this._downloadsHeld = false;
+        this._holdOnSource = false;
         this._source = undefined;
         this._mediaSource = undefined;
         this._playback = undefined;
@@ -1440,8 +1455,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     // Stop downloading the live stream while nothing plays, no data timeout while nothing is asked for
     private _holdDownloads() {
-        if (!this._paused || !this._source || !this._timeout) {
+        if (!this._paused || !this._timeout) {
             return;
+        }
+        if (!this._source) {
+            this._holdOnSource = true; // paused before the source exists
+            return;
+        }
+        if (!this._source.canHold) {
+            return; // keeps downloading, the resume plays on from the pause
         }
         this.log('Downloads held, the resume rejoins the live edge').info();
         this._downloadsHeld = true;
