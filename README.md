@@ -88,7 +88,9 @@ player.start({
 `player.paused = true` pauses a live stream without downloading it: the player holds its downloads, which spares
 bandwidth and a mobile device's battery, and `player.paused = false` resumes at the live edge (as fast as a start,
 0.2 to 0.4 s in our tests). `player.pauseHoldDelay` (ms, 0 by default) keeps downloading for that long first, so a
-pause shorter than it resumes instantly where it paused, behind live by the pause.
+pause shorter than it resumes instantly where it paused, behind live by the pause; `Infinity` never holds. A source
+that can't hold its downloads (`source.canHold` false, e.g. WebSocket) keeps downloading, and a pause resumes where it
+paused.
 
 > [!TIP]
 > 
