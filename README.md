@@ -90,7 +90,8 @@ and fires `onAutoplayMuted`, so you can offer an unmute button; on `stop()` it u
 unmuted it since. Where even muted playback is refused (iOS Low Power Mode, some data-saver settings), it waits paused
 and fires `onPlayBlocked`: resume it from a click with `player.paused = false`, it starts at the live edge. While it
 waits, however long, it downloads nothing (its downloads are held, which also spares a mobile device's battery) and
-the picture stays. Set `player.autoplayMuted = false` to skip the muted attempt.
+the picture stays. A source that can't hold its downloads (`source.canHold` false, e.g. WebSocket) keeps downloading,
+and the click resumes where it waited. Set `player.autoplayMuted = false` to skip the muted attempt.
 On iOS, inline muted playback needs `playsinline` on the `<video>` element.
 
 ```javascript
