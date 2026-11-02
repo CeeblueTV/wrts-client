@@ -945,6 +945,16 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 // Start the MediaKeys engine if metadata contains contentProtection and MediaKeysEngine parameters are provided
                 if (metadata.contentProtection.size > 0) {
                     if (params.contentProtection) {
+                        if (!this._mediaKeysEngine && this._video.mediaKeys) {
+                            // a failed release left the MediaKeys of a previous playback on the video element: a new
+                            // engine can't set its own
+                            this.stop({
+                                type: 'MediaKeysEngineError',
+                                name: 'MediaKeys issue',
+                                detail: 'MediaKeys of a previous playback still set on the video element'
+                            });
+                            return;
+                        }
                         if (!this._mediaKeysEngine) {
                             this._mediaKeysEngine = new MediaKeysEngine(this._video);
                             this._mediaKeysEngine.onMediaKeys = () => {
@@ -1247,9 +1257,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const mediaKeysEngine = this._mediaKeysEngine;
             mediaKeysEngine.onMediaKeys = Util.EMPTY_FUNCTION;
             mediaKeysEngine.onError = Util.EMPTY_FUNCTION;
-            // a release that fails (or times out) must not hold every later start(): reset anyway, the next start
-            // sets its own MediaKeys
-            const stopping = mediaKeysEngine.stop().catch(error => this.log('Failed to release the MediaKeys', error).warn());
+            // a release that fails must not hold every later start(): reset anyway. One that times out still runs: wait
+            // until it ended, else its setMediaKeys(null) would remove the MediaKeys of the next start
+            const stopping = mediaKeysEngine
+                .stop()
+                .catch(error => this.log('Failed to release the MediaKeys', error).warn())
+                .then(() => mediaKeysEngine.released);
             this._mediaKeysStopping = stopping;
             stopping.then(() => {
                 // Reset mediaKeysEngine once the release ended, released or not

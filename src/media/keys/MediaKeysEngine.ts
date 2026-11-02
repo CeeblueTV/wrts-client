@@ -114,6 +114,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
     private _encryptedHandler: (event: MediaEncryptedEvent) => void;
     private _metadata?: Metadata;
     private _mediaKeysPromise?: Promise<unknown>;
+    private _released: Promise<void> = Promise.resolve();
 
     constructor(video: HTMLVideoElement) {
         super();
@@ -182,6 +183,14 @@ export class MediaKeysEngine extends MediaKeysConfig {
     }
 
     /**
+     * Settles once the last {@link stop} has ended its work on the video element, released or not: unlike the promise
+     * {@link stop} returns, without the {@link STOP_TIMEOUT}, so nothing else can touch the MediaKeys after it
+     */
+    get released(): Promise<void> {
+        return this._released;
+    }
+
+    /**
      * Stop the engine by releasing all resources and detaching from the video element.
      *
      * @returns a promise that resolves when the engine has released all
@@ -216,7 +225,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
                 this._initDataMap.clear();
                 this._video.removeEventListener('encrypted', this._encryptedHandler);
 
-                Promise.resolve(this._mediaKeysPromise)
+                const release = Promise.resolve(this._mediaKeysPromise)
                     .catch(() => undefined)
                     .then(() => Promise.allSettled(closePromises))
                     .then(() => {
@@ -241,6 +250,10 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         this._stopping = false;
                         this._mediaKeysPromise = undefined;
                     });
+                this._released = release.then(
+                    () => undefined,
+                    () => undefined
+                );
 
                 if (error) {
                     this.onError(error);
