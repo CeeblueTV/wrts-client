@@ -1266,12 +1266,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             mediaKeysEngine.onMediaKeys = Util.EMPTY_FUNCTION;
             mediaKeysEngine.onError = Util.EMPTY_FUNCTION;
             // a release that fails must not hold every later start(): reset anyway. One that times out still runs:
-            // wait until it ended, bounded, past which it leaves the next playback's MediaKeys alone
-            const stopping = mediaKeysEngine
-                .stop()
-                .catch(error => this.log('Failed to release the MediaKeys', error).warn())
-                .then(() => Util.safePromise(MediaKeysEngine.RELEASE_TIMEOUT, mediaKeysEngine.releaseSettled))
-                .catch(() => this.log('MediaKeys release still running, starting anyway').warn());
+            // wait until it ended, at most RELEASE_TIMEOUT from now, past which it leaves the next playback's MediaKeys
+            // alone
+            mediaKeysEngine.stop().catch(error => this.log('Failed to release the MediaKeys', error).warn());
+            const stopping = Util.safePromise(MediaKeysEngine.RELEASE_TIMEOUT, mediaKeysEngine.releaseSettled).catch(() =>
+                this.log('MediaKeys release still running, starting anyway').warn()
+            );
             this._mediaKeysStopping = stopping;
             stopping.then(() => {
                 // Reset mediaKeysEngine once the release ended, released or not

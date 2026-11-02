@@ -70,7 +70,7 @@ function bufferSourceToUint8Array(source: BufferSource): Uint8Array {
 export class MediaKeysEngine extends MediaKeysConfig {
     static MEDIA_KEYS_TIMEOUT: number = 8000;
     static STOP_TIMEOUT: number = 5000;
-    /** Bound for waiting on {@link releaseSettled}: a key setup in progress (MEDIA_KEYS_TIMEOUT), then the detach */
+    /** Bound for waiting on {@link releaseSettled} from the stop: a key setup in progress (MEDIA_KEYS_TIMEOUT), then the detach */
     static RELEASE_TIMEOUT: number = 13000;
     /**
      * Event fired on {@link MediaBufferError}
@@ -118,6 +118,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
     private _mediaKeysPromise?: Promise<unknown>;
     private _released: Promise<void> = Promise.resolve();
     private _mediaKeys?: MediaKeys; // the MediaKeys this engine set on the video element
+    private _attaching?: Promise<void>; // the key setup's own calls, which outlive its MEDIA_KEYS_TIMEOUT
 
     constructor(video: HTMLVideoElement) {
         super();
@@ -229,8 +230,8 @@ export class MediaKeysEngine extends MediaKeysConfig {
                 this._initDataMap.clear();
                 this._video.removeEventListener('encrypted', this._encryptedHandler);
 
-                const release = Promise.resolve(this._mediaKeysPromise)
-                    .catch(() => undefined)
+                // the setup's calls themselves, not its timeout: one still running could set its MediaKeys later
+                const release = Promise.resolve(this._attaching)
                     .then(() => Promise.allSettled(closePromises))
                     .then(() => {
                         // only the MediaKeys this engine set: a release that outlived the player's wait must not
@@ -322,7 +323,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
 
     private _setupMediaKeys(): Promise<unknown> {
         // Already set up, just return
-        if (this._video.mediaKeys) {
+        if (this._mediaKeys) {
             return Promise.resolve();
         }
         // If a setup is already in progress, return the existing promise
@@ -338,7 +339,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
                     return;
                 }
 
-                this._requestKeySystemAccess()
+                const attaching = this._requestKeySystemAccess()
                     .then(keySystemAccess => keySystemAccess.createMediaKeys())
                     .then(createdMediaKeys => {
                         if (this._stopping || !this._isStarted) {
@@ -348,16 +349,20 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         if (this._certificate) {
                             createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>);
                         }
-                        this._video
+                        return this._video
                             .setMediaKeys(createdMediaKeys)
                             .then(() => {
                                 this._mediaKeys = createdMediaKeys;
                                 if (this._stopping || !this._isStarted) {
-                                    this._video
+                                    // stopped meanwhile: detach them, unless the element already has others
+                                    if (this._video.mediaKeys !== createdMediaKeys) {
+                                        resolve();
+                                        return;
+                                    }
+                                    return this._video
                                         .setMediaKeys(null)
                                         .catch(() => undefined)
                                         .finally(() => resolve());
-                                    return;
                                 }
                                 this.log('MediaKeys set on video element').info();
                                 this.onMediaKeys();
@@ -375,6 +380,10 @@ export class MediaKeysEngine extends MediaKeysConfig {
                             this._mediaKeysPromise = undefined;
                         }
                     });
+                this._attaching = attaching.then(
+                    () => {},
+                    () => {}
+                );
             })
         );
         return this._mediaKeysPromise;
@@ -385,7 +394,16 @@ export class MediaKeysEngine extends MediaKeysConfig {
             this.log('Ignoring encrypted event because MediaKeysEngine is stopping').warn();
             return;
         }
-        if (!this._video.mediaKeys) {
+        if (this._video.mediaKeys && this._video.mediaKeys !== this._mediaKeys) {
+            // left by another playback (a release that failed or still runs): not ours to use
+            this.onError({
+                type: 'MediaKeysEngineError',
+                name: 'MediaKeys issue',
+                detail: 'MediaKeys of another playback set on the video element'
+            });
+            return;
+        }
+        if (!this._mediaKeys) {
             try {
                 await this._setupMediaKeys();
             } catch (_) {
@@ -396,7 +414,8 @@ export class MediaKeysEngine extends MediaKeysConfig {
             }
         }
 
-        if (!this._video.mediaKeys) {
+        const mediaKeys = this._mediaKeys;
+        if (!mediaKeys || this._video.mediaKeys !== mediaKeys) {
             this.onError({ type: 'MediaKeysEngineError', name: 'MediaKeys issue', detail: 'Failed to set up MediaKeys' });
             return;
         }
@@ -423,7 +442,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
             this.log(`Session already created for initData ${initDataString.substring(0, 16)}...`).info();
             return;
         }
-        const session = this._video.mediaKeys.createSession();
+        const session = mediaKeys.createSession();
         const sessionHandler: SessionHandlers = {
             session,
             message: (e: MediaKeyMessageEvent) => this._handleMessage(e, session),
