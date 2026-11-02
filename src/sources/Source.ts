@@ -213,11 +213,12 @@ export abstract class Source extends EventEmitter implements ICMCD {
 
     /**
      * Asks to hold the downloads once the requests in flight end, or releases them. A source that cannot hold
-     * ({@link canHold} false) keeps downloading; {@link HTTPAdaptiveSource} rejoins the live edge on release
+     * ({@link canHold} false) ignores it and keeps downloading; {@link HTTPAdaptiveSource} rejoins the live edge on
+     * release
      */
     hold(value: boolean) {
         if (value) {
-            if (!this._held && !this._closed) {
+            if (!this._held && !this._closed && this.canHold) {
                 let release!: () => void;
                 const promise = new Promise<void>(resolve => (release = resolve));
                 this._held = { promise, release, waiting: false };

@@ -594,7 +594,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * How long a paused player keeps downloading the live stream, in milliseconds, before it holds the downloads; a
      * resume after that rejoins the live edge instead of playing on from the pause. 0 (default): hold at once,
-     * Infinity: never hold
+     * Infinity: never hold. A delay over the browser timer's limit (2^31-1 ms, about 24.8 days) holds at that limit
      */
     get pauseHoldDelay(): number {
         return this._pauseHoldDelay;
