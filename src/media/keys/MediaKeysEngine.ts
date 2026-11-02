@@ -116,7 +116,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
     private _encryptedHandler: (event: MediaEncryptedEvent) => void;
     private _metadata?: Metadata;
     private _mediaKeysPromise?: Promise<unknown>;
-    private _released: Promise<void> = Promise.resolve();
+    private _releaseSettled: Promise<void> = Promise.resolve();
     private _mediaKeys?: MediaKeys; // the MediaKeys this engine set on the video element
     private _attaching?: Promise<void>; // the key setup's own calls, which outlive its MEDIA_KEYS_TIMEOUT
 
@@ -192,7 +192,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
      * to detach stay on the video element, a new playback needs another one
      */
     get releaseSettled(): Promise<void> {
-        return this._released;
+        return this._releaseSettled;
     }
 
     /**
@@ -237,14 +237,14 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         // only the MediaKeys this engine set: a release that outlived the player's wait must not
                         // remove those of the next playback
                         if (!this._video.mediaKeys || this._video.mediaKeys !== this._mediaKeys) {
+                            this.log('No MediaKeys of this engine on the video element to detach').info();
                             return;
                         }
-                        return this._video.setMediaKeys(null);
+                        return this._video
+                            .setMediaKeys(null)
+                            .then(() => this.log('MediaKeys detached from video element').info());
                     })
-                    .then(() => {
-                        this.log('MediaKeys detached from video element').info();
-                        resolve();
-                    })
+                    .then(() => resolve())
                     .catch(err => {
                         this.log('Failed to detach MediaKeys from video element', err).warn();
                         reject(err);
@@ -259,9 +259,12 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         this._isStarted = false;
                         this._stopping = false;
                         this._mediaKeysPromise = undefined;
-                        this._mediaKeys = undefined;
+                        // kept while still on the video element, so that a later stop() can retry the detach
+                        if (this._video.mediaKeys !== this._mediaKeys) {
+                            this._mediaKeys = undefined;
+                        }
                     });
-                this._released = release.then(
+                this._releaseSettled = release.then(
                     () => {},
                     () => {}
                 );
