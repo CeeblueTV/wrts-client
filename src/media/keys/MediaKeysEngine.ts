@@ -261,8 +261,8 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         this._mediaKeys = undefined;
                     });
                 this._released = release.then(
-                    () => undefined,
-                    () => undefined
+                    () => {},
+                    () => {}
                 );
 
                 if (error) {
