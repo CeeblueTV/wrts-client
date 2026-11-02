@@ -762,6 +762,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;
     private _mediaKeysStopping?: Promise<unknown>;
+    private _startRequest: number = 0; // bumped by every stop(): a deferred start runs only if none came since
     private _playbackSpeed: ByteRate;
     private _playbackPrevTime?: number;
     private _passthroughCMAF?: boolean;
@@ -854,7 +855,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             // Previous MediaKeys engine cleanup is still in flight — defer the start
             // until it completes, otherwise the new playback would race with the
             // pending video.setMediaKeys(null).
-            this._mediaKeysStopping.then(() => this.start(params, idleTimeout));
+            // A stop() or another start() in the meantime cancels it
+            const request = this._startRequest;
+            this._mediaKeysStopping.then(() => {
+                if (request === this._startRequest) {
+                    this.start(params, idleTimeout);
+                }
+            });
             return;
         }
 
@@ -951,7 +958,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                             this.stop({
                                 type: 'MediaKeysEngineError',
                                 name: 'MediaKeys issue',
-                                detail: 'MediaKeys of a previous playback still set on the video element'
+                                detail: 'MediaKeys of a previous playback still set on the video element, it needs a new one'
                             });
                             return;
                         }
@@ -1189,6 +1196,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @param error optional error describing why playback stopped improperly
      */
     stop(error?: PlayerError) {
+        ++this._startRequest; // cancels a start deferred behind a MediaKeys release
         if (!this._timeout) {
             return;
         }
@@ -1257,12 +1265,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const mediaKeysEngine = this._mediaKeysEngine;
             mediaKeysEngine.onMediaKeys = Util.EMPTY_FUNCTION;
             mediaKeysEngine.onError = Util.EMPTY_FUNCTION;
-            // a release that fails must not hold every later start(): reset anyway. One that times out still runs: wait
-            // until it ended, else its setMediaKeys(null) would remove the MediaKeys of the next start
+            // a release that fails must not hold every later start(): reset anyway. One that times out still runs:
+            // wait until it ended, bounded, past which it leaves the next playback's MediaKeys alone
             const stopping = mediaKeysEngine
                 .stop()
                 .catch(error => this.log('Failed to release the MediaKeys', error).warn())
-                .then(() => mediaKeysEngine.released);
+                .then(() => Util.safePromise(MediaKeysEngine.RELEASE_TIMEOUT, mediaKeysEngine.releaseSettled))
+                .catch(() => this.log('MediaKeys release still running, starting anyway').warn());
             this._mediaKeysStopping = stopping;
             stopping.then(() => {
                 // Reset mediaKeysEngine once the release ended, released or not

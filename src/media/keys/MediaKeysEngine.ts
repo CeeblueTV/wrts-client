@@ -70,6 +70,8 @@ function bufferSourceToUint8Array(source: BufferSource): Uint8Array {
 export class MediaKeysEngine extends MediaKeysConfig {
     static MEDIA_KEYS_TIMEOUT: number = 8000;
     static STOP_TIMEOUT: number = 5000;
+    /** Bound for waiting on {@link releaseSettled}: a key setup in progress (MEDIA_KEYS_TIMEOUT), then the detach */
+    static RELEASE_TIMEOUT: number = 13000;
     /**
      * Event fired on {@link MediaBufferError}
      * @event
@@ -115,6 +117,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
     private _metadata?: Metadata;
     private _mediaKeysPromise?: Promise<unknown>;
     private _released: Promise<void> = Promise.resolve();
+    private _mediaKeys?: MediaKeys; // the MediaKeys this engine set on the video element
 
     constructor(video: HTMLVideoElement) {
         super();
@@ -183,10 +186,11 @@ export class MediaKeysEngine extends MediaKeysConfig {
     }
 
     /**
-     * Settles once the last {@link stop} has ended its work on the video element, released or not: unlike the promise
-     * {@link stop} returns, without the {@link STOP_TIMEOUT}, so nothing else can touch the MediaKeys after it
+     * Settles once the last {@link stop} has ended its work on the video element, released or not (`video.mediaKeys`
+     * tells which): unlike the promise {@link stop} returns, without the {@link STOP_TIMEOUT}. MediaKeys a CDM refused
+     * to detach stay on the video element, a new playback needs another one
      */
-    get released(): Promise<void> {
+    get releaseSettled(): Promise<void> {
         return this._released;
     }
 
@@ -229,6 +233,11 @@ export class MediaKeysEngine extends MediaKeysConfig {
                     .catch(() => undefined)
                     .then(() => Promise.allSettled(closePromises))
                     .then(() => {
+                        // only the MediaKeys this engine set: a release that outlived the player's wait must not
+                        // remove those of the next playback
+                        if (!this._video.mediaKeys || this._video.mediaKeys !== this._mediaKeys) {
+                            return;
+                        }
                         return this._video.setMediaKeys(null);
                     })
                     .then(() => {
@@ -249,6 +258,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         this._isStarted = false;
                         this._stopping = false;
                         this._mediaKeysPromise = undefined;
+                        this._mediaKeys = undefined;
                     });
                 this._released = release.then(
                     () => undefined,
@@ -341,6 +351,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         this._video
                             .setMediaKeys(createdMediaKeys)
                             .then(() => {
+                                this._mediaKeys = createdMediaKeys;
                                 if (this._stopping || !this._isStarted) {
                                     this._video
                                         .setMediaKeys(null)
