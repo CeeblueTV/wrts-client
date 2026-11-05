@@ -782,6 +782,17 @@
                     this.netDescription += this.latencyTarget
                         ? '<br><strong>Target latency ≈ ' + this.latencyTarget + 'ms</strong>'
                         : '<br><strong>Target latency read from the manifest</strong>';
+                    this.updateURL();
+                },
+
+                updateURL() {
+                    const url = new URL(location.href);
+                    // Update the stream and latencyTarget query parameters to reflect the current configuration.
+                    url.searchParams.set('stream', this.stream);
+                    url.searchParams.set('latencyTarget', this.netProfiles.get(this.netProfile)[1] ?? 0);
+                    if (url.href !== location.href) {
+                        history.replaceState(history.state, '', url.href);
+                    }
                 },
 
                 resetMetrics(all = false) {
