@@ -305,6 +305,16 @@
         // and only a seek to live will: that's when the Live button becomes actionable.
         const LIVE_DRIFT_THRESHOLD = 500;
 
+        // Detect if the browser is running on iOS. iPadOS 13+ reports MacIntel, so we also check for touch support.
+        const IS_IOS = /iPad|iPhone|iPod/.test(navigator.platform)
+            || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+        // So on iOS we replace dash.js catch-up with the wrts-client Player approach: hold one of three
+        // fixed rates and switch only when the latency leaves a band around the target.
+        const STEP_RATE_MIN = 0.90; 
+        const STEP_RATE_MAX = 1.10;
+        const STEP_MIN_BUFFER = 900; // ms, never speed up below it: that would only cause stalls
+        
         // The vod manifest URL the clipper opens. If null, the clipper uses the current stream's manifest URL.
         const CLIP_MANIFEST_URL = null;
 
@@ -471,6 +481,9 @@
 
                     this.latency = Math.round(this.player.getCurrentLiveLatency() * 1000) || 0;
                     latencies.push(this.latency + "ms");
+                    if (IS_IOS && !seekOccurred && !this._stalling) {
+                        this._stepPlaybackRate(buffer*1000);
+                    }
 
                     const e2eLatency = EpochTime.getLatency(video, this.canvas, drawContext);
                     if (e2eLatencies.length || (e2eLatency > 0 && e2eLatency < 0xFFFF)) {
@@ -745,7 +758,8 @@
                                     lowLatencyStallThreshold: manualDelay ? Math.min(0.3, liveDelay / 10) : 0.3
                                 },
                                 liveCatchup: {
-                                    enabled: manualDelay ? true : null,
+                                    // Off on iOS, replaced by _stepPlaybackRate (see IS_IOS)
+                                    enabled: IS_IOS ? false : (manualDelay ? true : null),
                                     maxDrift: manualDelay ? Math.max(0.3, Math.min(1.5, liveDelay)) : NaN,
                                     playbackRate: {
                                         min: manualDelay ? -0.05 : NaN,
@@ -784,6 +798,34 @@
                 goLive() {
                     if (this.player) {
                         this.player.seekToOriginalLive();
+                    }
+                },
+
+                // iOS catch-up (see IS_IOS), called on each metrics poll. Hysteresis: leave rate 1
+                // past ±STEP_MARGIN, come back to 1 only once the target is crossed, so the rate changes
+                // a few times per minute instead of several times per second.
+                _stepPlaybackRate(buffer) {
+                    const target = Number(this.latencyTarget);
+                    if (!target) {
+                        return; // manifest target not known yet
+                    }
+                    const STEP_MARGIN = Math.max(300, target * 0.25); // ms around the target latency before leaving rate 1. For 1200ms target 25% is 300ms.
+                    const drift = this.latency - target;
+                    const current = this.player.getPlaybackRate();
+                    let rate = current;
+                    if (drift > STEP_MARGIN) {
+                        rate = STEP_RATE_MAX;
+                    } else if (drift < -STEP_MARGIN) {
+                        rate = STEP_RATE_MIN;
+                    } else if ((rate > 1 && drift <= 0) || (rate < 1 && drift >= 0)) {
+                        rate = 1; // target crossed
+                    }
+                    if (rate > 1 && !(buffer > STEP_MIN_BUFFER)) {
+                        rate = 1;
+                    }
+                    if (rate !== current) {
+                        log(`Latency ${this.latency}ms (target ${target}ms), playback rate ${current} => ${rate}`).info();
+                        this.player.setPlaybackRate(rate);
                     }
                 },
 
