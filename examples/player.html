@@ -1619,12 +1619,12 @@
                     return this.playState === PlayState.STOPPED;
                 },
                 onVideoTrackChange() {
-                    if (this.player.running) {
+                    if (this.player.started) {
                         this.player.videoTrack = this.videoTrackId;
                     }
                 },
                 onAudioTrackChange() {
-                    if (this.player.running) {
+                    if (this.player.started) {
                         this.player.audioTrack = this.audioTrackId;
                     }
                 },
@@ -1749,7 +1749,7 @@
                     return true;
                 },
                 onReliable() {
-                    if (this.player) {
+                    if (this.player.started) {
                         this.player.reliable = !this.adaptiveFrameSkipping;
                     }
                     this.updateURL();
