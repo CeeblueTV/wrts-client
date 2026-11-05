@@ -327,7 +327,8 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         if (this._certificate) {
                             createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>);
                         }
-                        this._video
+                        // returned: the setup is still in progress until the attach has ended, a stop() must wait for it
+                        return this._video
                             .setMediaKeys(createdMediaKeys)
                             .then(() => {
                                 if (this._stopping || !this._isStarted) {
