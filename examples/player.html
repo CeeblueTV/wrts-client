@@ -170,8 +170,8 @@
                                 </button>
 
                                 <button class="btn" title="Jump to live position"
-                                    :class="{ 'btn-red': player && bufferAmount > player.bufferLimitMiddle }"
-                                    :disabled="!player || bufferAmount <= player.bufferLimitMiddle"
+                                    :class="{ 'btn-red': player?.running && bufferAmount > player.bufferLimitMiddle }"
+                                    :disabled="!player?.running || bufferAmount <= player.bufferLimitMiddle"
                                     v-on:click="goLive">
                                     <i class="fas fa-rocket"></i>
                                     Live
@@ -816,6 +816,7 @@
                 this.host = new NetAddress(host || location.host, 443);
                 this.stream = options.stream || '';
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
+                this.player = new Player(this.$refs.video, this.sourceType);
                 const bufferMin = Number(options.bufferMin);
                 const bufferMax = Number(options.bufferMax);
                 if (Number.isFinite(bufferMax)) {
@@ -890,7 +891,7 @@
                 this.uiTimeline = new UITimeline(this.$refs.timelineBox);
                 this.uiTimeline.axis = this.tlAxis;
                 this.uiTimeline.windowDuration = this.tlWindow;
-                this.uiTimeline.getMediaTime = () => (this.player ? this.player.currentTime * 1000 : undefined);
+                this.uiTimeline.getMediaTime = () => (this.player.running ? this.player.currentTime * 1000 : undefined);
                 this.uiTimeline.onFollowingChange = following => {
                     this.tlFollowing = following;
                 };
@@ -899,7 +900,7 @@
                 let prevSampleTime;
                 const computeStats = () => {
                     const player = this.player;
-                    if(player) {
+                    if(player.running) {
                         if(this.netPreset === '-auto-' && this.bufferMax !== player.bufferLimitHigh) {
                             this.bufferMax = player.bufferLimitHigh;
                         }
@@ -1227,7 +1228,7 @@
 
 
                 play() {
-                    if (this.player) {
+                    if (!this.isStopped()) {
                         this.player.stop();
                         return;
                     }
@@ -1295,7 +1296,6 @@
                     };
 
                     // Now we can start the player
-                    this.player = new Player(video, this.sourceType);
                     this.player.onStart = this.onStart.bind(this);
                     this.player.onStop = this.onStop.bind(this);
                     this.player.onTrackChange = this.onTrackChange.bind(this);
@@ -1397,7 +1397,6 @@
                     this.videoTrackId = undefined;
                     this.streamMetadata = null;
 
-                    this.player = null;
                     this.playState = PlayState.STOPPED;
                     this.keySystem = null;
                     this.controlsVisible = false;
@@ -1507,7 +1506,7 @@
                     log(this.muted ? 'MutePlayback' : 'UnmutePlayback').info();
                 },
                 goLive() {
-                    if(this.player) {
+                    if(this.player.running) {
                         this.player.goLive();
                     }
                 },
@@ -1517,7 +1516,7 @@
                     if (this.latencies.length) {
                         this.latencies.length = 0;
                         this.stats.get('Latency e2e')?.splice(0);
-                    } else if (this.player) {
+                    } else if (this.player.running) {
                         // A non-empty latency series is also the opt-in flag used by computeStats.
                         this.latencies.push((this.player.latency || 0) + 'ms');
                     }
@@ -1527,7 +1526,7 @@
                     this.uiStats.reset();
                     // Rebaseline the counters the Player reports cumulatively, so the chart
                     // shows what happened since this reset and not since the stream started.
-                    if (this.player) {
+                    if (this.player.running) {
                         const {skippedAudio, skippedVideo, stallCount} = this.player.computeStats();
                         this.deltaStats = { skippedAudio, skippedVideo, stallCount };
                     }
@@ -1620,12 +1619,12 @@
                     return this.playState === PlayState.STOPPED;
                 },
                 onVideoTrackChange() {
-                    if (this.player) {
+                    if (this.player.running) {
                         this.player.videoTrack = this.videoTrackId;
                     }
                 },
                 onAudioTrackChange() {
-                    if (this.player) {
+                    if (this.player.running) {
                         this.player.audioTrack = this.audioTrackId;
                     }
                 },
@@ -1745,7 +1744,7 @@
                 mutableReliability() {
                     if(this.sourceType === HTTPSource) {
                         // HTTP has no mutable reliability
-                        return this.player ? false : true;
+                        return !this.player?.running;
                     }
                     return true;
                 },
