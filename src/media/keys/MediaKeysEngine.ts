@@ -70,6 +70,7 @@ function bufferSourceToUint8Array(source: BufferSource): Uint8Array {
 export class MediaKeysEngine extends MediaKeysConfig {
     static MEDIA_KEYS_TIMEOUT: number = 8000;
     static STOP_TIMEOUT: number = 5000;
+    static CLOSE_TIMEOUT: number = 1000;
     /**
      * Event fired on {@link MediaBufferError}
      * @event
@@ -207,8 +208,9 @@ export class MediaKeysEngine extends MediaKeysConfig {
                     const { session, message, keystatuseschange } = sessionHandlers;
                     session.removeEventListener('message', message);
                     session.removeEventListener('keystatuseschange', keystatuseschange);
+                    // bounded: Widevine's close() hangs while its first license request is unanswered, blocking the detach
                     closePromises.push(
-                        session.close().catch(err => {
+                        Util.safePromise(MediaKeysEngine.CLOSE_TIMEOUT, session.close()).catch(err => {
                             this.log('Failed to close session', err).warn();
                         })
                     );
@@ -325,7 +327,8 @@ export class MediaKeysEngine extends MediaKeysConfig {
                         if (this._certificate) {
                             createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>);
                         }
-                        this._video
+                        // returned: the setup is still in progress until the attach has ended, a stop() must wait for it
+                        return this._video
                             .setMediaKeys(createdMediaKeys)
                             .then(() => {
                                 if (this._stopping || !this._isStarted) {
