@@ -18,7 +18,7 @@ Source ─────────► Reader ─────────► Play
         playback constraints                    buffered ranges
 ```
 
-- [`Source`](./src/sources/Source.ts) implementations acquire media, select tracks, measure received throughput, and expose decoded samples.
+- [`Source`](./src/sources/Source.ts) implementations acquire media, select tracks, measure received throughput, and expose demuxed samples (still encoded; the browser decodes them after the MSE append).
 - [`HTTPAdaptiveSource`](./src/sources/HTTPAdaptiveSource.ts) implements the default sequence-based WebRTS delivery and the multi-bitrate rendition algorithm.
 - [`Player`](./src/Player.ts) appends samples through Media Source Extensions (MSE), observes the browser's effective playback, and classifies the buffer.
 - [`IPlaying`](./src/sources/IPlaying.ts) is the feedback contract between the source and the player.
@@ -38,15 +38,17 @@ Important terms used throughout the implementation:
 
 WebRTS is transport-agnostic at the `Source` boundary. The default `HTTPAdaptiveSource` uses ordinary Fetch requests: it first loads an `index.json` manifest, then requests numbered media sequences. This model is CDN-friendly and benefits from HTTP multiplexing when the browser and deployment negotiate HTTP/2 or HTTP/3; the playback algorithm does not depend on a particular HTTP version.
 
-The repository also contains direct HTTP and WebSocket sources. A custom source can be supplied to `Player` without changing the playback controller, although transport-specific features such as sequence skipping and MBR probing remain the responsibility of that source.
+The repository also contains direct HTTP and WebSocket sources, which are deprecated. A custom source can be supplied to `Player` without changing the playback controller, although transport-specific features such as sequence skipping and MBR probing remain the responsibility of that source.
 
 The manifest describes:
 
-- the current and first available sequence;
+- the protocol `version` (`"2.0"` today);
+- the current and first available sequence, each with its `id` and the media `time` it starts at (`sequence.current`, `sequence.first`);
 - the estimated live media time;
 - the available audio, video, and data tracks;
 - rendition bandwidths and video resolutions;
-- the URL pattern used to request sequences.
+- the content protection, for encrypted streams;
+- the URL pattern used to request sequences (`sequence.pattern`), with the placeholders `{trackIds}`, `{sequenceId}` and `{ext}`; several track ids are joined with `sequence.trackSeparator`, `-` by default.
 
 At startup, the HTTP adaptive source can begin a few sequences behind the current sequence when necessary to build the target buffer. It then continuously requests the next sequence. A response for the current live sequence may stream bytes as they are produced, so playback does not have to wait for that sequence to close.
 
@@ -54,6 +56,8 @@ Two response headers have different meanings and must not be confused:
 
 - `Sequence-Duration` is the exact duration of a **completed** sequence. Its absence identifies the current, still-open live sequence.
 - `Max-Sequence-Duration` is only an upper bound used to locate possible sequences near the live edge. It is not an estimate of the duration of an open sequence.
+
+Both are in milliseconds. A third header, `First-Sample-Length`, gives the byte length of a sequence's first video sample; frame alteration (section 5) reads it from a `HEAD` response to request only that sample.
 
 ## 3. The playback control loop
 
@@ -216,7 +220,7 @@ Together, this layered policy enables low latency in three ways:
 
 RTS is a compact binary framing format for timed audio, video, and data samples. It minimizes repeated metadata and is one possible media container for WebRTS; CMAF (`mp4`) is also supported.
 
-The current reader is implemented in [`RTSReader.ts`](./src/media/reader/RTSReader.ts). Integer fields use unsigned 7-bit variable-length encoding. On byte-stream transports, a packet can be prefixed with its encoded size; message-framed transports such as WebSocket do not need that prefix.
+The current reader is implemented in [`RTSReader.ts`](./src/media/reader/RTSReader.ts). Integer fields use unsigned 7-bit variable-length encoding: least significant group first, with the high bit set on every byte but the last. Times, durations and composition offsets are in milliseconds. On byte-stream transports such as HTTP, every packet is prefixed with its encoded size; message-framed transports such as WebSocket carry one packet per message, without that prefix.
 
 ### 7.1 Common header
 
@@ -237,6 +241,8 @@ header = encodedTrack << 2 | type
 | `2` | Video | Invalid/reserved |
 | `3` | Reserved | Initialize tracks |
 
+A command packet of an invalid type stops the reader with an error.
+
 ### 7.2 Audio and video packets
 
 ```text
@@ -244,7 +250,7 @@ header = encodedTrack << 2 | type
 [custom fields...] [0] [media payload]
 ```
 
-`time` is present only for the first sample of a track after an initialize-tracks command. Later timestamps are reconstructed as `previous time + previous duration`.
+`time` is present only for the first sample of a track after an initialize-tracks command, which starts every sequence. Later timestamps are reconstructed as `previous time + previous duration`.
 
 ```text
 durationAndFlags = duration << 2
@@ -252,7 +258,20 @@ durationAndFlags = duration << 2
                  | isKeyFrame
 ```
 
-The optional composition offset represents the difference between decode and presentation order, as required by video containing reordered frames. Custom fields are length-prefixed and terminated by a zero length; currently defined fields carry subsample-encryption information and the sample initialization vector.
+The optional composition offset represents the difference between decode and presentation order, as required by video containing reordered frames. It is signed: a 16-bit two's complement value (`offset & 0xFFFF`), encoded as an unsigned integer.
+
+Custom fields are length-prefixed and terminated by a zero length:
+
+```text
+[size] [customType] [value]    size covers customType and value
+```
+
+| `customType` | Value |
+|---|---|
+| `1` | Subsample encryption: `[count]`, then `count` pairs of `[clearBytes] [encryptedBytes]` |
+| `2` | Sample initialization vector: the remaining bytes of the field |
+
+A reader skips custom types it does not know.
 
 ### 7.3 Timed data packets
 
@@ -269,7 +288,7 @@ The first time value is absolute for that track; following values are relative t
 [packetSize?] [header] [JSON metadata payload]
 ```
 
-Metadata is a command packet with `encodedTrack = 0` and `type = 0`. It describes protocol information and the available tracks and renditions.
+Metadata is a command packet with `encodedTrack = 0` and `type = 0`. It describes protocol information and the available tracks and renditions. The HTTP adaptive source takes this information from `index.json` and ignores the packet.
 
 ### 7.5 Initialize-tracks packets
 
@@ -277,4 +296,4 @@ Metadata is a command packet with `encodedTrack = 0` and `type = 0`. It describe
 [packetSize?] [header] [audioTrackId + 1] [videoTrackId + 1]
 ```
 
-Initialize-tracks is a command packet with `encodedTrack = 0` and `type = 3`. A zero track value means that the corresponding media type is absent. The command resets timestamp reconstruction, so the next packet for each active media track carries an explicit time.
+Initialize-tracks is a command packet with `encodedTrack = 0` and `type = 3`. A zero track value means that the corresponding media type is absent. The command resets timestamp reconstruction, data tracks included, so the next packet for each active track carries an explicit time.
