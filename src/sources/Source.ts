@@ -1029,6 +1029,8 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (withCMCD) {
             stats = this._playing.computeStats();
             const cmcd = stats.toCmcd(url, trackIds, this._prevStats);
+            // The content ID of the stream, from its endpoint: toCmcd hashes the media URL, which changes per sequence
+            cmcd.cid = Util.hash(this._url.pathname);
             // If asking for the short version of the cmcd payload remove the following fields
             if (this.cmcd === CMCD.SHORT) {
                 delete cmcd.cid;
