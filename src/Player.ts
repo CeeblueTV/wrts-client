@@ -438,6 +438,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * Gets the live playback position in seconds, where {@link goLive} moves the playback head
+     */
+    get liveTarget(): number {
+        // The middle buffer position to avoid MBR change, and in a valid range superior or equals to startTime
+        return Math.max(
+            this.startTime,
+            this.endTime - Math.max(this._bufferLimitLow, this._bufferLimitMiddle - BUFFER_SEEK_MARGIN) / 1000
+        );
+    }
+
+    /**
      * Gets the current playback time in seconds
      */
     get currentTime(): number {
@@ -816,12 +827,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (!this.running) {
             throw Error('Cannot goLive on stopped player');
         }
-        // Go to the middle buffer position to avoid MBR change, and in a valid range superior or equals to startTime
         const prevCurrentTime = this._video.currentTime;
-        const currentTime = (this._video.currentTime = Math.max(
-            this.startTime,
-            this.endTime - Math.max(this._bufferLimitLow, this._bufferLimitMiddle - BUFFER_SEEK_MARGIN) / 1000
-        ));
+        const currentTime = (this._video.currentTime = this.liveTarget);
         if (prevCurrentTime !== currentTime) {
             // After the seek, give the value
             this._playbackPrevTime = currentTime;
