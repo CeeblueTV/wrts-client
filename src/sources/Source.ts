@@ -946,14 +946,14 @@ export abstract class Source extends EventEmitter implements ICMCD {
             return;
         }
 
-        // Set current requestedTracks immediately
-        if (tracks.video) {
+        // Set current requestedTracks immediately, undefined (automatic) keeps the current track
+        if (tracks.video != null) {
             this._requestedTracks.video = tracks.video;
         }
-        if (tracks.audio) {
+        if (tracks.audio != null) {
             this._requestedTracks.audio = tracks.audio;
         }
-        if (tracks.data) {
+        if (tracks.data != null) {
             this._requestedTracks.data = tracks.data;
         }
 
