@@ -711,6 +711,15 @@
                             code: error.code
                         });
                         log('DASH error', error).error();
+                        // The manifest is refused for good (stream ended or unknown): stop the player
+                        // instead of letting dash.js refresh it forever, which restarts the server input
+                        // on every request. Error 25 = DOWNLOAD_ERROR_ID_MANIFEST, raised once its retries are exhausted.
+                        const status = error.data?.response?.status;
+                        if (error.code === 25 && status >= 400 && status < 500) {
+                            // Deferred: don't destroy the player from inside its own event dispatch
+                            const player = this.player;
+                            setTimeout(() => this.player === player && this.play());
+                        }
                     });
                     this.setLatencyTarget();
 
