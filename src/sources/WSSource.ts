@@ -13,6 +13,9 @@ import { Reader } from '../media/reader/Reader';
 
 /**
  * WebSocket Streaming
+ *
+ * @deprecated Use an https endpoint instead, played by {@link HTTPAdaptiveSource}. Will be removed in the next
+ * major version.
  */
 @Source.registerClass('wss', 'ws')
 export class WSSource extends Source {
@@ -21,6 +24,8 @@ export class WSSource extends Source {
 
     constructor(playing: IPlaying, params: Connect.Params) {
         super(playing, 'wss', params, Connect.Type.DIRECT_STREAMING);
+        // at error level, the only one shown by default
+        this.log('WSSource is deprecated and will be removed, use an https endpoint instead').error();
 
         this._rtt = 0;
         this._ws = new WebSocketReliable();

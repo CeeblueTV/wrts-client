@@ -12,12 +12,17 @@ import { Metadata } from '../media/Metadata';
 
 /**
  * HTTP Direct Streaming
+ *
+ * @deprecated Use {@link HTTPAdaptiveSource}, the default source of an https endpoint. Will be removed in the next
+ * major version.
  */
 export class HTTPSource extends Source {
     private _rtt: number;
 
     constructor(playing: IPlaying, params: Connect.Params) {
         super(playing, 'https', params, Connect.Type.DIRECT_STREAMING);
+        // at error level, the only one shown by default
+        this.log('HTTPSource is deprecated and will be removed, use HTTPAdaptiveSource instead').error();
         this._rtt = 0;
     }
 
