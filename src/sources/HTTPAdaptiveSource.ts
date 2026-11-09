@@ -507,7 +507,7 @@ export class HTTPAdaptiveSource extends Source {
      * Download one sequence, retry if can't download it until get it (at least that there is a unrecoverable issue).
      * If length is set it limits body of the request to this value by processing a byte-range request,
      * If length is set to 0 it sends a normal HEAD request
-     * @returns HTTP headers if was able to download at least it, null otherwise!
+     * @returns the response, or a synthetic one: 206 if partly downloaded, 408 if not downloaded, 400 if no track to download
      */
     private async _downloadSequence(
         playing: IPlaying,
