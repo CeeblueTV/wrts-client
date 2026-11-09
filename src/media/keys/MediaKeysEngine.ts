@@ -263,40 +263,54 @@ export class MediaKeysEngine extends MediaKeysConfig {
         }
 
         // Try each key system with its array of configurations.
+        let certificateError: Error | undefined;
         for (const [keySystem, configs] of keySystemConfigMap.entries()) {
+            let keySystemAccess: MediaKeySystemAccess;
             try {
                 this.log(`Requesting key system ${keySystem} with configs`, JSON.stringify(configs)).debug();
-                const keySystemAccess = await navigator.requestMediaKeySystemAccess(keySystem, configs);
-                this.log(`Key system ${keySystem} supported`).info();
-                this._keySystem = keySystem;
-                this._keySystemConfig = this._settings.get(keySystem);
-
-                // Optionally, handle certificate loading if needed
-                if (this._keySystemConfig && typeof this._keySystemConfig !== 'string' && this._keySystemConfig.certificate) {
-                    const certificateConfig = MediaKeysConfig.normalizeCertificate(this._keySystemConfig.certificate);
-                    if (certificateConfig.url) {
-                        await fetch(certificateConfig.url, {
-                            headers: certificateConfig.headers
-                        })
-                            .then(response => response.arrayBuffer())
-                            .then(certificate => {
-                                this._certificate = new Uint8Array(certificate);
-                                this.log(`${keySystem} certificate received, size ${this._certificate.byteLength}`).info();
-                            });
-                    } else if (certificateConfig.data) {
-                        this.log(`${keySystem} certificate loaded from settings`).info();
-                        this._certificate = certificateConfig.data;
-                    } else {
-                        this.log(`${keySystem} certificate settings ignored because neither url nor data is provided`).warn();
-                    }
-                }
-
-                return keySystemAccess;
+                keySystemAccess = await navigator.requestMediaKeySystemAccess(keySystem, configs);
             } catch (err) {
                 this.log(`Key system ${keySystem} not supported with any provided configuration`).info();
+                continue;
             }
+            this.log(`Key system ${keySystem} supported`).info();
+            const keySystemConfig = this._settings.get(keySystem);
+
+            // Optionally, handle certificate loading if needed
+            if (keySystemConfig && typeof keySystemConfig !== 'string' && keySystemConfig.certificate) {
+                const certificateConfig = MediaKeysConfig.normalizeCertificate(keySystemConfig.certificate);
+                if (certificateConfig.url) {
+                    try {
+                        const response = await fetch(certificateConfig.url, {
+                            headers: certificateConfig.headers
+                        });
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+                        this._certificate = new Uint8Array(await response.arrayBuffer());
+                    } catch (err) {
+                        // another configured key system can still work: its error is reported only if none does
+                        const reason = err instanceof Error ? err.message : String(err);
+                        certificateError ??= new Error(
+                            `${keySystem} certificate not loaded from ${certificateConfig.url} (${reason})`
+                        );
+                        this.log(`${certificateError.message}, trying the next key system`).warn();
+                        continue;
+                    }
+                    this.log(`${keySystem} certificate received, size ${this._certificate.byteLength}`).info();
+                } else if (certificateConfig.data) {
+                    this.log(`${keySystem} certificate loaded from settings`).info();
+                    this._certificate = certificateConfig.data;
+                } else {
+                    this.log(`${keySystem} certificate settings ignored because neither url nor data is provided`).warn();
+                }
+            }
+
+            this._keySystem = keySystem;
+            this._keySystemConfig = keySystemConfig;
+            return keySystemAccess;
         }
-        throw new Error('No supported key system found');
+        throw certificateError ?? new Error('No supported key system found');
     }
 
     private _setupMediaKeys(): Promise<unknown> {
@@ -324,12 +338,27 @@ export class MediaKeysEngine extends MediaKeysConfig {
                             resolve();
                             return;
                         }
-                        if (this._certificate) {
-                            createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>);
-                        }
+                        // the certificate is set before the MediaKeys are attached, and its refusal reported
+                        const certificateSet = this._certificate
+                            ? createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>).then(
+                                  supported => {
+                                      if (!supported) {
+                                          this.log(`${this._keySystem} doesn't use a server certificate, ignored`).warn();
+                                      }
+                                  },
+                                  (error: unknown) => {
+                                      // some CDMs refuse with NotSupportedError instead of resolving false
+                                      if ((error as DOMException)?.name === 'NotSupportedError') {
+                                          this.log(`${this._keySystem} doesn't use a server certificate, ignored`).warn();
+                                          return;
+                                      }
+                                      throw new Error(`${this._keySystem} certificate refused (${error})`);
+                                  }
+                              )
+                            : Promise.resolve();
                         // returned: the setup is still in progress until the attach has ended, a stop() must wait for it
-                        return this._video
-                            .setMediaKeys(createdMediaKeys)
+                        return certificateSet
+                            .then(() => this._video.setMediaKeys(createdMediaKeys))
                             .then(() => {
                                 if (this._stopping || !this._isStarted) {
                                     this._video
@@ -367,9 +396,15 @@ export class MediaKeysEngine extends MediaKeysConfig {
         if (!this._video.mediaKeys) {
             try {
                 await this._setupMediaKeys();
-            } catch (_) {
+            } catch (error) {
                 if (!this._stopping) {
-                    this.onError({ type: 'MediaKeysEngineError', name: 'MediaKeys issue', detail: 'MediaKeys not supported' });
+                    // the cause: no supported key system, a certificate, a timeout
+                    const reason = error instanceof Error ? error.message : String(error);
+                    this.onError({
+                        type: 'MediaKeysEngineError',
+                        name: 'MediaKeys issue',
+                        detail: `MediaKeys setup failed: ${reason}`
+                    });
                 }
                 return;
             }
