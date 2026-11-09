@@ -945,6 +945,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 // Start the MediaKeys engine if metadata contains contentProtection and MediaKeysEngine parameters are provided
                 if (metadata.contentProtection.size > 0) {
                     if (params.contentProtection) {
+                        if (!this._mediaKeysEngine && this._video.mediaKeys) {
+                            // a previous release that timed out is still running
+                            this.stop({
+                                type: 'MediaKeysEngineError',
+                                name: 'MediaKeys issue',
+                                detail: 'MediaKeys of the previous playback not released yet from the video element'
+                            });
+                            return;
+                        }
                         if (!this._mediaKeysEngine) {
                             this._mediaKeysEngine = new MediaKeysEngine(this._video);
                             this._mediaKeysEngine.onMediaKeys = () => {
@@ -1247,10 +1256,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const mediaKeysEngine = this._mediaKeysEngine;
             mediaKeysEngine.onMediaKeys = Util.EMPTY_FUNCTION;
             mediaKeysEngine.onError = Util.EMPTY_FUNCTION;
-            const stopping = mediaKeysEngine.stop();
+            // a failed release must not hold every later start()
+            const stopping = mediaKeysEngine
+                .stop()
+                .catch(error => this.log('MediaKeys not released, the next DRM playback can fail until they are', error).warn());
             this._mediaKeysStopping = stopping;
             stopping.then(() => {
-                // Reset mediaKeysEngine only when the MediaKeys have been released
+                // Reset mediaKeysEngine once the release ended, released or not
                 if (this._mediaKeysEngine === mediaKeysEngine) {
                     this._mediaKeysEngine = undefined;
                     this.onMediaKeys();
