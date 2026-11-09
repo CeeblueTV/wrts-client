@@ -1030,6 +1030,10 @@ export abstract class Source extends EventEmitter implements ICMCD {
                 delete cmcd.ot;
                 delete cmcd.st;
             }
+            // Session ID set by the application, in both payloads
+            if (this._cmcdSid) {
+                cmcd.sid = this._cmcdSid;
+            }
             // Mode
             if (this.cmcdMode === CMCDMode.QUERY) {
                 url.searchParams.set('cmcd', CML.encodeCmcd(cmcd));
