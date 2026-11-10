@@ -592,6 +592,22 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
+     * How long a paused player keeps downloading the live stream, in milliseconds, before it holds the downloads; a
+     * resume after that rejoins the live edge instead of playing on from the pause. 0 (default): hold at once,
+     * Infinity: never hold. A delay over the browser timer's limit (2^31-1 ms, about 24.8 days) holds at that limit
+     */
+    get pauseHoldDelay(): number {
+        return this._pauseHoldDelay;
+    }
+
+    /**
+     * Set how long a paused player keeps downloading before it holds the downloads, in milliseconds
+     */
+    set pauseHoldDelay(value: number) {
+        this._pauseHoldDelay = value >= 0 ? value : 0; // NaN as 0
+    }
+
+    /**
      * Returns true if player is paused
      */
     get paused(): boolean {
@@ -599,7 +615,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Enable or disable player's pause
+     * Enable or disable player's pause. A pause holds the downloads after {@link pauseHoldDelay} (at once by default),
+     * so a live stream isn't downloaded while nobody watches it; a resume then rejoins the live edge
      */
     set paused(value: boolean) {
         if (!this.running) {
@@ -616,11 +633,33 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 this._waitStarting();
             }
             this._video.pause();
+            if (!wasPaused) {
+                clearTimeout(this._pauseHold);
+                const delay = this._pauseHoldDelay;
+                if (!delay) {
+                    this._holdDownloads();
+                } else if (delay !== Infinity) {
+                    // a timer longer than 2^31-1 ms would fire at once
+                    this._pauseHold = setTimeout(() => this._holdDownloads(), Math.min(delay, 0x7fffffff));
+                }
+            }
         } else {
+            clearTimeout(this._pauseHold);
+            this._pauseHold = undefined;
+            this._holdOnSource = false;
             if (wasPaused) {
                 // Restart buffer learning after an intentional pause.
                 this._bufferMeasure = new BufferMeasure();
                 this._bufferLimitHighAuto?.rearm();
+            }
+            if (this._downloadsHeld) {
+                if (this._source?.held) {
+                    this._rejoinLive();
+                    return;
+                }
+                // a request was still in flight: the downloads never stopped, play on from the pause
+                this._downloadsHeld = false;
+                this._source?.hold(false);
             }
             this._tryToPlay();
         }
@@ -759,6 +798,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _buffering: boolean;
     private _maximumResolution?: Media.Resolution | null;
     private _paused: boolean;
+    private _pauseHoldDelay: number = 0;
+    private _pauseHold?: ReturnType<typeof setTimeout>; // holds the downloads of a paused player
+    private _downloadsHeld: boolean = false; // paused with a hold asked: the resume rejoins the live edge once held
+    private _holdOnSource: boolean = false; // a hold due before the source existed, asked once it does
     private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;
     private _mediaKeysStopping?: Promise<unknown>;
@@ -924,6 +967,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const protocol = params.endPoint.substring(0, params.endPoint.indexOf('://'));
             this._source = new (this.SourceClass || Source.getClass(protocol) || HTTPAdaptiveSource)(this, params);
             this._source.log = this.log.bind(this, this._source?.name + ':') as ILog;
+            if (this._holdOnSource) {
+                this._holdOnSource = false;
+                this._holdDownloads();
+            }
             this._source.onTrackChange = (audioTrack: number, videoTrack: number, dataTrack: Set<number>) => {
                 if (!this._playback) {
                     return;
@@ -1282,6 +1329,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._passthroughCMAF = undefined;
         this._buffering = false;
         this._paused = false;
+        clearTimeout(this._pauseHold);
+        this._pauseHold = undefined;
+        this._downloadsHeld = false;
+        this._holdOnSource = false;
         this._source = undefined;
         this._mediaSource = undefined;
         this._playback = undefined;
@@ -1412,6 +1463,42 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.log(`Decrease bufferLimitHigh from ${this._bufferLimitHigh} to ${highLimit}ms`).info();
         }
         this._setBufferLimitHigh(highLimit);
+    }
+
+    // Stop downloading the live stream while nothing plays, no data timeout while nothing is asked for
+    private _holdDownloads() {
+        if (!this._paused || !this._timeout) {
+            return;
+        }
+        if (!this._source) {
+            this._holdOnSource = true; // paused before the source exists
+            return;
+        }
+        if (!this._source.canHold) {
+            return; // keeps downloading, the resume plays on from the pause
+        }
+        this.log('Downloads held, the resume rejoins the live edge').info();
+        this._downloadsHeld = true;
+        clearTimeout(this._timeout.id);
+        this._source.hold(true);
+    }
+
+    // Resume after held downloads: the media buffered before is stale, so drop it, let the source fetch the live edge
+    // again and wait for it like at a start; play() runs now, within the gesture that resumed
+    private _rejoinLive() {
+        this._downloadsHeld = false;
+        if (this._playback) {
+            this._playback.startTime = this._playback.endTime;
+        }
+        this._source?.hold(false);
+        this._buffering = false;
+        this._tryToPlay();
+        this._buffering = true;
+        this._setBufferState(BufferState.NONE); // like at a start: no ABR decision on the empty buffer
+        if (this._timeout) {
+            clearTimeout(this._timeout.id);
+            this._timeout.id = setTimeout(() => this.stop({ type: 'PlayerError', name: 'Data timeout' }), this._timeout.value);
+        }
     }
 
     private _setBufferState(state: BufferState) {
