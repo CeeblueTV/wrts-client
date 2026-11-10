@@ -195,6 +195,50 @@ export abstract class Source extends EventEmitter implements ICMCD {
     get closed(): boolean {
         return this._closed;
     }
+
+    /**
+     * True when this source can hold its downloads, see {@link hold}; false by default
+     */
+    get canHold(): boolean {
+        return false;
+    }
+
+    /**
+     * True once the downloads have stopped on a hold, until its release: a hold asked while a request is still in
+     * flight is not held yet, see {@link hold}
+     */
+    get held(): boolean {
+        return this._held?.waiting === true;
+    }
+
+    /**
+     * Asks to hold the downloads once the requests in flight end, or releases them. A source that cannot hold
+     * ({@link canHold} false) ignores it and keeps downloading; {@link HTTPAdaptiveSource} rejoins the live edge on
+     * release
+     */
+    hold(value: boolean) {
+        if (value) {
+            if (!this._held && !this._closed && this.canHold) {
+                let release!: () => void;
+                const promise = new Promise<void>(resolve => (release = resolve));
+                this._held = { promise, release, waiting: false };
+            }
+        } else if (this._held) {
+            this._held.release();
+            this._held = undefined;
+        }
+    }
+
+    /**
+     * For a source that can hold, where its downloads stop: undefined when no hold is asked, else marks the downloads
+     * {@link held} and resolves on the release (or on close)
+     */
+    protected waitHold(): Promise<void> | undefined {
+        if (this._held) {
+            this._held.waiting = true;
+        }
+        return this._held?.promise;
+    }
     /**
      * Stream name, for example `as+bc3f535f-37f3-458b-8171-b4c5e77a6137`
      */
@@ -446,6 +490,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
     private _streamName: string;
     private _metadata?: Metadata;
     private _closed: boolean;
+    private _held?: { promise: Promise<void>; release: () => void; waiting: boolean }; // a hold until released, see hold()
     private _tracks: Media.Tracks; // effective tracks
     private _selectedTracks: Media.Tracks; // tracks selected by the user
     private _requestedTracks: Media.Tracks; // tracks requested
@@ -514,6 +559,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
             return;
         }
         this._closed = true;
+        this.hold(false); // a loop waiting on the hold sees the close
         clearTimeout(this._trackRequest);
         if (error && error.type === 'SourceError' && 'detail' in error) {
             // WIP MF fix = >morph a possible request error to a stream unavailable
