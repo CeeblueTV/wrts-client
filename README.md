@@ -138,7 +138,7 @@ player.start({
 });
 ```
 
-At runtime the player negotiates the most-preferred key system supported by the current browser.
+At runtime the player tries the key systems in the order of the `contentProtection` keys and uses the first one the current browser supports.
 
 > [!TIP]
 > The [MediaKeysEngine](./src/media/keys/MediaKeysEngine.ts) can also be used standalone (outside of `Player`), for example to drive EME from another player.
@@ -256,9 +256,10 @@ log.level = false; // suppresses all log output, the opposite `true` value displ
 
 WebRTS integrates support for [CMCD (Common Media Client Data)] to provide real-time client-side metrics to the server. These metrics help monitor and enhance the viewer's experience by reporting playback quality, buffer status, bitrate adaptation, and other key data points. By leveraging CMCD, WebRTS enables more efficient server-side decision-making for network management, content delivery optimization, and improved end-user quality of service.
 
-By default CMCD is disabled, but you can enable it by setting the `cmcd` property in the [Player](./src/Player.ts) object. The following properties are available for customization:
+By default CMCD is disabled, but you can enable it by setting the `cmcd` property in the [Player](./src/Player.ts) object. These properties belong to the running stream: set them in `onStart`, which fires on every start (setting them on a stopped player throws). The following properties are available for customization:
 
 ```javascript
+player.onStart = () => {
    // Set the level of CMCD data to be sent:
    // 'full' sends all available keys, 'short' sends only the necessary keys, 'none' disables CMCD
    player.cmcd = CMCD.NONE;
@@ -269,6 +270,7 @@ By default CMCD is disabled, but you can enable it by setting the `cmcd` propert
 
    // Specify a unique session ID for tracking the client session
    player.cmcdSid = 'client-session-id';
+};
 ```
 
 > [!TIP]

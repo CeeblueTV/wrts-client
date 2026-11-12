@@ -18,19 +18,22 @@ enum CustomType {
  * RTSReader to unserialize RTS container
  *
  * Format:
- * MEDIA PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type](7bit firstTime)[7bit duration << 2 | hasCompositionOffset<<1 | isKeyFrame](7bit compositionOffset) [frame] --
- * DATA  PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type][7bit time] [frame] --
+ * ```text
+ * MEDIA PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type](7bit firstTime)[7bit duration << 2 | hasCompositionOffset<<1 | isKeyFrame](7bit compositionOffset) [custom] [frame] --
+ * DATA  PACKET -- (7bit packetSize)[7bit trackId+1 << 2 | type][7bit timeDelta][7bit duration] [custom] [frame] --
  * INIT TRACKS  -- (7bit packetSize)[7bit 0 << 2 | 3]  (7bit audioTrackId+1)(7bit videoTrackId+1)--
  * METADATA -- (7bit packetSize)[7bit 0 << 2 | 0] [meta] --
  *
  * packetSize => optional packet size
  * trackId => track id
  * type = [0, 1, 2, 3] = [Data, Audio, Video, Reserved]
- * firstTime => timestamp only the first time per track after a INIT TRACKS signal
- * time => data time
- * compositionOffset => composition offset
+ * firstTime => timestamp, only when the reader has no time for the track yet: its first packet, or after INIT TRACKS
+ * timeDelta => data time, relative to the previous data time of the track (absolute for the first one)
+ * compositionOffset => composition offset, a signed 16-bit value
+ * custom => [7bit size][7bit customType][value] fields, the size covering type and value, ended by a 0 size
  * frame => binary frame payload
  * meta => JSON metadata payload
+ * ```
  */
 export class RTSReader extends Reader {
     private _nextTimes: Map<number, number>; // <trackId,time>
@@ -51,7 +54,8 @@ export class RTSReader extends Reader {
             if (this._params.withSize) {
                 const available = size;
                 size = reader.read7Bit();
-                if (reader.available() < size) {
+                if (!size || reader.available() < size) {
+                    // a size of 0 means it was cut by the end of the chunk, a frame always has its type byte
                     return available;
                 }
             } // else Is a frame protocol like WebSocket!

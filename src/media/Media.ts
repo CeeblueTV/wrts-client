@@ -99,12 +99,17 @@ export function screenResolution(): Resolution | undefined {
     if (typeof window === 'undefined' || !window.screen) {
         return;
     }
-    const ratio = window.devicePixelRatio || 1;
+    // Clamp to 1 so a page zoom-out (which lowers devicePixelRatio in Chromium) never caps below the screen size
+    const ratio = Math.max(window.devicePixelRatio || 1, 1);
     let height = ratio * window.screen.height;
     let width = ratio * window.screen.width;
     if (height > width) {
         // smartphone, switch to compute max fullscreen ability (height becomes width)
         [width, height] = [height, width];
+    }
+    if (width <= 0 || height <= 0) {
+        // screen not attached or not measurable (jsdom, detached webview), no resolution available
+        return;
     }
     return { width, height };
 }
@@ -115,6 +120,6 @@ export function screenResolution(): Resolution | undefined {
  * @param screen
  * @returns
  */
-export function overScreenSize(resolution: Resolution, screen?: Resolution) {
+export function overScreenSize(resolution: Resolution, screen?: Resolution | null) {
     return screen && resolution.height > screen.height && resolution.width > screen.width;
 }

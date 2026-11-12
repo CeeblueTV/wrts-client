@@ -3,5 +3,11 @@
     "cleanOutputDir": true,
     "validation": {
         "notExported": false
+    },
+    "externalSymbolLinkMappings": {
+        "typescript": {
+            "HTMLVideoElement": "https://developer.mozilla.org/docs/Web/API/HTMLVideoElement",
+            "MediaKeySystemConfiguration": "https://developer.mozilla.org/docs/Web/API/MediaKeySystemConfiguration"
+        }
     }
 }
