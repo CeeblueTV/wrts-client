@@ -129,6 +129,15 @@ export class AudioPlayback extends Loggable {
                 this.onError({ type: 'MediaBufferError', name: 'Track without metadata', track: trackId });
                 return;
             }
+            if (track.contentProtection) {
+                // Only a media element can decrypt it, never give protected samples to a decoder: it would play noise
+                this.onError({
+                    type: 'AudioPlaybackError',
+                    name: 'Audio decoder error',
+                    detail: `Audio track ${trackId} is protected, it can only be played by the video element`
+                });
+                return;
+            }
             this._trackId = trackId;
             // The decoder is reconfigured once the samples of the previous track are decoded
             this._queue.push(track);

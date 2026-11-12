@@ -119,6 +119,7 @@ if (!gesture) {
  */
 class FileSource extends Source {
     static hold = 0; // ms, simulate a network freeze: nothing delivered during this time, then a burst
+    static protectAudio = false; // announce the audio track as protected in the metadata
     static dropAudio = 0; // ms of audio to lose, to create a hole in the audio timeline
     constructor(playing, params) {
         super(playing, 'http', params, Connect.Type.DIRECT_STREAMING);
@@ -139,6 +140,10 @@ class FileSource extends Source {
         for (const track of tracks) {
             track._id += 1;
             metadata.tracks.set(track.id, track);
+            if (FileSource.protectAudio && track.type === lib.Media.Type.AUDIO) {
+                // announce the audio track as protected (its samples stay clear, only the choice of the engine is tested)
+                track.contentProtection = 'test';
+            }
         }
         await super.readMetadata(metadata);
         if (this.closed) {
@@ -219,10 +224,12 @@ window.e2e = {
         low,
         high,
         reliable = false,
-        reactive = false
+        reactive = false,
+        protectAudio = false
     }) {
         Player.audioEngines = engines;
         FileSource.file = file;
+        FileSource.protectAudio = protectAudio;
         video.muted = muted;
         stopError = undefined;
         stalls = 0;

@@ -165,6 +165,20 @@ await scenario('mse legacy AAC 48k + H264', {}, async t => {
     await healthy(t, 'mse', 'mse', { audible: false });
 });
 
+// A protected audio track can only be decrypted by a media element: never decoded by WebCodecs or WebAssembly
+await scenario('protected audio track', {}, async t => {
+    const before = requests.length;
+    await t.start({ file: 'media/av-aac48.mp4', protectAudio: true });
+    await healthy(t, 'protected', 'mse', { audible: false });
+    const logs = await t.logs();
+    check(
+        'protected: audio is given to the video element, no decoder is created',
+        !logs.some(l => /decoded with|Audio rendering started/.test(l)) &&
+            !requests.slice(before).some(r => r.includes('decoder')),
+        logs.filter(l => /decoded with|Audio rendering|AudioBuffer/.test(l))
+    );
+});
+
 await scenario('webcodecs AAC 44.1k + B-frames (resampling)', {}, async t => {
     await t.start({ file: 'media/av-aac44-bframes.mp4' });
     await healthy(t, 'aac44', 'webcodecs');
