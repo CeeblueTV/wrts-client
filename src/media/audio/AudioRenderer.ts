@@ -114,12 +114,16 @@ export class AudioRenderer extends Loggable {
     }
 
     /**
-     * True if the browser is able to render audio with an audio worklet
+     * True if the browser is able to render audio with an audio worklet,
+     * what requires a secure context: a page served in HTTPS, or from localhost
      */
     static get supported(): boolean {
         return (
             typeof AudioContext !== 'undefined' &&
             typeof AudioWorkletNode !== 'undefined' &&
+            // Out of a secure context browsers expose AudioWorkletNode, but not the audio worklet to run it
+            typeof AudioWorklet !== 'undefined' &&
+            'audioWorklet' in AudioContext.prototype &&
             typeof Blob !== 'undefined' &&
             typeof URL !== 'undefined' &&
             typeof URL.createObjectURL === 'function'

@@ -146,6 +146,7 @@ Things to know when audio is rendered outside of the `<video>` element:
 - **Volume and mute**: the player follows the `volume` and `muted` properties of the `<video>` element, keep using them. The native controls of the `<video>` element can hide their volume button because the element has no audio track, prefer your own controls.
 - **Autoplay**: browsers allow sound to start only after a user gesture. Call `player.start()` from the handler of a user gesture, or start with a muted `<video>` element: the stream then plays silently, and the sound starts on the first user gesture which unmutes it. Like before, starting an unmuted playback without user gesture stops the player with a `Video play error`.
 - **Remote playback and capture**: AirPlay, Chromecast or `captureStream()` on the `<video>` element get the video without its sound, remote playback is therefore disabled on the element.
+- **Secure context**: browsers expose WebCodecs and audio worklets only to a page served in HTTPS, or from `localhost`. On a page served in HTTP audio is played by the `<video>` element.
 - **Deployment**: when the library is not bundled, keep `wrts-client.decoder.js` beside the library file. A Content Security Policy must allow `blob:` in `script-src` for the audio worklet, and `'wasm-unsafe-eval'` for the WebAssembly decoder.
 
 [Web Audio API]: https://developer.mozilla.org/docs/Web/API/Web_Audio_API
@@ -210,7 +211,7 @@ To help you get started, we provide the following examples:
 >```
 >npx http-server . -p 8081
 >```
-> You can then access the examples at http://localhost:8081/examples/player.html.
+> You can then access the examples at http://localhost:8081/examples/player.html. Use `localhost` or HTTPS: from another host in HTTP the page is not in a secure context, and [audio is played by the `<video>` element](#audio-rendering).
 
 
 ## Building locally

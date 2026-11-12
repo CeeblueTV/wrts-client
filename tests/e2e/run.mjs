@@ -9,6 +9,7 @@
 // Run it with tests/e2e/run.sh, see tests/README.md
 
 import { createServer } from 'node:http';
+import { networkInterfaces } from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
@@ -40,6 +41,11 @@ const server = createServer(async (req, res) => {
     }
 }).listen(0);
 const origin = 'http://localhost:' + server.address().port;
+// Same server through its network address: in HTTP out of localhost, the page is not in a secure context
+const address = Object.values(networkInterfaces())
+    .flat()
+    .find(network => network.family === 'IPv4' && !network.internal)?.address;
+const insecureOrigin = address && `http://${address}:${server.address().port}`;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const only = process.argv[2];
 const results = [];
@@ -48,7 +54,7 @@ const check = (name, ok, detail) => {
     console.log((ok ? '  PASS ' : '  FAIL ') + name + (detail !== undefined ? ' ' + JSON.stringify(detail) : ''));
 };
 
-async function scenario(name, { blocked = false, verbose = false } = {}, body) {
+async function scenario(name, { blocked = false, insecure = false, verbose = false } = {}, body) {
     if (only && !name.includes(only)) {
         return;
     }
@@ -61,7 +67,7 @@ async function scenario(name, { blocked = false, verbose = false } = {}, body) {
             console.log('  CONSOLE', m.text());
         }
     });
-    await page.goto(origin + '/page.html' + (blocked ? '?blocked=' + blocked : ''));
+    await page.goto((insecure ? insecureOrigin : origin) + '/page.html' + (blocked ? '?blocked=' + blocked : ''));
     await page.waitForFunction(() => window.e2eReady);
     const api = {
         page,
@@ -545,6 +551,25 @@ await scenario('no false playback constraint', {}, async t => {
         samples.find(s => s.constraint)?.constraint
     );
 });
+
+if (insecureOrigin) {
+    await scenario('insecure context', { insecure: true }, async t => {
+        const before = requests.length;
+        await t.start({ file: 'media/av-aac48.mp4' });
+        const secure = await t.eval(() => window.isSecureContext);
+        const samples = await healthy(t, 'insecure', 'mse', { audible: false });
+        const logs = await t.logs();
+        check(
+            'insecure: audio falls back on the video element, without error nor decoder download',
+            !secure &&
+                samples[samples.length - 1].context === undefined &&
+                logs.some(l => /^warn .*secure context/.test(l)) &&
+                !logs.some(l => /^error|worklet loading failed/i.test(l)) &&
+                !requests.slice(before).some(r => r.includes('decoder')),
+            { secure, logs: logs.filter(l => /^(warn|error)/.test(l) && !/liveTime|skips/.test(l)) }
+        );
+    });
+}
 
 await scenario('restart', {}, async t => {
     for (let i = 0; i < 3; ++i) {

@@ -4,6 +4,7 @@
  * See file LICENSE or go to https://spdx.org/licenses/AGPL-3.0-or-later.html for full license details.
  */
 
+import { log } from '@ceeblue/web-utils';
 import { MediaTrack } from '../MediaTrack';
 import { AudioEngine, PCMDecoder } from './PCMDecoder';
 import { AudioRenderer } from './AudioRenderer';
@@ -11,6 +12,7 @@ import { WasmDecoder } from './WasmDecoder';
 import { WebCodecsDecoder } from './WebCodecsDecoder';
 
 let _engines = [AudioEngine.WEBCODECS, AudioEngine.WASM, AudioEngine.MSE];
+let _warned = false; // rendering unavailable already signaled
 
 /**
  * Get the audio engines usable to play audio, by order of preference.
@@ -40,6 +42,19 @@ export function setAudioEngines(engines?: AudioEngine[]) {
 async function supports(engine: AudioEngine, track: MediaTrack): Promise<boolean> {
     if (track.contentProtection) {
         return false; // only a media element can decrypt it
+    }
+    if (!AudioRenderer.supported) {
+        if (!_warned) {
+            _warned = true;
+            const insecure = typeof isSecureContext !== 'undefined' && !isSecureContext;
+            log(
+                'Audio is played by the video element,',
+                insecure
+                    ? 'the page is not in a secure context (HTTPS or localhost) what browsers require to decode and render audio with WebCodecs and audio worklets'
+                    : 'the browser has no audio worklet to render it'
+            ).warn();
+        }
+        return false;
     }
     switch (engine) {
         case AudioEngine.WEBCODECS:
