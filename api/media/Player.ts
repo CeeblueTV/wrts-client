@@ -35,8 +35,10 @@ const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high:
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
 const PLAYBACK_CONSTRAINT_THRESHOLD = 0.05; // 5%
 
-let _maximumResolution: Media.Resolution | undefined;
-root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution()));
+// Default screen limit, initialized with the current screen resolution then refreshed on resize.
+// null means that the screen resolution cannot be determined, so no resolution limit can be applied.
+let _maximumResolution = Media.screenResolution() ?? null;
+root.addEventListener('resize', () => (_maximumResolution = Media.screenResolution() ?? null));
 
 export type PlayerError =
     /**
@@ -88,7 +90,7 @@ export type PlayerError =
  * Use Player to start playing a WebRTS stream.
  *
  * You can implement and use a custom {@link Source} by passing it as the second argument in the constructor.
- * If not provided, {@link Player.start} will attempt to determine the protocol from {@link Connect.Params.endPoint}
+ * If not provided, {@link Player.start} will attempt to determine the protocol from {@link Connect.Params | Connect.Params.endPoint}
  * to instantiate the corresponding {@link Source.registerClass} or fall back to the default {@link HTTPAdaptiveSource}.
  *
  * You can initialize tracks selection by playing with {@link onMetadata}
@@ -232,7 +234,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     onVideoAppended(data: Uint8Array) {}
 
     /**
-     * Event fired when the buffer amount changes by at least `BUFFER_CHANGE_STEP` milliseconds.
+     * Event fired once when the starting phase ends, then when the buffer amount changes by at least
+     * `BUFFER_CHANGE_STEP` milliseconds or when the {@link bufferState} changes. Not fired during the starting phase.
      *
      * The default implementation calls {@link adjustPlaybackRate}.
      * Override this event without calling {@link adjustPlaybackRate} to disable that automatic playback-rate adjustment.
@@ -244,11 +247,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Event fired when MediaKeys state changes if contentProtection is found in the metadata
+     * Event fired with the {@link MediaKeysEngine} once its MediaKeys are attached to the video element, and without
+     * argument once their release has ended, successfully or not, if contentProtection is found in the metadata
      *
      * MediaKeys support can be disabled by setting no contentProtection in the player parameters
      *
-     * @param mediaKeysEngine The MediaKeys engine instance when ready, undefined when released
+     * @param mediaKeysEngine The MediaKeys engine instance when ready, undefined once the release has ended
      * @event
      */
     onMediaKeys(mediaKeysEngine?: MediaKeysEngine) {}
@@ -387,7 +391,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Set the high-buffer threshold for {@link BufferState.HIGH} in milliseconds
      *
      * If set to undefined, the buffer limit will be automatically computed based
-     * on the low-buffer threshold and the network conditions.
+     * on the low-buffer threshold and the buffer variations observed during playback.
      * It's the default behavior.
      */
     set bufferLimitHigh(value: number | undefined) {
@@ -433,6 +437,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     get endTime(): number {
         return this._playback ? this._playback.endTime : 0;
+    }
+
+    /**
+     * Gets the live playback position in seconds, where {@link goLive} moves the playback head
+     */
+    get liveTarget(): number {
+        // The middle buffer position to avoid MBR change, and in a valid range superior or equals to startTime
+        return Math.max(
+            this.startTime,
+            this.endTime - Math.max(this._bufferLimitLow, this._bufferLimitMiddle - BUFFER_SEEK_MARGIN) / 1000
+        );
     }
 
     /**
@@ -575,15 +590,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * @override
      * {@inheritDoc IPlaying.maximumResolution}
      */
-    get maximumResolution(): Media.Resolution | undefined {
-        return this._maximumResolution ?? _maximumResolution;
+    get maximumResolution(): Media.Resolution | null {
+        return this._maximumResolution === undefined ? _maximumResolution : this._maximumResolution;
     }
 
     /**
-     * Set maximum resolution that the MBR algo can reach, undefined means no limit.
-     * Defaults to the value of {@link Media.screenResolution}
+     * Set maximum resolution that the MBR algo can reach:
+     * - a Resolution applies an explicit limit;
+     * - undefined restores the default screen limit, see {@link Media.screenResolution};
+     * - null disables the resolution limit.
      */
-    set maximumResolution(value: Media.Resolution | undefined) {
+    set maximumResolution(value: Media.Resolution | null | undefined) {
         this._maximumResolution = value;
     }
 
@@ -753,7 +770,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _bufferState: BufferState;
     private _controller: AbortController;
     private _buffering: boolean;
-    private _maximumResolution?: Media.Resolution;
+    private _maximumResolution?: Media.Resolution | null;
     private _paused: boolean;
     private _starting: number = Number.MIN_VALUE;
     private _mediaKeysEngine?: MediaKeysEngine;
@@ -774,13 +791,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      *
      * @param video HTMLVideoElement object to render the video
      * @param SourceClass Optional Source logic to use, by default it uses {@link HTTPAdaptiveSource}
-     * unless {@link Connect.Params.endPoint} begin with ws:// see {@link Player.start}
+     * unless {@link Connect.Params | Connect.Params.endPoint} begin with ws:// see {@link Player.start}
      * @example
      * // Default build
      * const player = new Player(video);
      *
      * // Build with custom source implementation
-     * const player = new Player(MySource);
+     * const player = new Player(video, MySource);
      */
     constructor(
         video: HTMLVideoElement,
@@ -797,7 +814,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._bufferLimitLow = BUFFER_LIMIT_LOW;
         this._bufferLimitHigh = BUFFER_LIMIT_HIGH;
         this.bufferLimitHigh = undefined; // init automatic mode
-        // Set buffer as OK at the beginning when not playing to ignore congestion network algo
+        // No buffer state while not playing, to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
         this._previousBufferAmount = 0;
@@ -805,19 +822,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Moves the playback head as close as possible to the live point,
-     * while respecting the configured {@link bufferLimitLow} and {@link bufferLimitHigh} buffer thresholds.
+     * while keeping the buffer between the configured {@link bufferLimitLow} and {@link bufferLimitMiddle} thresholds.
      * @param reason add a log reason to display to explain this goLive call
      */
     goLive(reason?: string) {
         if (!this.running) {
             throw Error('Cannot goLive on stopped player');
         }
-        // Go to the middle buffer position to avoid MBR change, and in a valid range superior or equals to startTime
         const prevCurrentTime = this._video.currentTime;
-        const currentTime = (this._video.currentTime = Math.max(
-            this.startTime,
-            this.endTime - Math.max(this._bufferLimitLow, this._bufferLimitMiddle - BUFFER_SEEK_MARGIN) / 1000
-        ));
+        const currentTime = (this._video.currentTime = this.liveTarget);
         if (prevCurrentTime !== currentTime) {
             // After the seek, give the value
             this._playbackPrevTime = currentTime;
@@ -831,8 +844,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * Starts playing the stream
      *
-     * If a MediaKeys engine is already running, it means that the previous playback has not been properly released,
-     * so the player stops and reports a {@link PlayerError} error to avoid unexpected behavior.
+     * If the MediaKeys of a previous playback are still being released, the start waits for that release.
      *
      * @param params Connection parameters {@link Connect.Params}
      * @param idleTimeout  idle timeout, default value is around 14s. It sets the timeout error in the absence of
@@ -941,6 +953,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 // Start the MediaKeys engine if metadata contains contentProtection and MediaKeysEngine parameters are provided
                 if (metadata.contentProtection.size > 0) {
                     if (params.contentProtection) {
+                        if (!this._mediaKeysEngine && this._video.mediaKeys) {
+                            // a previous release that timed out is still running
+                            this.stop({
+                                type: 'MediaKeysEngineError',
+                                name: 'MediaKeys issue',
+                                detail: 'MediaKeys of the previous playback not released yet from the video element'
+                            });
+                            return;
+                        }
                         if (!this._mediaKeysEngine) {
                             this._mediaKeysEngine = new MediaKeysEngine(this._video);
                             this._mediaKeysEngine.onMediaKeys = () => {
@@ -1018,7 +1039,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._buffering = true;
             // W3C specification says that the player has been stopped to wait data
             // In such case few browsers "Pause" player when waiting data and so
-            // require an explicit play => see _onProgress
+            // require an explicit play => see _tryToPlay
             this._video.pause();
             /// start data timeout
             clearTimeout(this._timeout.id);
@@ -1243,10 +1264,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             const mediaKeysEngine = this._mediaKeysEngine;
             mediaKeysEngine.onMediaKeys = Util.EMPTY_FUNCTION;
             mediaKeysEngine.onError = Util.EMPTY_FUNCTION;
-            const stopping = mediaKeysEngine.stop();
+            // a failed release must not hold every later start()
+            const stopping = mediaKeysEngine
+                .stop()
+                .catch(error => this.log('MediaKeys not released, the next DRM playback can fail until they are', error).warn());
             this._mediaKeysStopping = stopping;
             stopping.then(() => {
-                // Reset mediaKeysEngine only when the MediaKeys have been released
+                // Reset mediaKeysEngine once the release ended, released or not
                 if (this._mediaKeysEngine === mediaKeysEngine) {
                     this._mediaKeysEngine = undefined;
                     this.onMediaKeys();
