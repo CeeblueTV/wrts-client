@@ -350,11 +350,12 @@
                                                 v-model="drm.license" placeholder="https://...">
                                         </div>
 
-                                        <div class="drm-field" v-if="drm.id === 'fairplay'">
+                                        <div class="drm-field">
                                             <span class="lbl">Certificate URL</span>
                                             <input class="inp" type="text"
                                                 :disabled="!drm.enabled || isPlaying()"
-                                                v-model="drm.certificate" placeholder="https://...">
+                                                v-model="drm.certificate"
+                                                :placeholder="drm.id === 'fairplay' ? 'https://...' : 'optional, https://...'">
                                         </div>
 
                                         <div class="drm-field">
@@ -732,11 +733,11 @@
                     ]),
                     contentProtection: [
                         { id: 'widevine', label: 'Widevine', keySystem: 'com.widevine.alpha',
-                            enabled: true, license: '', headers: [],
+                            enabled: true, license: '', certificate: '', headers: [],
                             audioRobustness: 'HW_SECURE_CRYPTO,SW_SECURE_CRYPTO',
                             videoRobustness: 'HW_SECURE_DECODE,SW_SECURE_DECODE' },
                         { id: 'playready', label: 'PlayReady', keySystem: 'com.microsoft.playready',
-                            enabled: true, license: '', headers: [], audioRobustness: '', videoRobustness: '' },
+                            enabled: true, license: '', certificate: '', headers: [], audioRobustness: '', videoRobustness: '' },
                         { id: 'fairplay', label: 'FairPlay', keySystem: 'com.apple.fps.1_0',
                             enabled: true, license: '', certificate: '', headers: [], audioRobustness: '', videoRobustness: '' }
                     ],
@@ -1133,11 +1134,9 @@
                         const config = {
                             license: hasHeaders ? { url: license, headers } : license
                         };
-                        if (drm.id === 'fairplay') {
-                            const cert = drm.certificate.trim();
-                            if (cert) {
-                                config.certificate = cert;
-                            }
+                        const cert = drm.certificate.trim();
+                        if (cert) {
+                            config.certificate = cert;
                         }
                         if (hasRobustness) {
                             config.configurations = Connect.createMediaKeySystemConfigurations({
@@ -1186,7 +1185,7 @@
                         if (!drm.license) { continue; }
                         const entry = { id: drm.id, license: drm.license };
                         if (!drm.enabled) { entry.enabled = false; }
-                        if (drm.id === 'fairplay' && drm.certificate) { entry.certificate = drm.certificate; }
+                        if (drm.certificate) { entry.certificate = drm.certificate; }
                         const headers = drm.headers.filter(h => h.name);
                         if (headers.length) { entry.headers = headers; }
                         if (drm.audioRobustness) { entry.audioRobustness = drm.audioRobustness; }
@@ -1215,7 +1214,7 @@
                         if (!drm) { continue; }
                         if (entry.enabled === false) { drm.enabled = false; }
                         if (typeof entry.license === 'string') { drm.license = entry.license; }
-                        if (drm.id === 'fairplay' && typeof entry.certificate === 'string') { drm.certificate = entry.certificate; }
+                        if (typeof entry.certificate === 'string') { drm.certificate = entry.certificate; }
                         if (Array.isArray(entry.headers)) {
                             drm.headers = entry.headers
                                 .filter(h => h && typeof h.name === 'string')
