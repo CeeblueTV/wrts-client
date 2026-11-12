@@ -286,7 +286,7 @@ export class MediaBuffer extends Loggable {
         }
 
         // Add this._packets.length check in the condition to keep calm loading state
-        // In this case call onProgress every PROGRESS_TIMEOUT
+        // In this case call onUpdate every UPDATE_TIMEOUT
         if (this._packets.length) {
             const now = Util.time();
             if (!this._updateTimeout) {

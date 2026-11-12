@@ -57,7 +57,7 @@ export interface ICMCD {
     get cmcdSid(): string;
 
     /**
-     * Set the CMCD session ID,
+     * Set the CMCD session ID, up to 64 printable ASCII characters (another value clears it, with an error log),
      * if undefined reset to empty string
      */
     set cmcdSid(value: string | undefined);

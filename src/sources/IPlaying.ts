@@ -64,7 +64,8 @@ export interface IPlaying extends EventEmitter {
     onBufferState(oldState: BufferState): void;
 
     /**
-     * Event fire when buffer amount changes by a configured threshold
+     * Event fired once when the starting phase ends, then when the buffer amount changes by a fixed step or when the
+     * buffer state changes. Not fired during the starting phase
      * @event
      */
     onBufferChange(): void;

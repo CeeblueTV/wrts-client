@@ -137,14 +137,8 @@ export class HTTPAdaptiveSource extends Source {
         this._trackSeparator = mSequence.trackSeparator ?? '-';
         this._sequencePattern = mSequence.pattern.replace('{ext}', this.mediaExt);
 
-        // WIP backward compatibility, remove it
-        const version = metadata.protocolVersion.major;
-        if (version < 2) {
-            this._sequencePattern = this._sequencePattern.replace('{trackId}', '{trackIds}');
-        }
-
-        const sequenceId = Number(mSequence.current?.id ?? mSequence.currentId); // WIP remove old currentId
-        const sequenceFirstId = Number(mSequence.first?.id ?? mSequence.firstId ?? 0); // WIP remove old firstId
+        const sequenceId = Number(mSequence.current?.id);
+        const sequenceFirstId = Number(mSequence.first?.id ?? 0);
         if (isNaN(sequenceId)) {
             return this.close({
                 type: 'SourceError',
@@ -381,7 +375,7 @@ export class HTTPAdaptiveSource extends Source {
             // Create promises
             const promises = [];
             if (channels.reliable.size) {
-                if (version < 2 || !playing.tracksCombinable) {
+                if (!playing.tracksCombinable) {
                     for (const track of channels.reliable) {
                         promises.push(this._downloadSequence(playing, this._reliableController, track, sequence));
                     }
@@ -390,7 +384,7 @@ export class HTTPAdaptiveSource extends Source {
                 }
             }
             if (channels.cancelable.size) {
-                if (version < 2 || !playing.tracksCombinable) {
+                if (!playing.tracksCombinable) {
                     for (const track of channels.cancelable) {
                         promises.push(this._downloadSequence(playing, this._cancelableController, track, sequence));
                     }
@@ -399,7 +393,7 @@ export class HTTPAdaptiveSource extends Source {
                 }
             }
             if (channels.alterable.size) {
-                if (version < 2 || !playing.tracksCombinable) {
+                if (!playing.tracksCombinable) {
                     for (const track of channels.alterable) {
                         promises.push(this._downloadSequence(playing, this._alterableController, track, sequence));
                     }
@@ -513,7 +507,7 @@ export class HTTPAdaptiveSource extends Source {
      * Download one sequence, retry if can't download it until get it (at least that there is a unrecoverable issue).
      * If length is set it limits body of the request to this value by processing a byte-range request,
      * If length is set to 0 it sends a normal HEAD request
-     * @returns HTTP headers if was able to download at least it, null otherwise!
+     * @returns the response, or a synthetic one: 206 if partly downloaded, 408 if not downloaded, 400 if no track to download
      */
     private async _downloadSequence(
         playing: IPlaying,

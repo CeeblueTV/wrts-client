@@ -234,7 +234,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     onVideoAppended(data: Uint8Array) {}
 
     /**
-     * Event fired when the buffer amount changes by at least `BUFFER_CHANGE_STEP` milliseconds.
+     * Event fired once when the starting phase ends, then when the buffer amount changes by at least
+     * `BUFFER_CHANGE_STEP` milliseconds or when the {@link bufferState} changes. Not fired during the starting phase.
      *
      * The default implementation calls {@link adjustPlaybackRate}.
      * Override this event without calling {@link adjustPlaybackRate} to disable that automatic playback-rate adjustment.
@@ -246,11 +247,12 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     /**
-     * Event fired when MediaKeys state changes if contentProtection is found in the metadata
+     * Event fired with the {@link MediaKeysEngine} once its MediaKeys are attached to the video element, and without
+     * argument once their release has ended, successfully or not, if contentProtection is found in the metadata
      *
      * MediaKeys support can be disabled by setting no contentProtection in the player parameters
      *
-     * @param mediaKeysEngine The MediaKeys engine instance when ready, undefined when released
+     * @param mediaKeysEngine The MediaKeys engine instance when ready, undefined once the release has ended
      * @event
      */
     onMediaKeys(mediaKeysEngine?: MediaKeysEngine) {}
@@ -389,7 +391,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Set the high-buffer threshold for {@link BufferState.HIGH} in milliseconds
      *
      * If set to undefined, the buffer limit will be automatically computed based
-     * on the low-buffer threshold and the network conditions.
+     * on the low-buffer threshold and the buffer variations observed during playback.
      * It's the default behavior.
      */
     set bufferLimitHigh(value: number | undefined) {
@@ -435,6 +437,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      */
     get endTime(): number {
         return this._playback ? this._playback.endTime : 0;
+    }
+
+    /**
+     * Gets the live playback position in seconds, where {@link goLive} moves the playback head
+     */
+    get liveTarget(): number {
+        // The middle buffer position to avoid MBR change, and in a valid range superior or equals to startTime
+        return Math.max(
+            this.startTime,
+            this.endTime - Math.max(this._bufferLimitLow, this._bufferLimitMiddle - BUFFER_SEEK_MARGIN) / 1000
+        );
     }
 
     /**
@@ -784,7 +797,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * const player = new Player(video);
      *
      * // Build with custom source implementation
-     * const player = new Player(MySource);
+     * const player = new Player(video, MySource);
      */
     constructor(
         video: HTMLVideoElement,
@@ -801,7 +814,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._bufferLimitLow = BUFFER_LIMIT_LOW;
         this._bufferLimitHigh = BUFFER_LIMIT_HIGH;
         this.bufferLimitHigh = undefined; // init automatic mode
-        // Set buffer as OK at the beginning when not playing to ignore congestion network algo
+        // No buffer state while not playing, to ignore congestion network algo
         this._bufferState = BufferState.NONE;
         this._controller = new AbortController();
         this._previousBufferAmount = 0;
@@ -809,19 +822,15 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Moves the playback head as close as possible to the live point,
-     * while respecting the configured {@link bufferLimitLow} and {@link bufferLimitHigh} buffer thresholds.
+     * while keeping the buffer between the configured {@link bufferLimitLow} and {@link bufferLimitMiddle} thresholds.
      * @param reason add a log reason to display to explain this goLive call
      */
     goLive(reason?: string) {
         if (!this.running) {
             throw Error('Cannot goLive on stopped player');
         }
-        // Go to the middle buffer position to avoid MBR change, and in a valid range superior or equals to startTime
         const prevCurrentTime = this._video.currentTime;
-        const currentTime = (this._video.currentTime = Math.max(
-            this.startTime,
-            this.endTime - Math.max(this._bufferLimitLow, this._bufferLimitMiddle - BUFFER_SEEK_MARGIN) / 1000
-        ));
+        const currentTime = (this._video.currentTime = this.liveTarget);
         if (prevCurrentTime !== currentTime) {
             // After the seek, give the value
             this._playbackPrevTime = currentTime;
@@ -835,8 +844,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     /**
      * Starts playing the stream
      *
-     * If a MediaKeys engine is already running, it means that the previous playback has not been properly released,
-     * so the player stops and reports a {@link PlayerError} error to avoid unexpected behavior.
+     * If the MediaKeys of a previous playback are still being released, the start waits for that release.
      *
      * @param params Connection parameters {@link Connect.Params}
      * @param idleTimeout  idle timeout, default value is around 14s. It sets the timeout error in the absence of
@@ -1031,7 +1039,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._buffering = true;
             // W3C specification says that the player has been stopped to wait data
             // In such case few browsers "Pause" player when waiting data and so
-            // require an explicit play => see _onProgress
+            // require an explicit play => see _tryToPlay
             this._video.pause();
             /// start data timeout
             clearTimeout(this._timeout.id);
