@@ -102,11 +102,15 @@ player.start({
 
 ## Playback rate adaptation
 
-To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts its `playbackRate` from the buffer state on every supported platform, including environments exposing `ManagedMediaSource`. It switches to 1.1x when the buffer is `HIGH`, to 0.9x when it is `LOW`, and back to 1x when it is `OK`.
+To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts its `playbackRate` from the buffer state: 1.1x when the buffer is `HIGH`, 0.9x when it is `LOW`, and back to 1x when it is `OK`. The behavior is the same on every browser, there is no browser-specific workaround.
 
 The sound is time-stretched by the player itself to follow the playback rate without changing its pitch (see [Audio rendering](#audio-rendering)), so a rate change is inaudible and never disturbs the video. Set `player.preservesPitch = false` to let the pitch follow the playback rate instead, like on a tape.
 
-There is no Safari-specific workaround in `onBufferChange` or `adjustPlaybackRate`. To disable automatic playback-rate adaptation, override `onBufferChange` without calling `adjustPlaybackRate`:
+> [!NOTE]
+>
+> When audio is played by the `<video>` element (protected audio track, page out of a secure context, or `AudioEngine.MSE` selected, see [Audio rendering](#audio-rendering)), the rate change is applied by the audio pipeline of the browser, and the pitch is controlled by the `preservesPitch` property of the `<video>` element. On Safari a rate change can then briefly freeze the playback ([WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433)): set `video.preservesPitch = false`, or disable the playback rate adaptation as described below.
+
+To disable the automatic playback rate adaptation, override `onBufferChange` without calling `adjustPlaybackRate`:
 
 ```javascript
 player.onBufferChange = () => {
@@ -114,8 +118,14 @@ player.onBufferChange = () => {
 };
 ```
 
-To use different rates, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 90 / 110).
+To use different rates, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 90 / 110). A `minRate` of 100 or more disables the slowdown, a `maxRate` of 100 or less disables the acceleration:
 
+```javascript
+player.onBufferChange = () => {
+   // 0.95x when the buffer is low, 1.05x when it is high
+   player.adjustPlaybackRate(95, 105);
+};
+```
 
 ## Audio rendering
 

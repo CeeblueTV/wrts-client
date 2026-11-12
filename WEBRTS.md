@@ -93,7 +93,7 @@ When `bufferLimitHigh` is left undefined, which is the default, the player measu
 - instability or a transition to `LOW` can enlarge the window;
 - stable observation windows allow it to shrink gradually;
 - increases are bounded to avoid abrupt jumps, and decreases move only halfway toward the newly measured target;
-- the window never becomes smaller than `200ms`, or `400ms` with `ManagedMediaSource`.
+- the window never becomes smaller than `200ms`.
 
 The middle target moves with the high threshold. This makes the latency target adaptive rather than assuming that the same fixed buffer is suitable for every network, browser, and decoder.
 
@@ -101,12 +101,14 @@ The middle target moves with the high threshold. This makes the latency target a
 
 `playbackRate` and `playbackSpeed` describe different things:
 
-- `playbackRate` is the rate requested from the `HTMLVideoElement` (`1.0`, `0.9`, `1.1`, and so on).
-- `playbackSpeed` is the observed progression of `video.currentTime` relative to wall-clock time. It is averaged over `500ms` to cover multiple `timeupdate` samples while remaining responsive.
+- `playbackRate` is the rate requested from the playback (`1.0`, `0.9`, `1.1`, and so on).
+- `playbackSpeed` is the observed progression of the playback time relative to wall-clock time. It is averaged over `500ms` to cover multiple time updates while remaining responsive.
+
+The playback time is the media time of the audio rendered by the player, which conducts the playback and is followed by the `HTMLVideoElement`. It is the time of the `HTMLVideoElement` itself when it plays audio too, or when the stream has no audio.
 
 A requested rate of `1.0` does not guarantee an effective speed of `1.0`: an overloaded decoder, a rendering problem, or a browser interruption can advance the media clock more slowly. Conversely, short-term measurement noise is expected because `currentTime` is sampled rather than continuously observed.
 
-On every supported platform, including environments exposing `ManagedMediaSource`, the default rate is `0.9x` in `LOW`, `1x` in `OK`, and `1.1x` in `HIGH`. Slowing in `LOW` gives incoming data more time to rebuild the buffer; accelerating in `HIGH` consumes excess buffer and moves playback toward the live edge. There is no Safari-specific workaround in `onBufferChange` or `adjustPlaybackRate`.
+On every browser the default rate is `0.9x` in `LOW`, `1x` in `OK`, and `1.1x` in `HIGH`. Slowing in `LOW` gives incoming data more time to rebuild the buffer; accelerating in `HIGH` consumes excess buffer and moves playback toward the live edge. There is no browser-specific workaround in `onBufferChange` or `adjustPlaybackRate`.
 
 ## 4. MBR: multi-bitrate rendition selection
 

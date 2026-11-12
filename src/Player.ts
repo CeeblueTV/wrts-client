@@ -30,7 +30,7 @@ const root = typeof window !== 'undefined' ? window : global;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ManagedMediaSource = (root as any).ManagedMediaSource;
-const BUFFER_AUTO_MIN_WINDOW = ManagedMediaSource ? 400 : 200; // ms
+const BUFFER_AUTO_MIN_WINDOW = 200; // ms
 const BUFFER_AUTO_MEASURE_MARGIN = 40; // ms
 const BUFFER_AUTO_TRY_DELAY = 7000; // ms
 
@@ -1495,22 +1495,20 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     private _newMediaSource(): MediaSource | undefined {
+        if (ManagedMediaSource) {
+            // In priority use ManagedMediaSource when the browser exposes it (Safari) =>
+            // disable remote playback what can interact with our playback control
+            this._video.disableRemotePlayback = true;
+            this.log('new ManagedMediaSource').info();
+            return new ManagedMediaSource();
+        }
         this._video.disableRemotePlayback = false;
-        // in priority try with MediaSource =>
+        // Otherwise use MediaSource =>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const MS = (root as any).WebKitMediaSource || (root as any).MediaSource;
         if (MS) {
             this.log('new MediaSource').info();
             return new MS();
-        }
-        if (ManagedMediaSource) {
-            // Now try with ManagedMediaSource - Safari =>
-            // disable pitch to prevent the [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433)
-            this._video.preservesPitch = false;
-            // disable remote playback what can interact with our playback control
-            this._video.disableRemotePlayback = true;
-            this.log('new ManagedMediaSource').info();
-            return new ManagedMediaSource();
         }
     }
 
