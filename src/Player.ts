@@ -1418,22 +1418,21 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     private _newMediaSource(): MediaSource | undefined {
+        if (ManagedMediaSource) {
+            // Disable pitch to prevent the [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433).
+            this._video.preservesPitch = false;
+            // ManagedMediaSource requires remote playback to be disabled without an AirPlay source alternative.
+            this._video.disableRemotePlayback = true;
+            this.log('new ManagedMediaSource').info();
+            return new ManagedMediaSource();
+        }
         this._video.disableRemotePlayback = false;
-        // in priority try with MediaSource =>
+        // Fall back to MediaSource.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const MS = (root as any).WebKitMediaSource || (root as any).MediaSource;
         if (MS) {
             this.log('new MediaSource').info();
             return new MS();
-        }
-        if (ManagedMediaSource) {
-            // Now try with ManagedMediaSource - Safari =>
-            // disable pitch to prevent the [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433)
-            this._video.preservesPitch = false;
-            // disable remote playback what can interact with our playback control
-            this._video.disableRemotePlayback = true;
-            this.log('new ManagedMediaSource').info();
-            return new ManagedMediaSource();
         }
     }
 
