@@ -93,7 +93,7 @@ When `bufferLimitHigh` is left undefined, which is the default, the player measu
 - instability or a transition to `LOW` can enlarge the window;
 - stable observation windows allow it to shrink gradually;
 - increases are bounded to avoid abrupt jumps, and decreases move only halfway toward the newly measured target;
-- the window never becomes smaller than `200ms`, or `400ms` with `ManagedMediaSource`.
+- the window never becomes smaller than `200ms`, or `400ms` when audio is played by the video element through `ManagedMediaSource`.
 
 The middle target moves with the high threshold. This makes the latency target adaptive rather than assuming that the same fixed buffer is suitable for every network, browser, and decoder.
 

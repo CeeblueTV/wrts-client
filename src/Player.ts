@@ -30,8 +30,10 @@ const root = typeof window !== 'undefined' ? window : global;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ManagedMediaSource = (root as any).ManagedMediaSource;
-// A larger minimum buffer window with ManagedMediaSource, to avoid playback speed drift on Safari
-const BUFFER_AUTO_MIN_WINDOW = ManagedMediaSource ? 400 : 200; // ms
+const BUFFER_AUTO_MIN_WINDOW = 200; // ms
+// Larger minimum buffer window when audio is played by the video element through ManagedMediaSource,
+// to avoid playback speed drift on Safari
+const BUFFER_AUTO_MIN_WINDOW_MANAGED_AUDIO = 400; // ms
 const BUFFER_AUTO_MEASURE_MARGIN = 40; // ms
 const BUFFER_AUTO_TRY_DELAY = 7000; // ms
 
@@ -1429,18 +1431,31 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this.playbackRate = rate;
     }
 
+    /**
+     * Minimum window of the automatic buffer, between its low and high limits
+     */
+    private _getMinBufferWindow(): number {
+        // Safari needs a larger window only when it plays audio itself: not for a stream without audio,
+        // nor when audio is rendered outside of the video element
+        return ManagedMediaSource &&
+            this._mediaSource instanceof ManagedMediaSource &&
+            this._playback?.audioEngine === AudioEngine.MSE
+            ? BUFFER_AUTO_MIN_WINDOW_MANAGED_AUDIO
+            : BUFFER_AUTO_MIN_WINDOW;
+    }
+
     private _setBufferLimitHigh(value: number) {
         value = Math.round(value);
         this._bufferLimitLow = Math.min(value, this._bufferLimitLow);
         if (this._bufferLimitHighAuto) {
-            value = Math.max(this._bufferLimitLow + BUFFER_AUTO_MIN_WINDOW, value);
+            value = Math.max(this._bufferLimitLow + this._getMinBufferWindow(), value);
         }
         this._bufferLimitHigh = value;
         this._bufferLimitMiddle = Math.max(0, this._bufferLimitLow + Math.round((value - this._bufferLimitLow) / 2));
     }
 
     private _adjustBufferLimitHigh(shouldIncrease = false) {
-        const bufferWindow = Math.max(BUFFER_AUTO_MIN_WINDOW, this._bufferMeasure.lowHighRange + BUFFER_AUTO_MEASURE_MARGIN);
+        const bufferWindow = Math.max(this._getMinBufferWindow(), this._bufferMeasure.lowHighRange + BUFFER_AUTO_MEASURE_MARGIN);
         let highLimit = Math.round(this._bufferLimitLow + bufferWindow);
 
         if (highLimit > this._bufferLimitHigh) {
