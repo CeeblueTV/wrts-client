@@ -2,6 +2,7 @@
  <a href="#requirements">Requirements</a> •
  <a href="#usage">Usage</a> •
  <a href="#playback-rate-adaptation">Playback rate adaptation</a> •
+ <a href="#audio-rendering">Audio rendering</a> •
  <a href="#drm">DRM</a> •
  <a href="#examples">Examples</a> •
  <a href="#building-locally">Building locally</a> •
@@ -101,7 +102,9 @@ player.start({
 
 ## Playback rate adaptation
 
-To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts `<video>.playbackRate` from the buffer state on every supported platform, including environments exposing `ManagedMediaSource`. It switches to 1.1x when the buffer is `HIGH`, to 0.9x when it is `LOW`, and back to 1x when it is `OK`. This is a deliberate compromise: we prioritise low latency and stall protection over perfectly smooth audio.
+To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts its `playbackRate` from the buffer state on every supported platform, including environments exposing `ManagedMediaSource`. It switches to 1.1x when the buffer is `HIGH`, to 0.9x when it is `LOW`, and back to 1x when it is `OK`.
+
+The sound is time-stretched by the player itself to follow the playback rate without changing its pitch (see [Audio rendering](#audio-rendering)), so a rate change is inaudible and never disturbs the video. Set `player.preservesPitch = false` to let the pitch follow the playback rate instead, like on a tape.
 
 There is no Safari-specific workaround in `onBufferChange` or `adjustPlaybackRate`. To disable automatic playback-rate adaptation, override `onBufferChange` without calling `adjustPlaybackRate`:
 
@@ -113,6 +116,41 @@ player.onBufferChange = () => {
 
 To use different rates, override `onBufferChange` and pass custom percentages to `player.adjustPlaybackRate(minRate, maxRate)` (default 90 / 110).
 
+
+## Audio rendering
+
+Video is played by the `<video>` element through Media Source Extensions, but by default **audio is not given to the `<video>` element anymore**. The player decodes it itself and renders it with the [Web Audio API]:
+
+1. **Decoding** uses [WebCodecs] when the browser implements its `AudioDecoder`, otherwise a WebAssembly build of the AAC and MP3 decoders of [FFmpeg] shipped with the library (see [wasm/README.md](./wasm/README.md)). The WebAssembly decoder is in its own file, `wrts-client.decoder.js`, loaded only by the browsers which need it.
+2. **Rendering** is done in an audio worklet which time-stretches the sound to follow the playback rate, resamples it to the audio output rate, and reports the media time really heard.
+3. **Synchronization**: audio is the conductor of the playback. Its media time is the clock of the player (`player.currentTime`), and the `<video>` element only follows it: its playback rate is continuously adjusted to stay on the audio time, with a seek when the drift is too large (start, hole in the stream, tab back to foreground).
+
+This removes the interactions between the audio and video pipelines of the browsers on a playback rate change, which were the cause of audio glitches or video freezes on some platforms (Safari on macOS and iOS in particular).
+
+The engine in use is given by `player.audioEngine`, and the engines usable can be restricted or reordered with `Player.audioEngines` before starting a player:
+
+```javascript
+import { Player, AudioEngine } from '@ceeblue/wrts-client';
+
+// Default order: WebCodecs, then WebAssembly, then Media Source Extensions as last resort
+Player.audioEngines = [AudioEngine.WEBCODECS, AudioEngine.WASM, AudioEngine.MSE];
+
+// Play audio inside the <video> element, like the previous versions
+Player.audioEngines = [AudioEngine.MSE];
+```
+
+Audio stays in the `<video>` element (`AudioEngine.MSE`) for a protected audio track, which only a media element can decrypt, and when neither WebCodecs nor WebAssembly can decode the track.
+
+Things to know when audio is rendered outside of the `<video>` element:
+
+- **Volume and mute**: the player follows the `volume` and `muted` properties of the `<video>` element, keep using them. The native controls of the `<video>` element can hide their volume button because the element has no audio track, prefer your own controls.
+- **Autoplay**: browsers allow sound to start only after a user gesture. Call `player.start()` from the handler of a user gesture, or start with a muted `<video>` element: the stream then plays silently, and the sound starts on the first user gesture which unmutes it. Like before, starting an unmuted playback without user gesture stops the player with a `Video play error`.
+- **Remote playback and capture**: AirPlay, Chromecast or `captureStream()` on the `<video>` element get the video without its sound, remote playback is therefore disabled on the element.
+- **Deployment**: when the library is not bundled, keep `wrts-client.decoder.js` beside the library file. A Content Security Policy must allow `blob:` in `script-src` for the audio worklet, and `'wasm-unsafe-eval'` for the WebAssembly decoder.
+
+[Web Audio API]: https://developer.mozilla.org/docs/Web/API/Web_Audio_API
+[WebCodecs]: https://developer.mozilla.org/docs/Web/API/WebCodecs_API
+[FFmpeg]: https://ffmpeg.org
 
 ## DRM
 
@@ -183,6 +221,7 @@ To help you get started, we provide the following examples:
    - **wrts-client.d.ts** - Typescript definitions file
    - **wrts-client.js** - NPM JavaScript library
    - **wrts-client.bundle.js** - Bundled browser JavaScript library
+   - **wrts-client.decoder.js** - WebAssembly audio decoder, loaded on demand by the two libraries above
 ```
 git clone https://github.com/CeeblueTV/wrts-client.git
 cd wrts-client

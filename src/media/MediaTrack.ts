@@ -5,6 +5,8 @@
  */
 import { Loggable } from '@ceeblue/web-utils';
 import * as Media from './Media';
+import { findAudioEngine, getAudioEngines } from './audio/AudioDecoders';
+import { AudioEngine } from './audio/PCMDecoder';
 
 export class MediaTrack extends Loggable {
     /**
@@ -57,6 +59,10 @@ export class MediaTrack extends Loggable {
      * Content Protection
      */
     contentProtection?: string;
+    /**
+     * How this audio track is decoded and rendered, determined by {@link checkSupport}
+     */
+    audioEngine?: AudioEngine;
 
     up?: MediaTrack; // track up by ascending MAXBPS
     down?: MediaTrack; // track down by ascending MAXBPS
@@ -87,10 +93,16 @@ export class MediaTrack extends Loggable {
     }
 
     /**
-     * Checks whether this track can be decoded through Media Source Extensions.
+     * Checks whether this track can be played.
      *
-     * Data tracks are considered supported because they do not require media decoding. Audio and video tracks are
-     * evaluated with the Media Capabilities API using their codec, bitrate, and type-specific properties.
+     * Data tracks are considered supported because they do not require media decoding.
+     *
+     * An audio track is supported when one of the {@link getAudioEngines | audio engines} is able to play it, the
+     * engine found is assigned to {@link audioEngine}: WebCodecs or the WebAssembly decoder of the library to render it
+     * with the Web Audio API, otherwise Media Source Extensions like a video track.
+     *
+     * Video tracks, and audio tracks falling back on Media Source Extensions, are evaluated with the Media
+     * Capabilities API using their codec, bitrate, and type-specific properties.
      *
      * @returns `1` when the track is supported, `0` when it is explicitly unsupported, or `-1` when support cannot be
      * determined because the Media Capabilities API is unavailable or rejects the configuration.
@@ -100,6 +112,28 @@ export class MediaTrack extends Loggable {
             // Data track always supported!
             return 1;
         }
+        if (this.type === Media.Type.AUDIO) {
+            this.audioEngine = await findAudioEngine(this);
+            if (this.audioEngine) {
+                return 1;
+            }
+            if (!getAudioEngines().includes(AudioEngine.MSE)) {
+                return 0;
+            }
+            // Fall back on Media Source Extensions
+            const support = await this._checkMediaSourceSupport();
+            if (support) {
+                this.audioEngine = AudioEngine.MSE;
+            }
+            return support;
+        }
+        return this._checkMediaSourceSupport();
+    }
+
+    /**
+     * Checks whether this track can be decoded through Media Source Extensions
+     */
+    private async _checkMediaSourceSupport(): Promise<number> {
         if (typeof navigator !== 'undefined' && navigator.mediaCapabilities?.decodingInfo) {
             const type = Media.typeToString(this.type);
             const configuration = {

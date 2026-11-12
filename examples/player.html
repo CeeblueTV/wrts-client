@@ -816,7 +816,15 @@
                 this.host = new NetAddress(host || location.host, 443);
                 this.stream = options.stream || '';
                 this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
+                if (options.audioEngines) {
+                    // Audio engines by order of preference, ex: ?audioEngines=mse to play audio inside the video element,
+                    // or ?audioEngines=wasm,mse to test the WebAssembly decoder
+                    Player.audioEngines = String(options.audioEngines).toLowerCase().split(',');
+                }
                 this.player = new Player(this.$refs.video, this.sourceType);
+                if (options.preservesPitch != null) {
+                    this.player.preservesPitch = options.preservesPitch ? true : false;
+                }
                 const bufferMin = Number(options.bufferMin);
                 const bufferMax = Number(options.bufferMax);
                 if (Number.isFinite(bufferMax)) {
@@ -927,7 +935,8 @@
                         playbackRates.push((stats.playbackRate || 0).toFixed(2));
                         playbackSpeeds.push((stats.playbackSpeed || 0).toFixed(2));
                         fps.push((stats.videoPerSecond || 0).toFixed(2));
-                        trackAudio.push(((stats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
+                        const audioEngine = this.player.audioEngine; // how audio is decoded: webcodecs, wasm or mse
+                        trackAudio.push(((stats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps' + (audioEngine ? ' ' + audioEngine : ''));
                         trackVideo.push(((stats.videoTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
 
                         skippedAudio.push((((stats.skippedAudio || 0) - (this.deltaStats.skippedAudio || 0)) /1000).toFixed(1)+"s");
@@ -1715,6 +1724,12 @@
                         }
                         if(options.fixedRate) {
                             path += "&fixedRate";
+                        }
+                        if(options.audioEngines) {
+                            path += "&audioEngines=" + options.audioEngines;
+                        }
+                        if(options.preservesPitch != null) {
+                            path += "&preservesPitch=" + options.preservesPitch;
                         }
                         if(this.sidePanel) {
                             path += "&sidePanel";

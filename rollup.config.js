@@ -15,10 +15,41 @@ import terser from '@rollup/plugin-terser';
 import { dts } from 'rollup-plugin-dts';
 import { nodeResolve } from '@rollup/plugin-node-resolve';
 import path from 'path';
+import { readFileSync } from 'fs';
 
 const input = 'index.ts';
 const output = 'dist/wrts-client';
 const name = 'CeeblueWRTSClient';
+
+// The WebAssembly audio decoder (see the wasm folder) is the module src/media/audio/DecoderWasmBinary,
+// generated here from its binary. It is imported dynamically, to be loaded only by the browsers which need it.
+const decoderInput = 'wasm/decoder.wasm';
+const decoderOutput = output + '.decoder.js';
+const decoderModule = '\0decoder-wasm';
+
+// The decoder file is always beside the file importing it
+const decoderPaths = id => (id === path.resolve(process.cwd(), decoderOutput) ? './' + path.basename(decoderOutput) : id);
+
+function decoderPlugin(isExternal) {
+    return {
+        name: 'decoder-wasm',
+        resolveId(source) {
+            if (source === decoderModule) {
+                return source;
+            }
+            if (/(^|\/)DecoderWasmBinary$/.test(source)) {
+                // In its own file beside the library, or inlined when the module format has no dynamic import
+                return isExternal ? { id: path.resolve(process.cwd(), decoderOutput), external: true } : decoderModule;
+            }
+        },
+        load(id) {
+            if (id === decoderModule) {
+                this.addWatchFile(path.resolve(process.cwd(), decoderInput));
+                return `export const DECODER_WASM = '${readFileSync(decoderInput).toString('base64')}';`;
+            }
+        }
+    };
+}
 
 export default args => {
     // Determine the package version by using the 'version' environment variable (for CI/CD processes) or fallback to the version specified in the 'package.json' file.
@@ -44,6 +75,9 @@ export default args => {
     const ts = typescript({ target: args.target });
     delete args.target; // remove the target argument because it not valid for rollup
 
+    // ES and CommonJS modules load the decoder from its own file, the other formats embed it
+    const isDecoderExternal = !args.format || ['es', 'esm', 'module', 'cjs', 'commonjs'].includes(args.format);
+
     function createOutput(input, outputName, isExternal) {
         return {
             input,
@@ -54,6 +88,8 @@ export default args => {
                     format: args.format, // iife, es, cjs, umd, amd, system
                     compact: true,
                     sourcemap: true,
+                    inlineDynamicImports: !isDecoderExternal,
+                    paths: decoderPaths,
                     file: outputName + '.js'
                 },
                 {
@@ -62,11 +98,14 @@ export default args => {
                     format: args.format, // iife, es, cjs, umd, amd, system
                     compact: true,
                     sourcemap: true,
+                    inlineDynamicImports: !isDecoderExternal,
+                    paths: decoderPaths,
                     plugins: [terser()],
                     file: outputName + '.min.js'
                 }
             ],
             plugins: [
+                decoderPlugin(isDecoderExternal),
                 replacer({
                     __lib__version__: "'" + version + "'",
                     preventAssignment: true
@@ -102,6 +141,16 @@ export default args => {
             ); // special case: is not our main index.ts file
         }),
         // Browser binaries
-        createOutput(input, output + '.bundle')
+        createOutput(input, output + '.bundle'),
+        // WebAssembly audio decoder
+        ...(isDecoderExternal
+            ? [
+                  {
+                      input: decoderModule,
+                      output: { format: args.format, compact: true, file: decoderOutput },
+                      plugins: [decoderPlugin(false)]
+                  }
+              ]
+            : [])
     ];
 };

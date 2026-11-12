@@ -27,6 +27,14 @@ export { ICMCD, CMCD, CMCDMode } from './src/media/CMCD';
 export { MediaKeysEngine, MediaKeysEngineError } from './src/media/keys/MediaKeysEngine';
 export { NormalizedMediaKeyCertificate } from './src/media/keys/MediaKeysConfig';
 
+// Audio
+export { AudioEngine, PCM, PCMDecoder } from './src/media/audio/PCMDecoder';
+export { getAudioEngines, setAudioEngines } from './src/media/audio/AudioDecoders';
+export { WebCodecsDecoder } from './src/media/audio/WebCodecsDecoder';
+export { WasmDecoder } from './src/media/audio/WasmDecoder';
+export { AudioRenderer } from './src/media/audio/AudioRenderer';
+export { AudioPlayback, AudioPlaybackError } from './src/media/audio/AudioPlayback';
+
 // Sources
 export { Source, SourceError } from './src/sources/Source';
 export { HTTPAdaptiveSource } from './src/sources/HTTPAdaptiveSource';

@@ -15,6 +15,9 @@ import { HTTPAdaptiveSource } from './sources/HTTPAdaptiveSource';
 import { MediaKeysEngine, MediaKeysEngineError } from './media/keys/MediaKeysEngine';
 import { AdaptiveRetry } from './utils/AdaptiveRetry';
 import { BufferMeasure } from './utils/BufferMeasure';
+import { AudioRenderer } from './media/audio/AudioRenderer';
+import { getAudioEngines, hasAudioEngine, setAudioEngines } from './media/audio/AudioDecoders';
+import { AudioEngine } from './media/audio/PCMDecoder';
 
 const PAST_BUFFER = 20; // seconds
 const BUFFER_LIMIT_LOW = 200; // ms
@@ -120,6 +123,28 @@ export type PlayerError =
  *
  */
 export class Player extends EventEmitter implements IPlaying, ICMCD {
+    /**
+     * Audio engines usable to play audio, by order of preference.
+     *
+     * By default audio is decoded with WebCodecs, or with the WebAssembly decoder shipped with the library when
+     * WebCodecs is unavailable, then rendered with the Web Audio API: audio conducts the playback and the video element
+     * only follows its media time. {@link AudioEngine.MSE} gives audio to the video element like video, it is the last
+     * resort used for a protected audio track or when nothing else is available.
+     *
+     * Set it before to start a player, undefined restores the default order.
+     *
+     * @example
+     * // Play audio inside the video element, like before
+     * Player.audioEngines = [AudioEngine.MSE];
+     */
+    static get audioEngines(): AudioEngine[] {
+        return getAudioEngines();
+    }
+
+    static set audioEngines(engines: AudioEngine[] | undefined) {
+        setAudioEngines(engines);
+    }
+
     /**
      * Event fired when streaming starts
      * @event
@@ -452,7 +477,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Gets the current playback time in seconds
      */
     get currentTime(): number {
-        return this._video.currentTime;
+        // Audio time when audio conducts the playback, otherwise time of the video element
+        return this._playback ? this._playback.currentTime : this._video.currentTime;
     }
 
     /**
@@ -460,27 +486,57 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * {@inheritDoc IPlaying.playbackRate}
      */
     get playbackRate(): number {
-        return this._video.playbackRate;
+        return this._playback ? this._playback.playbackRate : this._video.playbackRate;
     }
 
     /**
-     * Set video playback rate
+     * Set playback rate
      */
     set playbackRate(value: number) {
-        const playbackRate = this._video.playbackRate;
+        const playback = this._playback || this._video;
+        const playbackRate = playback.playbackRate;
         // Some browsers expose playbackRate with float32 precision. Avoid an assignment when both values represent the
         // same float32, as it may fire a ratechange event and briefly disrupt playback.
         if (Math.fround(playbackRate) !== Math.fround(value)) {
-            this._video.playbackRate = value;
+            playback.playbackRate = value;
             this.log(
-                `Change playback rate from ${playbackRate} to ${this._video.playbackRate} (bufferAmount=${this.bufferAmount}ms)`
+                `Change playback rate from ${playbackRate} to ${playback.playbackRate} (bufferAmount=${this.bufferAmount}ms)`
             ).info();
-            if (playbackRate > 1 && this._video.playbackRate <= 1) {
+            if (playbackRate > 1 && playback.playbackRate <= 1) {
                 // Reset dropped-frame measurements after accelerated playback to prevent it from skewing the ratio.
                 this._droppedVideoFrames = this._video.getVideoPlaybackQuality().droppedVideoFrames;
                 this._droppedFramePerSecond.clear();
             }
         }
+    }
+
+    /**
+     * True if the pitch of the audio is preserved when the {@link playbackRate} is different of 1, the default.
+     * Otherwise the pitch follows the playback rate, like on a tape.
+     *
+     * It applies when audio is rendered outside of the video element (see {@link audioEngine}),
+     * otherwise the pitch is controlled by the `preservesPitch` property of the video element.
+     */
+    get preservesPitch(): boolean {
+        return this._preservesPitch;
+    }
+
+    /**
+     * Enable or disable the pitch correction of the audio
+     */
+    set preservesPitch(value: boolean) {
+        this._preservesPitch = value;
+        if (this._playback) {
+            this._playback.preservesPitch = value;
+        }
+    }
+
+    /**
+     * Engine currently playing the audio, see {@link Player.audioEngines}.
+     * Undefined if the player is not playing or has not decoded audio yet.
+     */
+    get audioEngine(): AudioEngine | undefined {
+        return this._playback?.audioEngine;
     }
 
     /**
@@ -504,10 +560,13 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // because slow playback may otherwise be caused by insufficient input.
         const playbackSpeed = this.playbackSpeed;
         const playbackRate = this.playbackRate;
-        const slowdownRatio =
+        let slowdownRatio =
             this.bufferAmount > this._bufferLimitHigh && playbackRate > 0 && !this._playbackSpeed.increasing
                 ? Math.min(Math.max(0, 1 - playbackSpeed / playbackRate), 1)
                 : 0;
+        // When audio conducts the playback it is never slowed down by a video hard to decode,
+        // the constraint is then visible on the video which doesn't follow its conductor
+        slowdownRatio = Math.max(slowdownRatio, this._playback?.videoSlowdown ?? 0);
 
         // Clamp the ratio because the input and renderer measurements use independent time windows.
         const videoFPS = this._source.videoPerSecond;
@@ -626,7 +685,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 this._starting = 0; // force restarting!
                 this._waitStarting();
             }
-            this._video.pause();
+            this._pause();
         } else {
             if (wasPaused) {
                 // Restart buffer learning after an intentional pause.
@@ -780,6 +839,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _stallCount: number = 0;
     private _droppedVideoFrames: number = 0;
     private _droppedFramePerSecond: ByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
+    private _preservesPitch: boolean = true;
 
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
@@ -827,8 +887,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (!this.running) {
             throw Error('Cannot goLive on stopped player');
         }
-        const prevCurrentTime = this._video.currentTime;
-        const currentTime = (this._video.currentTime = this.liveTarget);
+        const prevCurrentTime = this.currentTime;
+        const currentTime = this.liveTarget;
+        this._seek(currentTime);
         if (prevCurrentTime !== currentTime) {
             // After the seek, give the value
             this._playbackPrevTime = currentTime;
@@ -891,6 +952,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._buffering = true;
         this._video.pause();
 
+        if (hasAudioEngine()) {
+            // Browsers allow audio to start only from a user gesture: start() is the best place to be inside
+            AudioRenderer.unlock();
+        }
+
         // process params
         this._passthroughCMAF = Util.trimStart(params.mediaExt?.toLowerCase() ?? '', '.') === 'cmaf';
         if (this._passthroughCMAF) {
@@ -935,8 +1001,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
                 if (!this._playback) {
                     return;
                 }
-                this._playback.audioEnabled = audioTrack >= 0;
-                this._playback.videoEnabled = videoTrack >= 0;
+                this._playback.setTracks(this._metadata, audioTrack >= 0, videoTrack >= 0);
+                if (!this._playback) {
+                    // closed, track unsupported
+                    return;
+                }
                 this.onTrackChange(audioTrack, videoTrack, dataTrack);
             };
             this._source.onVideoChange = (videoTrack: number, videoTrackOld?: number) => {
@@ -1000,22 +1069,30 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._source.onClose = (error?: SourceError) => this.stop(error);
 
             // Create MediaPlayback to render frame
-            this._playback = new MediaPlayback(this._mediaSource, this.passthroughCMAF);
+            this._playback = new MediaPlayback(this._video, this._mediaSource, this.passthroughCMAF);
             this._playback.log = this.log.bind(this);
+            this._playback.preservesPitch = this._preservesPitch;
+            this._playback.onWaiting = onWaiting;
+            this._playback.onCanPlay = onCanPlay;
+            this._playback.onPlaying = onPlaying;
+            this._playback.onSeeking = onSeeking;
+            this._playback.onSeeked = onSeeked;
+            this._playback.onPause = onPause;
+            this._playback.onTimeUpdate = onTimeUpdate;
             this._playback.onAudioAppended = this.onAudioAppended.bind(this);
             this._playback.onVideoAppended = this.onVideoAppended.bind(this);
             this._playback.onProgress = this._onPlaybackProgress.bind(this);
             this._playback.onBufferOverflow = () => {
                 // QuotaExceeding can happen just when live video is paused, we have to forward playing to let browser managed buffer exceed
-                const time = this._video.currentTime;
+                const time = this.currentTime;
                 // Advance to 10s
-                this._video.currentTime += 10;
+                this._seek(time + 10);
                 // Look if we success to advance the playback
-                if (this._video.currentTime <= time) {
+                if (this.currentTime <= time) {
                     // exception whereas already at the end? => stop all!
                     return this.stop({ type: 'MediaBufferError', name: 'Exceeds buffer size' });
                 }
-                if (this._video.paused) {
+                if (this._playback?.paused) {
                     this.log('Unpause video to release buffer space').warn();
                     this.paused = false;
                 } else {
@@ -1039,7 +1116,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             // W3C specification says that the player has been stopped to wait data
             // In such case few browsers "Pause" player when waiting data and so
             // require an explicit play => see _onProgress
-            this._video.pause();
+            this._pause();
             /// start data timeout
             clearTimeout(this._timeout.id);
             this._timeout.id = setTimeout(() => this.stop({ type: 'PlayerError', name: 'Data timeout' }), this._timeout.value);
@@ -1062,7 +1139,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             // Reset playback measurements and keep a watchdog active until playback resumes.
             this._waitStarting();
 
-            if (this._video.seeking) {
+            if (this._playback?.seeking) {
                 // Wait for the seek to complete without treating it as a regular stall.
                 return;
             }
@@ -1074,7 +1151,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
             if (this.bufferAmount > this.bufferLimitLow) {
                 // We have data BUT is missing data ?!
-                if (this._video.buffered.length > 1) {
+                if (this._playback?.fragmented) {
                     // Buffer hole detected => 'error' log because it should not really happen
                     // even for B-Frame where we resolve it in a resonnable short time.
                     this.log(`There is an audio or video hole (B-Frame?), waiting hole recovering`).error();
@@ -1132,7 +1209,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             }
             this.log(`Playback seek to ${this.currentTime}s (${(this.currentTime - this.endTime).toFixed(3)} from end)`).info();
             // Looks if we were on a stall
-            if (this._video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+            if (this._playback && this._playback.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
                 onWaiting();
             }
         };
@@ -1164,27 +1241,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this._onPlayerProgress();
         };
 
-        this._video.addEventListener('waiting', onWaiting);
-        this._video.addEventListener('canplay', onCanPlay);
-        this._video.addEventListener('playing', onPlaying);
-        this._video.addEventListener('seeking', onSeeking);
-        this._video.addEventListener('seeked', onSeeked);
-        this._video.addEventListener('pause', onPause);
-        this._video.addEventListener('timeupdate', onTimeUpdate);
-
-        this._controller.signal.addEventListener(
-            'abort',
-            () => {
-                this._video.removeEventListener('waiting', onWaiting);
-                this._video.removeEventListener('canplay', onCanPlay);
-                this._video.removeEventListener('playing', onPlaying);
-                this._video.removeEventListener('seeking', onSeeking);
-                this._video.removeEventListener('seeked', onSeeked);
-                this._video.removeEventListener('pause', onPause);
-                this._video.removeEventListener('timeupdate', onTimeUpdate);
-            },
-            { once: true }
-        );
+        // These playback events are subscribed on the MediaPlayback, which conducts the playback with audio
+        // or relays the events of the video element
 
         this._video.src = window.URL.createObjectURL(this._mediaSource);
     }
@@ -1456,14 +1514,30 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         }
     }
 
+    private _seek(time: number) {
+        if (this._playback) {
+            this._playback.currentTime = time;
+        } else {
+            this._video.currentTime = time;
+        }
+    }
+
+    private _pause() {
+        if (this._playback) {
+            this._playback.pause();
+        } else {
+            this._video.pause();
+        }
+    }
+
     private async _tryToPlay() {
         if (this._paused || this._buffering) {
             return;
         }
         try {
-            if (this._video.paused) {
+            if (this._playback?.paused) {
                 this._waitStarting(true);
-                await this._video.play();
+                await this._playback.play();
             }
         } catch (err) {
             if (err instanceof DOMException) {
@@ -1484,11 +1558,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     }
 
     private _computePlaybackSpeed(): number {
-        if (this._video.seeking) {
+        if (this._playback ? this._playback.seeking : this._video.seeking) {
             // recompute playback speed on seeking
             this._playbackPrevTime = undefined;
         } else {
-            const currentTime = this._video.currentTime;
+            const currentTime = this.currentTime;
             if (this._playbackPrevTime != null && currentTime > this._playbackPrevTime) {
                 this._playbackSpeed.addBytes((currentTime - this._playbackPrevTime) * 100);
             }
@@ -1531,7 +1605,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             return;
         }
         // New media was appended; repair a potential hole at the current playback position.
-        if (this._video.readyState < HTMLMediaElement.HAVE_ENOUGH_DATA) {
+        if (this._playback.readyState < HTMLMediaElement.HAVE_ENOUGH_DATA) {
             this._playback.flush(true);
         }
 
@@ -1576,7 +1650,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             this.log(
                 `Playback position ${currentTime.toFixed(3)}s is beyond media end ${endTime.toFixed(3)}s; clamping to the end`
             ).warn();
-            this._video.currentTime = this._playbackPrevTime = endTime;
+            this._seek(endTime);
+            this._playbackPrevTime = endTime;
         }
 
         this._onPlayerProgress();
