@@ -34,6 +34,9 @@ const BUFFER_AUTO_TRY_DELAY = 7000; // ms
 const PLAYBACK_RATE_MAX = 110; // Default playback rate when the buffer is high: 10% faster
 const PLAYBACK_RATE_MIN = 90; // Default playback rate when the buffer is low: 10% slower
 const PLAYBACK_CONSTRAINT_THRESHOLD = 0.05; // 5%
+const RATE_HITCH_CHECK = 1000; // ms of playback after a rate change checked for a hitch
+const RATE_HITCH_LOSS = 200; // ms lost in that time make a hitch, Safari loses 300 to 500ms
+const RATE_HOLD = 10000; // ms, after one hitch a rate is held at least this long
 
 // Default screen limit, initialized with the current screen resolution then refreshed on resize.
 // null means that the screen resolution cannot be determined, so no resolution limit can be applied.
@@ -472,6 +475,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         // same float32, as it may fire a ratechange event and briefly disrupt playback.
         if (Math.fround(playbackRate) !== Math.fround(value)) {
             this._video.playbackRate = value;
+            this._rateChangeTime = performance.now();
+            this._rateCheck = { time: this._rateChangeTime, currentTime: this._video.currentTime };
             this.log(
                 `Change playback rate from ${playbackRate} to ${this._video.playbackRate} (bufferAmount=${this.bufferAmount}ms)`
             ).info();
@@ -780,6 +785,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     private _stallCount: number = 0;
     private _droppedVideoFrames: number = 0;
     private _droppedFramePerSecond: ByteRate = new ByteRate(Media.MAX_GOP_DURATION); // Average over GOP
+    // Some browsers (Safari) hitch on every playback rate change
+    private _rateChangeTime?: number;
+    private _rateCheck?: { time: number; currentTime: number };
+    private _rateHitches: number = 0;
 
     /**
      * Constructs a new Player instance to render on the {@link HTMLVideoElement} passed in first argument,
@@ -890,6 +899,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this.log('buffering...').info();
         this._buffering = true;
         this._video.pause();
+        this._rateChangeTime = this._rateCheck = undefined;
+        this._rateHitches = 0;
 
         // process params
         this._passthroughCMAF = Util.trimStart(params.mediaExt?.toLowerCase() ?? '', '.') === 'cmaf';
@@ -1351,12 +1362,18 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * to the live point after congestion. Disabling the decrease can increase the risk of stalls when network conditions
      * worsen.
      *
+     * When a rate change makes playback hitch (Safari), rates are held at least `RATE_HOLD` after one hitch, and after
+     * two the rate is not raised anymore. Slowing down for a low buffer is never held back.
+     *
      * Note: Intended to be called from {@link onBufferChange}.
      *
      * @param minRate playback rate percentage applied when the buffer is low; defaults to 90 (0.9x)
      * @param maxRate playback rate percentage applied when the buffer is high; defaults to 110 (1.1x)
      */
     adjustPlaybackRate(minRate = PLAYBACK_RATE_MIN, maxRate = PLAYBACK_RATE_MAX) {
+        if (this._rateHitches > 1) {
+            maxRate = 100;
+        }
         let rate = 1;
         if (this.bufferState === BufferState.HIGH) {
             if (maxRate > 100) {
@@ -1366,6 +1383,14 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             if (minRate < 100) {
                 rate = minRate / 100;
             }
+        }
+        if (
+            this._rateHitches &&
+            rate >= 1 &&
+            this._rateChangeTime != null &&
+            performance.now() - this._rateChangeTime < RATE_HOLD
+        ) {
+            return;
         }
         this.playbackRate = rate;
     }
@@ -1593,6 +1618,22 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         const currentTime = this.currentTime;
         if (currentTime > this._playback.startTime + PAST_BUFFER) {
             this._playback.startTime = currentTime - PAST_BUFFER;
+        }
+
+        // Did the last rate change make playback hitch? Checked over the second that follows it
+        if (this._rateCheck) {
+            const elapsed = performance.now() - this._rateCheck.time;
+            if (this._buffering || this._video.paused || elapsed > 3 * RATE_HITCH_CHECK) {
+                // a stall, a pause or a throttled page, not a hitch
+                this._rateCheck = undefined;
+            } else if (elapsed >= RATE_HITCH_CHECK) {
+                const lost = elapsed - ((currentTime - this._rateCheck.currentTime) * 1000) / this._video.playbackRate;
+                if (lost > RATE_HITCH_LOSS) {
+                    ++this._rateHitches;
+                    this.log(`Playback rate change hitched, ${Math.round(lost)}ms lost`).info();
+                }
+                this._rateCheck = undefined;
+            }
         }
 
         if (this._bufferState === BufferState.NONE && this._buffering) {
