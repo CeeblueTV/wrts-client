@@ -18,6 +18,8 @@ node_modules
 commitlint.config.js
 rollup.config.js
 src/
+wasm/
+tests/
 tsconfig.json
 typedoc.json
 WEBRTS.md

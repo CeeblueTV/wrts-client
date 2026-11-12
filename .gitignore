@@ -4,6 +4,7 @@ docs/**/*.html
 docs/media/*
 docs/.nojekyll
 docs/assets
+wasm/build/
 
 # OS
 .DS_Store
@@ -24,3 +25,4 @@ docs/assets
 .codex
 .claude
 CLAUDE.md
+tests/e2e/media/

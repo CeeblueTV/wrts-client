@@ -3,6 +3,9 @@ package-lock.json
 node_modules
 dist
 examples
+wasm/build
+tests/e2e/*.html
+tests/e2e/media
 
 # OS
 .DS_Store

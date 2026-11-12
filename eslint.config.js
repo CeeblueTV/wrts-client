@@ -8,7 +8,7 @@ import headersPlugin from 'eslint-plugin-headers';
 
 export default [
     {
-        ignores: ['dist/**', 'docs/**']
+        ignores: ['dist/**', 'docs/**', 'wasm/build/**', 'tests/e2e/media/**']
     },
     {
         files: ['eslint.config.js'],
@@ -47,6 +47,13 @@ export default [
                     path: '.eslint-header'
                 }
             ]
+        }
+    },
+    {
+        // The tests run in Node or in a recent browser
+        files: ['tests/**/*.{js,mjs}'],
+        languageOptions: {
+            ecmaVersion: 'latest'
         }
     },
     {
