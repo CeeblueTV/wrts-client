@@ -98,8 +98,9 @@ export default args => {
                 !id.startsWith('.') && // is not a relative import (our sources)
                 !id.startsWith('/') &&
                 id !== resolvedEntry && // is not an absolute import
-                id !== 'index.ts'
-            ); // special case: is not our main index.ts file
+                id !== 'index.ts' && // special case: is not our main index.ts file
+                id !== 'tslib' // TypeScript helpers are bundled: tslib is only a devDependency
+            );
         }),
         // Browser binaries
         createOutput(input, output + '.bundle')
