@@ -28,7 +28,10 @@ let _module: Promise<boolean> | undefined;
 let _ready = false; // worklet module loaded in _context
 let _unlocking = false; // unlock listeners installed
 let _suspending: ReturnType<typeof setTimeout> | undefined;
-const _renderers = new Set<AudioRenderer>();
+// Renderers opened, by identifier: a renderer can be seen through a proxy by its own methods when an application
+// wraps the player in a reactive state (Vue for example), so its reference is not a reliable key
+const _renderers = new Map<number, AudioRenderer>();
+let _rendererId = 0;
 
 /**
  * Try to start the AudioContext, what is allowed by the browser only after a user gesture on the page
@@ -151,7 +154,7 @@ export class AudioRenderer extends Loggable {
             _module = undefined;
             _ready = false;
             _context.addEventListener('statechange', () => {
-                for (const renderer of _renderers) {
+                for (const renderer of _renderers.values()) {
                     renderer._onContextState();
                 }
             });
@@ -219,7 +222,7 @@ export class AudioRenderer extends Loggable {
                     return; // AudioContext replaced
                 }
                 _ready = ready;
-                for (const renderer of _renderers) {
+                for (const renderer of _renderers.values()) {
                     renderer._onContextState();
                 }
             });
@@ -352,6 +355,7 @@ export class AudioRenderer extends Loggable {
         this._updateGain();
     }
 
+    private _id: number;
     private _closed: boolean = false;
     private _paused: boolean = true;
     private _starved: boolean = true;
@@ -379,7 +383,8 @@ export class AudioRenderer extends Loggable {
 
     constructor() {
         super();
-        _renderers.add(this);
+        this._id = ++_rendererId;
+        _renderers.set(this._id, this);
         suspendLater(0);
         this._timer = setInterval(() => this._tick(), TICK);
         AudioRenderer.prepare().then(ready => {
@@ -539,7 +544,7 @@ export class AudioRenderer extends Loggable {
         }
         this._closed = true;
         clearInterval(this._timer);
-        _renderers.delete(this);
+        _renderers.delete(this._id);
         this._rendering = false;
         this._pending.length = 0;
         this._ranges.length = 0;
@@ -581,15 +586,21 @@ export class AudioRenderer extends Loggable {
     private _send(command: AudioWorkletCommand) {
         try {
             if (command.type === 'pcm') {
-                this._node?.port.postMessage(
-                    command,
-                    command.channels.map(channel => channel.buffer as ArrayBuffer)
-                );
+                // Send a new object: the command can be seen here through a proxy, which cannot be cloned,
+                // when an application wraps the player in a reactive state (Vue for example)
+                const channels = new Array<Float32Array>();
+                const buffers = new Array<ArrayBuffer>();
+                for (const channel of command.channels) {
+                    channels.push(channel);
+                    buffers.push(channel.buffer as ArrayBuffer);
+                }
+                const pcm: PCMCommand = { type: 'pcm', time: command.time, rate: command.rate, disc: command.disc, channels };
+                this._node?.port.postMessage(pcm, buffers);
             } else {
-                this._node?.port.postMessage(command);
+                this._node?.port.postMessage({ ...command });
             }
         } catch (e) {
-            this.log('Audio worklet command failed', e).warn();
+            this.log('Audio worklet command failed', e).error();
         }
     }
 

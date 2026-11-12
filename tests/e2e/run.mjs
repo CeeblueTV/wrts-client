@@ -27,6 +27,9 @@ const server = createServer(async (req, res) => {
         if (url === '/page.html' || url === '/page.js') {
             file = new URL('.' + url, import.meta.url).pathname;
         }
+        if (url === '/vue.js') {
+            file = process.env.VUE;
+        }
         for (const [prefix, root] of Object.entries(ROOTS)) {
             if (url.startsWith(prefix)) {
                 file = join(root, normalize(url.slice(prefix.length)));
@@ -569,6 +572,35 @@ if (insecureOrigin) {
             { secure, logs: logs.filter(l => /^(warn|error)/.test(l) && !/liveTime|skips/.test(l)) }
         );
     });
+}
+
+// Frameworks like Vue wrap the objects of their state in proxies: examples/player.html keeps its player this way,
+// everything the player creates is then seen through proxies by its own code
+if (process.env.VUE) {
+    for (const engines of [undefined, ['wasm', 'mse']]) {
+        const label = 'reactive ' + (engines ? 'wasm' : 'webcodecs');
+        await scenario(`player in a Vue reactive proxy (${engines ? 'wasm' : 'webcodecs'})`, {}, async t => {
+            await t.start({ file: 'media/av-aac48.mp4', engines, reactive: true });
+            await healthy(t, label, engines ? 'wasm' : 'webcodecs');
+            await t.eval(() => {
+                window.e2e.player.playbackRate = 1.1;
+            });
+            await sleep(1500);
+            const state = await t.state();
+            const logs = await t.logs();
+            check(
+                `${label}: no failure`,
+                state.stopError === undefined && state.rms > 0.02 && !logs.some(l => /failed|error/i.test(l)),
+                {
+                    logs: logs.filter(l => /failed|error/i.test(l)).map(l => l.slice(0, 160))
+                }
+            );
+            await t.eval(() => window.e2e.stop());
+            await sleep(7000);
+            const context = await t.eval(() => window.e2e.contextState());
+            check(`${label}: the audio output is released after the stop`, context === 'suspended', context);
+        });
+    }
 }
 
 await scenario('restart', {}, async t => {

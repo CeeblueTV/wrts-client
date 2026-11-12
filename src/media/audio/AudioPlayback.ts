@@ -101,6 +101,7 @@ export class AudioPlayback extends Loggable {
     private _failures: number = 0;
     private _failed: Set<AudioEngine> = new Set(); // engines unable to decode the stream
     private _decoded: number = 0; // PCM decoded since the decoder is opened
+    private _decoderId: number = 0; // identifier of the decoder opened
     private _queueSize: number = 0; // bytes of samples in the queue
     private _queueEnd: number = 0; // end time in seconds of the last sample queued
     private _decoding: number = 0; // samples given to the decoder and not decoded yet
@@ -301,12 +302,16 @@ export class AudioPlayback extends Loggable {
                 this._pump();
             }
         };
-        decoder.onError = detail => this._onDecoderError(decoder, detail);
+        // Identify the decoder by a number rather than by its reference: this object can be seen through a proxy when an
+        // application wraps the player in a reactive state (Vue for example), and a proxy differs from its target
+        const id = ++this._decoderId;
+        decoder.onError = detail => this._onDecoderError(id, detail);
         this.log(`Initiate track and codec to ${track.id} ${track.codecString}, decoded with ${decoder.engine}`).info();
     }
 
-    private _onDecoderError(decoder: PCMDecoder, detail: string) {
-        if (decoder !== this._decoder || this._closed) {
+    private _onDecoderError(id: number, detail: string) {
+        const decoder = this._decoder;
+        if (!decoder || id !== this._decoderId || this._closed) {
             return;
         }
         const track = this._track;

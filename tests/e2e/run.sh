@@ -18,6 +18,8 @@ if [ ! -f "$ROOT/dist/wrts-client.bundle.js" ] || [ ! -f "$ROOT/tests/e2e/media/
     exit 1
 fi
 
-exec docker run --rm --ipc=host -e LOGS="${LOGS:-}" -e PLAYWRIGHT=/tmp/playwright/node_modules/playwright/index.mjs \
+# Vue is used to test a player wrapped in a reactive proxy, like in examples/player.html
+exec docker run --rm --ipc=host -e LOGS="${LOGS:-}" -e PLAYWRIGHT=/tmp/modules/node_modules/playwright/index.mjs \
+    -e VUE=/tmp/modules/node_modules/vue/dist/vue.esm-browser.prod.js \
     -v "$ROOT:/repo:ro" -w /repo "mcr.microsoft.com/playwright:v$PLAYWRIGHT_VERSION-noble" \
-    bash -c 'npm install --silent --no-audit --no-fund --prefix /tmp/playwright playwright@'"$PLAYWRIGHT_VERSION"' && node tests/e2e/run.mjs "$@"' -- "$@"
+    bash -c 'npm install --silent --no-audit --no-fund --prefix /tmp/modules playwright@'"$PLAYWRIGHT_VERSION"' vue@3 && node tests/e2e/run.mjs "$@"' -- "$@"

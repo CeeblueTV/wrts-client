@@ -210,7 +210,17 @@ window.e2e = {
     logs,
     events,
     heard,
-    start({ file, engines, muted = false, adjust = true, preservesPitch = true, low, high, reliable = false }) {
+    async start({
+        file,
+        engines,
+        muted = false,
+        adjust = true,
+        preservesPitch = true,
+        low,
+        high,
+        reliable = false,
+        reactive = false
+    }) {
         Player.audioEngines = engines;
         FileSource.file = file;
         video.muted = muted;
@@ -218,6 +228,11 @@ window.e2e = {
         stalls = 0;
         started = false;
         player = new Player(video, FileSource);
+        // like examples/player.html: a player kept in the state of a Vue application, on a video element in autoplay
+        video.autoplay = reactive;
+        if (reactive) {
+            player = (await import('/vue.js')).reactive(player);
+        }
         player.preservesPitch = preservesPitch;
         if (low != null) {
             player.bufferLimitLow = low;
@@ -245,6 +260,10 @@ window.e2e = {
     },
     stop() {
         player?.stop();
+    },
+    // state of the AudioContext, without the side effects of AudioRenderer.unlock()
+    contextState() {
+        return analyser?.context.state;
     },
     hold(ms) {
         FileSource.hold = ms;
