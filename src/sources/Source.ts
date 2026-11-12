@@ -686,7 +686,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
     }
 
     /**
-     * Ingest audio sample for trackId, if sample is undefined it only changes the tracks
+     * Ingest audio sample for trackId, a track not announced by {@link initTracks} is ignored
      * @param trackId
      * @param sample
      */
@@ -716,7 +716,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
     }
 
     /**
-     * Ingest video sample for trackId, if sample is undefined it only changes the tracks
+     * Ingest video sample for trackId, a track not announced by {@link initTracks} is ignored
      * @param trackId
      * @param sample
      */
@@ -769,7 +769,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (this.dataTrack == null || !this.dataTrack.has(trackId)) {
             const count = this._ignoredTracks.size;
             if (this._ignoredTracks.add(trackId).size > count) {
-                this.log('Video track ' + trackId + ' unannounced before').error();
+                this.log('Data track ' + trackId + ' unannounced before').error();
             }
             return;
         }

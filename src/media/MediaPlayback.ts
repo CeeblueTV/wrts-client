@@ -51,7 +51,7 @@ export class MediaPlayback extends Loggable {
     }
 
     /**
-     * Fired when the renderer makes progress in time.
+     * Fired when the buffered end time advances.
      * @event
      */
     onProgress() {}
@@ -96,7 +96,7 @@ export class MediaPlayback extends Loggable {
     }
 
     get endTime(): number {
-        // Start time is the last common sync time between the tracks
+        // End time is the last common sync time between the tracks
         // Considerate also case where a track is disabled
         if (this._audioBuffer) {
             if (this._videoBuffer) {

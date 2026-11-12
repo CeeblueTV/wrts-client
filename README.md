@@ -138,7 +138,7 @@ player.start({
 });
 ```
 
-At runtime the player negotiates the most-preferred key system supported by the current browser.
+At runtime the player tries the key systems in the order of the `contentProtection` keys and uses the first one the current browser supports.
 
 > [!TIP]
 > The [MediaKeysEngine](./src/media/keys/MediaKeysEngine.ts) can also be used standalone (outside of `Player`), for example to drive EME from another player.
