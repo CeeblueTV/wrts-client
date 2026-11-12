@@ -38,6 +38,21 @@ function bufferSourceToUint8Array(source: BufferSource): Uint8Array {
     }
 }
 
+// Keeps the name of a DOMException or TypeError (InvalidStateError, AbortError...), the useful part of it
+function errorReason(err: unknown): string {
+    if (err instanceof Error || err instanceof DOMException) {
+        return err.name && err.name !== 'Error' ? `${err.name}: ${err.message}` : err.message;
+    }
+    return String(err);
+}
+
+// Status of a failed Util.fetch, with the server's textual reason when it is short text (not an HTML page)
+function httpErrorReason(response: Response & { error?: string }): string {
+    const text = (response.error ?? '').replace(/\s+/g, ' ').trim();
+    const reason = text && !text.startsWith('<') && text !== String(response.status) ? text.substring(0, 200) : '';
+    return reason ? `HTTP ${response.status}, ${reason}` : `HTTP ${response.status}`;
+}
+
 /**
  * MediaKeysEngine handles EME (Encrypted Media Extensions) operations for an `HTMLVideoElement`.
  * It supports the standard key systems — Widevine, PlayReady, FairPlay, and Clear Key — with
@@ -262,6 +277,9 @@ export class MediaKeysEngine extends MediaKeysConfig {
             keySystemConfigMap.set(keySystem, configurations);
         }
 
+        // a certificate from a previous attempt must not reach another key system
+        this._certificate = undefined;
+
         // Try each key system with its array of configurations.
         let certificateError: Error | undefined;
         for (const [keySystem, configs] of keySystemConfigMap.entries()) {
@@ -281,20 +299,24 @@ export class MediaKeysEngine extends MediaKeysConfig {
                 const certificateConfig = MediaKeysConfig.normalizeCertificate(keySystemConfig.certificate);
                 if (certificateConfig.url) {
                     try {
-                        const response = await fetch(certificateConfig.url, {
+                        const response = await Util.fetch(certificateConfig.url, {
                             headers: certificateConfig.headers
                         });
                         if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}`);
+                            throw new Error(httpErrorReason(response));
                         }
-                        this._certificate = new Uint8Array(await response.arrayBuffer());
+                        const certificate = new Uint8Array(await response.arrayBuffer());
+                        if (!certificate.byteLength) {
+                            // setServerCertificate rejects an empty certificate, a load failure keeps the fallback
+                            throw new Error('empty response');
+                        }
+                        this._certificate = certificate;
                     } catch (err) {
                         // another configured key system can still work: its error is reported only if none does
-                        const reason = err instanceof Error ? err.message : String(err);
-                        certificateError ??= new Error(
-                            `${keySystem} certificate not loaded from ${certificateConfig.url} (${reason})`
-                        );
-                        this.log(`${certificateError.message}, trying the next key system`).warn();
+                        const reason = errorReason(err);
+                        // the URL stays in the log, it can carry a token the app should not get in its errors
+                        certificateError ??= new Error(`${keySystem} certificate not loaded (${reason})`);
+                        this.log(`${keySystem} certificate not loaded from ${certificateConfig.url} (${reason})`).warn();
                         continue;
                     }
                     this.log(`${keySystem} certificate received, size ${this._certificate.byteLength}`).info();
@@ -339,6 +361,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
                             return;
                         }
                         // the certificate is set before the MediaKeys are attached, and its refusal reported
+                        // only false means "no certificate support", any rejection (NotSupportedError too) is a refusal
                         const certificateSet = this._certificate
                             ? createdMediaKeys.setServerCertificate(this._certificate as Uint8Array<ArrayBuffer>).then(
                                   supported => {
@@ -347,12 +370,7 @@ export class MediaKeysEngine extends MediaKeysConfig {
                                       }
                                   },
                                   (error: unknown) => {
-                                      // some CDMs refuse with NotSupportedError instead of resolving false
-                                      if ((error as DOMException)?.name === 'NotSupportedError') {
-                                          this.log(`${this._keySystem} doesn't use a server certificate, ignored`).warn();
-                                          return;
-                                      }
-                                      throw new Error(`${this._keySystem} certificate refused (${error})`);
+                                      throw new Error(`${this._keySystem} certificate refused (${errorReason(error)})`);
                                   }
                               )
                             : Promise.resolve();
@@ -399,11 +417,10 @@ export class MediaKeysEngine extends MediaKeysConfig {
             } catch (error) {
                 if (!this._stopping) {
                     // the cause: no supported key system, a certificate, a timeout
-                    const reason = error instanceof Error ? error.message : String(error);
                     this.onError({
                         type: 'MediaKeysEngineError',
                         name: 'MediaKeys issue',
-                        detail: `MediaKeys setup failed: ${reason}`
+                        detail: `MediaKeys setup failed: ${errorReason(error)}`
                     });
                 }
                 return;
@@ -514,14 +531,14 @@ export class MediaKeysEngine extends MediaKeysConfig {
 
         // Use fetch or XHR to POST the requestBody to the license server
         this.log(`Sending license request to ${licenseRequestUrl}`).info();
-        fetch(licenseRequestUrl, {
+        Util.fetch(licenseRequestUrl, {
             method: 'POST',
             headers,
             body: requestBody
         })
             .then(response => {
                 if (!response.ok) {
-                    throw new Error(`License request failed with status ${response.status}`);
+                    throw new Error(`License request failed (${httpErrorReason(response)})`);
                 }
                 return response.arrayBuffer();
             })
@@ -539,7 +556,10 @@ export class MediaKeysEngine extends MediaKeysConfig {
                 this.onError({
                     type: 'MediaKeysEngineError',
                     name: 'MediaKeys issue',
-                    detail: err instanceof Error ? err.message : 'License request failed'
+                    detail:
+                        err instanceof Error && err.message.startsWith('License request failed')
+                            ? err.message
+                            : `License request failed (${errorReason(err)})`
                 });
             });
     }
