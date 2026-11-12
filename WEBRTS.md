@@ -57,7 +57,7 @@ Two response headers have different meanings and must not be confused:
 - `Sequence-Duration` is the exact duration of a **completed** sequence. Its absence identifies the current, still-open live sequence.
 - `Max-Sequence-Duration` is only an upper bound used to locate possible sequences near the live edge. It is not an estimate of the duration of an open sequence.
 
-Both are in milliseconds. A third header, `First-Sample-Length`, gives the byte length of a sequence's first video sample; frame alteration (section 5) reads it from a `HEAD` response to request only that sample.
+Both are in milliseconds. A third header, `First-Sample-Length`, gives the number of bytes, from the start of the sequence, that hold its first video sample (with everything before it: size prefixes, the INIT TRACKS command); frame alteration (section 5) reads it from a `HEAD` response and, when that response also has `Sequence-Duration` (the sequence is complete), requests only those bytes with `Range: bytes=0-<length-1>`.
 
 ## 3. The playback control loop
 
