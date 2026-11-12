@@ -136,7 +136,11 @@
                             <!-- Track selects -->
                             <div class="row2 gap-panel">
                                 <div>
-                                    <span class="lbl">Video track</span>
+                                    <span class="lbl">
+                                        Video track
+                                        <span v-if="videoEngine" class="lbl-engine"
+                                            title="How video is decoded and rendered">· {{ videoEngine }}</span>
+                                    </span>
                                     <select class="sel" id="video-track-selection"
                                         :disabled="!player || !player.trackSelectable"
                                         v-model="videoTrackId" @change="onVideoTrackChange()">
@@ -145,7 +149,11 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <span class="lbl">Audio track</span>
+                                    <span class="lbl">
+                                        Audio track
+                                        <span v-if="audioEngine" class="lbl-engine"
+                                            title="How audio is decoded and rendered: WebCodecs or WebAssembly with Web Audio, otherwise MSE in the video element">· {{ audioEngine }}</span>
+                                    </span>
                                     <select class="sel" id="audio-track-selection"
                                         :disabled="!player || !player.trackSelectable"
                                         v-model="audioTrackId" @change="onAudioTrackChange()">
@@ -474,6 +482,9 @@
             4: 'MEDIA_ERR_SRC_NOT_SUPPORTED'
         };
 
+        // Display names of the audio engines, see Player.audioEngine
+        const AUDIO_ENGINE_NAMES = { webcodecs: 'WebCodecs', wasm: 'WebAssembly', mse: 'MSE' };
+
         // Keys the .player-alert renders itself, everything else on the error object becomes a chip.
         const ALERT_RESERVED_KEYS = new Set(['type', 'name', 'detail']);
 
@@ -751,6 +762,8 @@
                     videoTracks: new Map(),
                     videoTrack: 'Video',
                     videoTrackId: undefined,
+                    videoEngine: '', // how video is decoded and rendered, displayed beside the track selection
+                    audioEngine: '', // how audio is decoded and rendered: WebCodecs, WebAssembly or MSE
                     sourceType: undefined,
                     audioTracks: new Map(),
                     audioTrack: 'Audio',
@@ -913,6 +926,9 @@
                             this.bufferMax = player.bufferLimitHigh;
                         }
                         this.hasMetrics = true;
+                        // Engines in use, the audio one is known once its first sample is decoded
+                        this.audioEngine = AUDIO_ENGINE_NAMES[player.audioEngine] || '';
+                        this.videoEngine = player.videoTrack >= 0 ? 'MSE' : '';
                         const stats = player.computeStats();
                        // For bandwidth calculation, using player.recvByteRate is faster than
                        // summing stats.audioByteRate + stats.videoByteRate + stats.dataByteRate.
@@ -935,8 +951,7 @@
                         playbackRates.push((stats.playbackRate || 0).toFixed(2));
                         playbackSpeeds.push((stats.playbackSpeed || 0).toFixed(2));
                         fps.push((stats.videoPerSecond || 0).toFixed(2));
-                        const audioEngine = this.player.audioEngine; // how audio is decoded: webcodecs, wasm or mse
-                        trackAudio.push(((stats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps' + (audioEngine ? ' ' + audioEngine : ''));
+                        trackAudio.push(((stats.audioTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
                         trackVideo.push(((stats.videoTrackBandwidth || 0)*8/1000).toFixed() + 'kbps');
 
                         skippedAudio.push((((stats.skippedAudio || 0) - (this.deltaStats.skippedAudio || 0)) /1000).toFixed(1)+"s");
@@ -1404,6 +1419,7 @@
                     this.videoTracks = new Map();
                     this.videoTrack = 'Video';
                     this.videoTrackId = undefined;
+                    this.audioEngine = this.videoEngine = '';
                     this.streamMetadata = null;
 
                     this.playState = PlayState.STOPPED;

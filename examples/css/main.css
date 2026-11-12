@@ -308,6 +308,8 @@ body {
     color: var(--txt-m);
     margin-bottom: 3px;
 }
+/* engine decoding and rendering a track, beside the label of its selection */
+.lbl-engine { color: var(--accent); }
 
 /* ── Inputs ── */
 .inp, .sel {
