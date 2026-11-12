@@ -30,7 +30,8 @@ const root = typeof window !== 'undefined' ? window : global;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ManagedMediaSource = (root as any).ManagedMediaSource;
-const BUFFER_AUTO_MIN_WINDOW = 200; // ms
+// A larger minimum buffer window with ManagedMediaSource, to avoid playback speed drift on Safari
+const BUFFER_AUTO_MIN_WINDOW = ManagedMediaSource ? 400 : 200; // ms
 const BUFFER_AUTO_MEASURE_MARGIN = 40; // ms
 const BUFFER_AUTO_TRY_DELAY = 7000; // ms
 
@@ -1499,6 +1500,9 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
             // In priority use ManagedMediaSource when the browser exposes it (Safari) =>
             // disable remote playback what can interact with our playback control
             this._video.disableRemotePlayback = true;
+            // disable pitch to prevent the [WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433)
+            // when audio is played by the video element
+            this._video.preservesPitch = false;
             this.log('new ManagedMediaSource').info();
             return new ManagedMediaSource();
         }

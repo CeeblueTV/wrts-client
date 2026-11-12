@@ -102,13 +102,13 @@ player.start({
 
 ## Playback rate adaptation
 
-To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts its `playbackRate` from the buffer state: 1.1x when the buffer is `HIGH`, 0.9x when it is `LOW`, and back to 1x when it is `OK`. The behavior is the same on every browser, there is no browser-specific workaround.
+To stay close to the live edge and protect against stalls when the network worsens, the default `Player` adjusts its `playbackRate` from the buffer state: 1.1x when the buffer is `HIGH`, 0.9x when it is `LOW`, and back to 1x when it is `OK`. The rates are the same on every browser, there is no browser-specific workaround in `onBufferChange` or `adjustPlaybackRate`.
 
 The sound is time-stretched by the player itself to follow the playback rate without changing its pitch (see [Audio rendering](#audio-rendering)), so a rate change is inaudible and never disturbs the video. Set `player.preservesPitch = false` to let the pitch follow the playback rate instead, like on a tape.
 
 > [!NOTE]
 >
-> When audio is played by the `<video>` element (protected audio track, page out of a secure context, or `AudioEngine.MSE` selected, see [Audio rendering](#audio-rendering)), the rate change is applied by the audio pipeline of the browser, and the pitch is controlled by the `preservesPitch` property of the `<video>` element. On Safari a rate change can then briefly freeze the playback ([WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433)): set `video.preservesPitch = false`, or disable the playback rate adaptation as described below.
+> When audio is played by the `<video>` element (protected audio track, page out of a secure context, or `AudioEngine.MSE` selected, see [Audio rendering](#audio-rendering)), the rate change is applied by the audio pipeline of the browser, and the pitch is controlled by the `preservesPitch` property of the `<video>` element. On Safari, where a rate change with pitch correction can briefly freeze the playback ([WebKit bug 163433](https://bugs.webkit.org/show_bug.cgi?id=163433)), the player disables the pitch correction of the `<video>` element when it uses `ManagedMediaSource`: the pitch then follows the playback rate. Disable the playback rate adaptation as described below to keep the pitch unchanged.
 
 To disable the automatic playback rate adaptation, override `onBufferChange` without calling `adjustPlaybackRate`:
 
