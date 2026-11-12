@@ -391,7 +391,7 @@ export abstract class Source extends EventEmitter implements ICMCD {
         // CMCD allows 64 characters, and a header or query value needs printable ASCII: anything else would make
         // every media request fail
         if (value && !/^[\x20-\x7e]{1,64}$/.test(value)) {
-            this.log(`CMCD session id ignored, it must be up to 64 printable ASCII characters: ${JSON.stringify(value)}`).error();
+            this.log(`CMCD session id cleared, it must be up to 64 printable ASCII characters: ${JSON.stringify(value)}`).error();
             value = undefined;
         }
         this._cmcdSid = value;
