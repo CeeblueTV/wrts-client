@@ -476,7 +476,10 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         if (Math.fround(playbackRate) !== Math.fround(value)) {
             this._video.playbackRate = value;
             this._rateChangeTime = performance.now();
-            this._rateCheck = { time: this._rateChangeTime, currentTime: this._video.currentTime };
+            if (ManagedMediaSource) {
+                // Only Safari (macOS and iOS, ManagedMediaSource since Safari 17) is known to hitch
+                this._rateCheck = { time: this._rateChangeTime, currentTime: this._video.currentTime };
+            }
             this.log(
                 `Change playback rate from ${playbackRate} to ${this._video.playbackRate} (bufferAmount=${this.bufferAmount}ms)`
             ).info();
@@ -1362,7 +1365,7 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * to the live point after congestion. Disabling the decrease can increase the risk of stalls when network conditions
      * worsen.
      *
-     * When a rate change makes playback hitch (Safari), rates are held at least `RATE_HOLD` after one hitch, and after
+     * On Safari, when a rate change makes playback hitch, rates are held at least `RATE_HOLD` after one hitch, and after
      * two the rate is not raised anymore. Slowing down for a low buffer is never held back.
      *
      * Note: Intended to be called from {@link onBufferChange}.
