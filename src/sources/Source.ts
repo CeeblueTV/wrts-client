@@ -387,6 +387,12 @@ export abstract class Source extends EventEmitter implements ICMCD {
      * {@inheritDoc ICMCD.cmcdSid}
      */
     set cmcdSid(value: string | undefined) {
+        // CMCD allows 64 characters, and a header or query value needs printable ASCII: anything else would make
+        // every media request fail
+        if (value && !/^[\x20-\x7e]{1,64}$/.test(value)) {
+            this.log(`CMCD session id cleared, it must be up to 64 printable ASCII characters: ${JSON.stringify(value)}`).error();
+            value = undefined;
+        }
         this._cmcdSid = value;
     }
 
@@ -1015,12 +1021,18 @@ export abstract class Source extends EventEmitter implements ICMCD {
         if (withCMCD) {
             stats = this._playing.computeStats();
             const cmcd = stats.toCmcd(url, trackIds, this._prevStats);
+            // The content ID of the stream, from its endpoint: toCmcd hashes the media URL, which changes per sequence
+            cmcd.cid = Util.hash(this._url.pathname);
             // If asking for the short version of the cmcd payload remove the following fields
             if (this.cmcd === CMCD.SHORT) {
                 delete cmcd.cid;
                 delete cmcd.dl;
                 delete cmcd.ot;
                 delete cmcd.st;
+            }
+            // Session ID set by the application, in both payloads
+            if (this._cmcdSid) {
+                cmcd.sid = this._cmcdSid;
             }
             // Mode
             if (this.cmcdMode === CMCDMode.QUERY) {
