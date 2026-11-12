@@ -34,6 +34,8 @@
         "lint": "eslint . && prettier --check .",
         "eslint": "eslint --fix .",
         "prettier": "prettier --write --ignore-unknown .",
+        "test:audio": "node --experimental-strip-types --no-warnings tests/audio/worklet.test.mjs",
+        "test:e2e": "tests/e2e/run.sh",
         "semantic-release": "semantic-release",
         "prepare": "is-ci || simple-git-hooks"
     },
