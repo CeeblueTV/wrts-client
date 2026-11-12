@@ -234,8 +234,8 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
     onVideoAppended(data: Uint8Array) {}
 
     /**
-     * Event fired when the buffer amount changes by at least `BUFFER_CHANGE_STEP` milliseconds, when the
-     * {@link bufferState} changes, and when the starting phase ends.
+     * Event fired once when the starting phase ends, then when the buffer amount changes by at least
+     * `BUFFER_CHANGE_STEP` milliseconds or when the {@link bufferState} changes. Not fired during the starting phase.
      *
      * The default implementation calls {@link adjustPlaybackRate}.
      * Override this event without calling {@link adjustPlaybackRate} to disable that automatic playback-rate adjustment.
@@ -248,11 +248,11 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
 
     /**
      * Event fired with the {@link MediaKeysEngine} once its MediaKeys are attached to the video element, and without
-     * argument once they are released, if contentProtection is found in the metadata
+     * argument once their release has ended, successfully or not, if contentProtection is found in the metadata
      *
      * MediaKeys support can be disabled by setting no contentProtection in the player parameters
      *
-     * @param mediaKeysEngine The MediaKeys engine instance when ready, undefined when released
+     * @param mediaKeysEngine The MediaKeys engine instance when ready, undefined once the release has ended
      * @event
      */
     onMediaKeys(mediaKeysEngine?: MediaKeysEngine) {}
@@ -845,8 +845,6 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
      * Starts playing the stream
      *
      * If the MediaKeys of a previous playback are still being released, the start waits for that release.
-     * If a MediaKeys engine is still running without a release, the player reports a {@link PlayerError} error
-     * through {@link onStop} to avoid unexpected behavior.
      *
      * @param params Connection parameters {@link Connect.Params}
      * @param idleTimeout  idle timeout, default value is around 14s. It sets the timeout error in the absence of
