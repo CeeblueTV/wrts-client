@@ -177,8 +177,8 @@
                                     Live
                                 </button>
 
-                                <label title="Enable or disable adaptive frame skipping" class="tog" :class="{ on: adaptiveFrameSkipping, off: !mutableReliability() }">
-                                    <input type="checkbox" :disabled="!mutableReliability()"
+                                <label title="Enable or disable adaptive frame skipping" class="tog" :class="{ on: adaptiveFrameSkipping }">
+                                    <input type="checkbox"
                                         v-model="adaptiveFrameSkipping" @change="onReliable()">
                                     <span class="tog-track"></span>
                                     <span>AFS*</span>
@@ -430,7 +430,7 @@
         <!-- .shell -->
     </body>
     <script type="module">
-        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, UITimeline, VERSION, utils } from "../dist/wrts-client.bundle.js";
+        import { Player, HTTPAdaptiveSource, Media, UITimeline, VERSION, utils } from "../dist/wrts-client.bundle.js";
         // development version, includes helpful console warnings
         // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
         // production version, optimized for size and speed
@@ -752,7 +752,6 @@
                     videoTracks: new Map(),
                     videoTrack: 'Video',
                     videoTrackId: undefined,
-                    sourceType: undefined,
                     audioTracks: new Map(),
                     audioTrack: 'Audio',
                     audioTrackId: undefined,
@@ -816,8 +815,8 @@
                 const host = options.host;
                 this.host = new NetAddress(host || location.host, 443);
                 this.stream = options.stream || '';
-                this.sourceType = (host && host.toLowerCase().startsWith('ws')) ? WSSource : HTTPAdaptiveSource;
-                this.player = new Player(this.$refs.video, this.sourceType);
+                // always the HTTP adaptive source: a ws:// or wss:// host is played over http:// or https://
+                this.player = new Player(this.$refs.video, HTTPAdaptiveSource);
                 const bufferMin = Number(options.bufferMin);
                 const bufferMax = Number(options.bufferMax);
                 if (Number.isFinite(bufferMax)) {
@@ -1080,9 +1079,6 @@
                     let accessToken = options.token || options.id;
                     let endPoint = this.host;
                     let mediaExt;
-                    if(this.sourceType === HTTPSource) {
-                        mediaExt = '.mp4'; // force CMAF for HTTP Streaming
-                    }
                     try {
                         endPoint = new URL(streamName);
                         streamName = endPoint.pathname;
@@ -1739,13 +1735,6 @@
                         }
                         history.replaceState({path}, '', path);
                     }
-                },
-                mutableReliability() {
-                    if(this.sourceType === HTTPSource) {
-                        // HTTP has no mutable reliability
-                        return !this.player?.running;
-                    }
-                    return true;
                 },
                 onReliable() {
                     if (this.player.started) {
