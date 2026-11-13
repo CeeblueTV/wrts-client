@@ -140,6 +140,8 @@ player.start({
 
 At runtime the player tries the key systems in the order of the `contentProtection` keys and uses the first one the current browser supports.
 
+A certificate is optional for Widevine (a service certificate). Once configured, though, it is required: if it fails to load or the CDM refuses it, that key system is not used, and its error reaches the app through `onStop` when no other key system works.
+
 > [!TIP]
 > The [MediaKeysEngine](./src/media/keys/MediaKeysEngine.ts) can also be used standalone (outside of `Player`), for example to drive EME from another player.
 
