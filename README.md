@@ -3,6 +3,7 @@
  <a href="#usage">Usage</a> •
  <a href="#playback-rate-adaptation">Playback rate adaptation</a> •
  <a href="#drm">DRM</a> •
+ <a href="#ads">Ads</a> •
  <a href="#examples">Examples</a> •
  <a href="#building-locally">Building locally</a> •
  <a href="#logs">Logs</a> •
@@ -160,6 +161,44 @@ player.onBufferChange = () => {
 ```
 
 - **Larger playback buffers work better.** PlayReady's decoder path needs more headroom; configuring buffer thresholds to roughly `min=400ms / max=2000ms` (instead of the WebRTS low-latency defaults) avoids stutter under bandwidth jitter.
+
+
+## Ads
+
+The [AdsEngine](./src/ads/AdsEngine.ts) plays a video or audio **pre-roll** ad before the stream, with the [Google IMA HTML5 SDK]. It is independent of the `Player`: play the ad first, then start the player from `onEnd`.
+
+```html
+<div style="position: relative">
+   <video id="video" playsinline></video>
+   <div id="ads" style="position: absolute; inset: 0"></div>
+</div>
+```
+
+```javascript
+import { Player, AdsEngine } from '@ceeblue/wrts-client';
+
+const player = new Player(video);
+// Build it early: it loads the IMA SDK, which must be ready on the click
+const ads = new AdsEngine(video, document.getElementById('ads'));
+ads.onEnd = error => {
+   // The ad break is over, with an error when no ad was played: start the content in both cases
+   player.start({ endPoint: <endPoint> });
+};
+playButton.onclick = () => ads.start({ adTagUrl: 'https://pubads.g.doubleclick.net/gampad/ads?...&output=vast' });
+```
+
+- **The ad never prevents the content.** `onEnd` fires exactly once per `start()`: when the ad ends, or with an `AdsEngineError` when the SDK is blocked (ad blocker), the ad tag has no ad to serve, the ad fails, or nothing happens within the timeout (8 seconds by default, see the `timeout` parameter). `ads.stop()` aborts the ad without firing `onEnd`.
+- **Start it from a click.** Browsers, mobile ones above all, only allow an ad with sound from a user gesture. Without one, mute the video before `ads.start()`; the ad server is told so and selects an ad allowed to autoplay muted.
+- **Ad tag.** It must return a single VAST pre-roll. With a playlist (VMAP, ad rules) only the pre-roll is played, the player takes over the video element afterwards.
+- **Audio ads.** Use an ad tag with `ad_type=audio` (or `audio_video`) and `vpmute=0`. The container can be hidden with `display: none` on an audio-only page, but must stay in the document. The SDK displays no skip button for an audio ad: display yours when `ads.skippable` is true and call `ads.skip()` (it has no effect on a video ad, where the SDK displays its own button). The `audio` argument of `onAdStart(duration, audio)` tells which kind of ad is playing.
+- **iPhone.** Keep the `playsinline` attribute on the `<video>`.
+- **Layout.** The container covers the video: give it `pointer-events: none` while no ad plays to keep your own controls reachable, and put it inside the element you display in fullscreen.
+- **Consent.** The SDK reads the consent from the CMP of your page (IAB TCF); collecting it is up to the page.
+
+During the ad use `ads.paused` and `ads.volume`, and the `onAdStart`, `onAdProgress`, `onAdPause` and `onAdResume` events to drive your own UI. To change the SDK settings (locale, VPAID mode...) before the first ad, use `AdsEngine.load().then(ima => ima.settings.setLocale('es'))`.
+
+> [!NOTE]
+> The IMA SDK is not part of this library: it is loaded from Google at runtime, and only when an `AdsEngine` is built. Its use is subject to Google's terms.
 
 
 ## Examples
@@ -326,3 +365,4 @@ By contributing code to this project, you agree to license your contribution und
 [Quick Start Guide]: https://docs.ceeblue.net/reference/quick-start-guide
 [static http-server]: https://www.npmjs.com/package/http-server
 [CMCD (Common Media Client Data)]: https://github.com/cta-wave/common-media-client-data
+[Google IMA HTML5 SDK]: https://developers.google.com/interactive-media-ads/docs/sdks/html5/client-side
