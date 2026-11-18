@@ -89,8 +89,9 @@ player.start({
 bandwidth and a mobile device's battery, and `player.paused = false` resumes at the live edge (as fast as a start,
 0.2 to 0.4 s in our tests). `player.pauseHoldDelay` (ms, 0 by default) keeps downloading for that long first, so a
 pause shorter than it resumes instantly where it paused, behind live by the pause; `Infinity` never holds. A source
-that can't hold its downloads (`source.canHold` false, e.g. WebSocket) keeps downloading, and a pause resumes where it
-paused.
+that can't hold its downloads (`source.canHold` false, e.g. WebSocket) keeps downloading, and the resume skips what it
+received to return to the live edge too. `player.reliable` changes nothing here: a pause is the viewer's choice, and
+its resume is at the live edge.
 
 > [!TIP]
 > 
