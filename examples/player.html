@@ -61,6 +61,14 @@
 
                         <video autoplay id="video" ref="video" playsinline></video>
 
+                        <!-- Pre-roll ad, displayed by the IMA SDK over the video -->
+                        <div class="player-ads" ref="adContainer" :class="{ 'is-active': adPlaying }"></div>
+                        <!-- The SDK displays no skip button on an audio ad -->
+                        <button class="btn player-skip" title="Skip ad" @click="skipAd()" v-if="adSkippable">
+                            Skip ad
+                            <i class="fas fa-forward"></i>
+                        </button>
+
                         <!-- Hover/touch revealed controls (only while playing) -->
                         <div class="player-ctrls"
                             :class="{ 'is-active': isPlaying(), 'is-visible': controlsVisible }">
@@ -91,9 +99,14 @@
                         <button class="player-action" title="Play" @click="play()" v-if="isStopped()">
                             <i class="fas fa-play"></i>
                         </button>
-                        <div class="player-action is-loading" v-else-if="isStarting()">
+                        <div class="player-action is-loading" v-else-if="isStarting() && !adPlaying">
                             <div class="ring"></div>
                         </div>
+                        <button class="player-action is-resume" title="Resume ad"
+                            @click="resumeAd()"
+                            v-else-if="adPaused">
+                            <i class="fas fa-play"></i>
+                        </button>
                         <button class="player-action is-resume" title="Resume"
                             @click="player.paused = false"
                             v-else-if="player && player.paused">
@@ -160,6 +173,13 @@
                                 <input class="inp" :disabled="isPlaying()"
                                     placeholder="StreamName(?id=accessToken) or URL"
                                     type="text" v-model="stream">
+                            </div>
+
+                            <!-- Pre-roll ad tag (full width) -->
+                            <div class="stream-row gap-panel">
+                                <input class="inp" :disabled="!isStopped()"
+                                    placeholder="Pre-roll ad tag URL (VAST), optional"
+                                    type="text" v-model="adTag">
                             </div>
 
                             <!-- Controls: mute / live / AFS / protection -->
@@ -430,7 +450,7 @@
         <!-- .shell -->
     </body>
     <script type="module">
-        import { Player, HTTPAdaptiveSource, WSSource, HTTPSource, Media, UITimeline, VERSION, utils } from "../dist/wrts-client.bundle.js";
+        import { Player, AdsEngine, HTTPAdaptiveSource, WSSource, HTTPSource, Media, UITimeline, VERSION, utils } from "../dist/wrts-client.bundle.js";
         // development version, includes helpful console warnings
         // import { createApp } from 'https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.js';
         // production version, optimized for size and speed
@@ -697,6 +717,10 @@
                     theme: localStorage.getItem(THEME_KEY) || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
 
                     stream: '',
+                    adTag: options.adTag || '',
+                    adPlaying: false,
+                    adPaused: false,
+                    adSkippable: false,
                     muted: false,
                     host: null,
                     bufferMin: 200,
@@ -824,6 +848,7 @@
                     this.netPreset = '-manual-';
                 }
                 this.setBuffer(bufferMin, bufferMax);
+                this.initAds();
 
                 // An OS theme change overrides the stored choice (the initial paint is done in <head>).
                 this._themeQuery = matchMedia('(prefers-color-scheme: dark)');
@@ -988,6 +1013,9 @@
                 // Only flags <html>, the CSS gates the split on wide screens.
                 sidePanel(value) {
                     document.documentElement.classList.toggle('layout-side', value);
+                },
+                adTag() {
+                    this.initAds();
                 }
             },
             methods: {
@@ -1226,8 +1254,60 @@
                 },
 
 
+                // ── Pre-roll ad ──
+                initAds() {
+                    // Built as soon as an ad tag is set, not on play: the IMA SDK must be loaded before
+                    // the click to start the ad inside the user gesture.
+                    if (!this.ads && this.adTag.trim()) {
+                        this.ads = new AdsEngine(this.$refs.video, this.$refs.adContainer);
+                    }
+                },
+                resetAd() {
+                    this.adPlaying = this.adPaused = this.adSkippable = false;
+                },
+                resumeAd() {
+                    this.ads.paused = false;
+                },
+                skipAd() {
+                    this.ads.skip();
+                },
+                playAd(adTagUrl, onEnd) {
+                    this.initAds();
+                    const ads = this.ads;
+                    let audioAd = false;
+                    ads.onAdStart = (duration, audio) => {
+                        log(`${audio ? 'Audio' : 'Video'} ad starts (${duration}s)`).info();
+                        audioAd = audio;
+                        this.adPlaying = true;
+                    };
+                    // The SDK displays its own skip button on a video ad
+                    ads.onAdProgress = () => { this.adSkippable = audioAd && ads.skippable; };
+                    ads.onAdPause = () => { this.adPaused = true; };
+                    ads.onAdResume = () => { this.adPaused = false; };
+                    ads.onEnd = error => {
+                        // An ad failure is not a stream error: log it and play the content
+                        if (error) {
+                            log('No ad played', error).warn();
+                        } else {
+                            log('Ad ended').info();
+                            // Not again until the content has played: if the browser refuses to play it
+                            // without a user gesture, the next click starts it instead of the same ad
+                            this._adPlayed = true;
+                        }
+                        this.resetAd();
+                        onEnd();
+                    };
+                    ads.start({ adTagUrl });
+                },
+
                 play() {
                     if (!this.isStopped()) {
+                        if (this.ads?.running) {
+                            // the player is not started yet, there is no onStop to wait
+                            this.ads.stop();
+                            this.resetAd();
+                            this.playState = PlayState.STOPPED;
+                        }
                         this.player.stop();
                         return;
                     }
@@ -1259,6 +1339,18 @@
                     }
 
                     this.playState = PlayState.STARTING;
+                    // the ads engine reads the mute state of the video
+                    this.$refs.video.muted = this.muted;
+
+                    const adTag = this.adTag.trim();
+                    if (adTag && !this._adPlayed) {
+                        // The player takes over the video element, so it starts once the ad break is over
+                        this.playAd(adTag, () => this.startPlayer(params));
+                    } else {
+                        this.startPlayer(params);
+                    }
+                },
+                startPlayer(params) {
                     this.startTime = Util.time();
 
                     const video = this.$refs.video;
@@ -1267,6 +1359,7 @@
                     video.onloadeddata = () => {
                         log('TTFF :', Util.time()-this.startTime).info();
                         this.playState = PlayState.PLAYING;
+                        this._adPlayed = false;
                     };
                     video.onerror = () => {
                         const mediaError = video.error;
@@ -1502,6 +1595,9 @@
                 mute() {
                     this.muted = !this.muted;
                     this.$refs.video.muted = this.muted;
+                    if (this.ads) {
+                        this.ads.volume = this.muted ? 0 : this.$refs.video.volume;
+                    }
                     log(this.muted ? 'MutePlayback' : 'UnmutePlayback').info();
                 },
                 goLive() {
@@ -1726,6 +1822,9 @@
                         }
                         if(options.host != null) {
                             path += "&host=" + options.host;
+                        }
+                        if (this.adTag.trim()) {
+                            path += "&adTag=" + encodeURIComponent(this.adTag.trim());
                         }
                         const contentProtection = this.serializeContentProtection();
                         if (contentProtection) {

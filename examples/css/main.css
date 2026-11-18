@@ -139,6 +139,18 @@ body {
 .player video::-webkit-media-controls,
 .player video::-webkit-media-controls-start-playback-button { display: none !important; }
 
+/* Pre-roll ad, filled by the IMA SDK. Inert unless an ad is displayed, to keep the controls below reachable. */
+.player-ads {
+    position: absolute; inset: 0;
+    z-index: 7;
+    pointer-events: none;
+}
+.player-ads.is-active { pointer-events: auto; }
+.player-skip {
+    position: absolute; right: 10px; bottom: 10px;
+    z-index: 9;
+}
+
 /* Error banner (bottom of video) */
 .player-alert {
     position: absolute; bottom: 10px; left: 10px; right: 10px;
