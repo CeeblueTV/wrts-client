@@ -36,6 +36,9 @@ export { BufferState, IPlaying, PlaybackConstraint } from './src/sources/IPlayin
 
 export { Player, PlayerError } from './src/Player';
 
+// Ads
+export { AdsEngine, AdsEngineError } from './src/ads/AdsEngine';
+
 // UI helpers
 export { UITimeline, UITimelineAxis } from './src/UITimeline';
 
