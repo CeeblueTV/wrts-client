@@ -1288,6 +1288,14 @@
                         // An ad failure is not a stream error: log it and play the content
                         if (error) {
                             log('No ad played', error).warn();
+                            if (error.name === 'SDK unavailable') {
+                                // ima3.js is on every ad-block filter list
+                                this.setStreamError({
+                                    type: 'Ads',
+                                    name: 'Pre-roll skipped',
+                                    detail: 'The IMA SDK could not be loaded, probably blocked by an ad blocker.'
+                                });
+                            }
                         } else {
                             log('Ad ended').info();
                             // Not again until the content has played: if the browser refuses to play it
