@@ -305,6 +305,9 @@
         // and only a seek to live will: that's when the Live button becomes actionable.
         const LIVE_DRIFT_THRESHOLD = 500;
 
+        // Shortest MPD refresh period, in seconds, replacing dash.js' hard-coded 1 s floor
+        const MIN_MANIFEST_REFRESH = 0.1;
+
         // Detect if the browser is running on iOS. iPadOS 13+ reports MacIntel, so we also check for touch support.
         const IS_IOS = /iPad|iPhone|iPod/.test(navigator.platform)
             || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -688,6 +691,17 @@
                     const video = this.$refs.video;
 
                     this.player = MediaPlayer().create();
+                    // dash.js never refreshes the MPD faster than 1 s (Math.max(minimumUpdatePeriod - latency, 1)
+                    // in DashManifestModel), so a new SegmentTimeline segment can be discovered ~1 s late and
+                    // sub-1.4 s targets stall. Follow the server's minimumUpdatePeriod instead. Must run before initialize().
+                    this.player.extend('DashManifestModel', function () {
+                        return {
+                            getManifestUpdatePeriod(manifest, latencyOfLastUpdate = 0) {
+                                const delay = manifest?.minimumUpdatePeriod;
+                                return isNaN(delay) ? NaN : Math.max(delay - latencyOfLastUpdate, MIN_MANIFEST_REFRESH);
+                            }
+                        };
+                    }, true);
                     this.player.on(MediaPlayer.events.PLAYBACK_PLAYING, () => { this.playState = PlayState.PLAYING; });
                     this.player.on(MediaPlayer.events.STREAM_INITIALIZED, () => this.onMetadata());
                     this.player.on(MediaPlayer.events.FRAGMENT_LOADING_COMPLETED, e => this._feedTimeline(e.request, e.response));
