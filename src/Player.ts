@@ -892,8 +892,17 @@ export class Player extends EventEmitter implements IPlaying, ICMCD {
         this._buffering = true;
         this._video.pause();
 
-        // process params
-        this._passthroughCMAF = Util.trimStart(params.mediaExt?.toLowerCase() ?? '', '.') === 'cmaf';
+        // process params, the .cmaf extension can also come from the endPoint URL (?ext= or path)
+        let mediaExt = params.mediaExt;
+        if (!mediaExt) {
+            try {
+                const url = new URL(params.endPoint);
+                mediaExt = url.searchParams.get('ext') ?? Util.getExtension(Util.getFile(url.pathname));
+            } catch (_) {
+                // a host without path, no extension
+            }
+        }
+        this._passthroughCMAF = Util.trimStart(mediaExt?.toLowerCase() ?? '', '.') === 'cmaf';
         if (this._passthroughCMAF) {
             // Rename it to mp4, cmaf is usefull only to debug reason for bypassing a CMAF source
             params.mediaExt = 'mp4';
